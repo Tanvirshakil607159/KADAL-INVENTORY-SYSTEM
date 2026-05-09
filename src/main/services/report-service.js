@@ -10,7 +10,7 @@ const ReportService = {
     return await StockTransactionsRepo.getMovementSummary(filters);
   },
   
-  async lowStockReport() { return await ItemsRepo.getLowStockItems(); },
+  async lowStockReport(filters = {}) { return await ItemsRepo.getLowStockItems(filters); },
   
   async challanHistory(filters = {}) { return await ChallansRepo.getAll(filters); },
   

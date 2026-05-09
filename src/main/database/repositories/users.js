@@ -84,6 +84,12 @@ const UsersRepo = {
   },
 
   async toggleActive(id) {
+    // Safety: Protect the default admin user from being deactivated
+    const userToToggle = await this.getById(id);
+    if (userToToggle?.username === 'admin') {
+      throw new Error('The default admin user cannot be deactivated.');
+    }
+
     if (isCloudEnabled()) {
       const { data: user } = await getSupabase().from('users').select('is_active').eq('id', id).single();
       const { error } = await getSupabase().from('users').update({ is_active: !user.is_active, updated_at: new Date().toISOString() }).eq('id', id);
@@ -103,6 +109,12 @@ const UsersRepo = {
   },
 
   async delete(id) {
+    // Safety: Protect the default admin user from being deleted
+    const userToDelete = await this.getById(id);
+    if (userToDelete?.username === 'admin') {
+      throw new Error('The default admin user cannot be deleted to prevent system lockout.');
+    }
+
     if (isCloudEnabled()) {
       const { error } = await getSupabase().from('users').delete().eq('id', id);
       if (error) throw error;

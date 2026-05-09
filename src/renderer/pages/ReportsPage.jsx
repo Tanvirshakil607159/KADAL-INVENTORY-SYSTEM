@@ -44,7 +44,7 @@ export default function ReportsPage() {
       switch (activeTab) {
         case 'stock': res = await window.kadal.reports.stockReport(filters); break;
         case 'movement': res = await window.kadal.reports.movementReport(filters); break;
-        case 'lowStock': res = await window.kadal.reports.lowStockReport(); break;
+        case 'lowStock': res = await window.kadal.reports.lowStockReport(filters); break;
         case 'challan': res = await window.kadal.reports.challanHistory(filters); break;
       }
       if (res?.success) setData(res.data || []);
@@ -295,8 +295,7 @@ export default function ReportsPage() {
             <input className="form-input" placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)} style={{width:180,padding:'8px 12px',fontSize:13}} />
           )}
           
-          {(activeTab !== 'lowStock') && (
-            <div className="toolbar-row" style={{display:'flex', gap:10, flexWrap:'wrap'}}>
+          <div className="toolbar-row" style={{display:'flex', gap:10, flexWrap:'wrap'}}>
             <select className="form-input" style={{width: 150}} value={buyerName} onChange={e => setBuyerName(e.target.value)}>
               <option value="">All Buyers</option>
               {distinctValues.buyers.map(v => <option key={v} value={v}>{v}</option>)}
@@ -314,7 +313,6 @@ export default function ReportsPage() {
               {distinctValues.purchases.map((v,i) => <option key={i} value={v}>{v}</option>)}
             </select>
           </div>
-        )}
 
           {(activeTab === 'movement' || activeTab === 'challan') && (
             <div className="filter-group">

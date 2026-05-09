@@ -225,19 +225,40 @@ const ItemsRepo = {
     return dbPrepare('SELECT COUNT(*) as count FROM items WHERE is_active = 1 AND current_stock <= min_stock_level AND min_stock_level > 0').get().count;
   },
 
-  async getLowStockItems() {
+  async getLowStockItems(filters = {}) {
     if (isCloudEnabled()) {
-      const { data, error } = await getSupabase()
+      const supabase = getSupabase();
+      let query = supabase
         .from('items')
         .select('*, categories(name)')
         .eq('is_active', true);
+      
+      if (filters.categoryId) query = query.eq('category_id', filters.categoryId);
+      if (filters.supplierId) query = query.eq('supplier_id', filters.supplierId);
+      if (filters.buyerName) query = query.eq('buyer_name', filters.buyerName);
+      if (filters.styleName) query = query.eq('style_name', filters.styleName);
+      if (filters.orderNumber) query = query.eq('order_number', filters.orderNumber);
+      if (filters.purchaseNo) query = query.eq('purchase_no', filters.purchaseNo);
+
+      const { data, error } = await query;
       if (error) throw error;
       return data
         .filter(i => i.current_stock <= i.min_stock_level && i.min_stock_level > 0)
         .map(i => ({ ...i, category_name: i.categories?.name }))
         .sort((a, b) => (a.current_stock - a.min_stock_level) - (b.current_stock - b.min_stock_level));
     }
-    return dbPrepare(`SELECT i.*, c.name as category_name FROM items i LEFT JOIN categories c ON i.category_id = c.id WHERE i.is_active = 1 AND i.current_stock <= i.min_stock_level AND i.min_stock_level > 0 ORDER BY (i.current_stock - i.min_stock_level) ASC`).all();
+
+    let where = ['i.is_active = 1', 'i.current_stock <= i.min_stock_level', 'i.min_stock_level > 0'];
+    let params = [];
+    if (filters.categoryId) { where.push('i.category_id = ?'); params.push(filters.categoryId); }
+    if (filters.supplierId) { where.push('i.supplier_id = ?'); params.push(filters.supplierId); }
+    if (filters.buyerName) { where.push('i.buyer_name = ?'); params.push(filters.buyerName); }
+    if (filters.styleName) { where.push('i.style_name = ?'); params.push(filters.styleName); }
+    if (filters.orderNumber) { where.push('i.order_number = ?'); params.push(filters.orderNumber); }
+    if (filters.purchaseNo) { where.push('i.purchase_no = ?'); params.push(filters.purchaseNo); }
+
+    const w = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
+    return dbPrepare(`SELECT i.*, c.name as category_name FROM items i LEFT JOIN categories c ON i.category_id = c.id ${w} ORDER BY (i.current_stock - i.min_stock_level) ASC`).all(...params);
   },
 
   async checkCodeExists(code, excludeId = null) {

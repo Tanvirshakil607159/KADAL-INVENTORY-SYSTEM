@@ -62,7 +62,6 @@
       "target": [
         "nsis"
       ],
-      "icon": "assets/icon.ico",
       "publish": [
         "github"
       ]
@@ -71,8 +70,6 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "installerIcon": "assets/icon.ico",
-      "uninstallerIcon": "assets/icon.ico",
       "deleteAppDataOnUninstall": false
     },
     "publish": {
