@@ -422,8 +422,8 @@ function registerIpcHandlers() {
     return ImportService.parseGoogleSheet(url);
   }));
 
-  ipcMain.handle('import:importItems', wrapHandler((rows) => {
-    return ImportService.importItems(rows);
+  ipcMain.handle('import:importItems', wrapHandler(async (rows) => {
+    return await ImportService.importItems(rows);
   }));
 
   ipcMain.handle('import:downloadTemplate', wrapHandler(async () => {
