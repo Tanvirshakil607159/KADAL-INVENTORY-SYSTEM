@@ -65,7 +65,10 @@
       ],
 
       "publish": [
-        "github"
+        {
+          "provider": "github",
+          "releaseType": "release"
+        }
       ]
     },
     "nsis": {
@@ -77,7 +80,8 @@
     "publish": {
       "provider": "github",
       "owner": "Tanvirshakil607159",
-      "repo": "KADAL-INVENTORY-SYSTEM"
+      "repo": "KADAL-INVENTORY-SYSTEM",
+      "releaseType": "release"
     }
   }
 }
