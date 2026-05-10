@@ -467,15 +467,18 @@ function getReportColumns(type) {
       ];
     case 'movement':
       return [
-        { key: 'item_name_code', label: 'Item / Code', width: 100, format: (v, r) => `${r.item_name} (${r.item_code})` },
-        { key: 'style_purchase_order', label: 'Style / Purchase / Order', width: 120, format: (v, r) => `${r.style_name || '-'} / ${r.purchase_no || '-'} / ${r.order_number || '-'}` },
-        { key: 'size_color', label: 'Size / Color', width: 80, format: (v, r) => [r.size, r.color].filter(Boolean).join(' / ') || '-' },
-        { key: 'buyer_name', label: 'Buyer', width: 80 },
-        { key: 'total_in', label: 'Total IN', width: 60, align: 'right' },
-        { key: 'total_out', label: 'Total OUT', width: 60, align: 'right' },
-        { key: 'current_stock', label: 'Current Stock', width: 70, align: 'right' },
-        { key: 'unit', label: 'Unit', width: 40 },
+        { key: 'item_name_code', label: 'Item / Code', width: 90, format: (v, r) => `${r.item_name} (${r.item_code})` },
+        { key: 'style_purchase_order', label: 'Style / Purchase / Order', width: 110, format: (v, r) => `${r.style_name || '-'} / ${r.purchase_no || '-'} / ${r.order_number || '-'}` },
+        { key: 'size_color', label: 'Size / Color', width: 70, format: (v, r) => [r.size, r.color].filter(Boolean).join(' / ') || '-' },
+        { key: 'buyer_name', label: 'Buyer', width: 70 },
+        { key: 'order_quantity', label: 'Order Qty', width: 55, align: 'right', format: (v) => v || 0 },
+        { key: 'total_in', label: 'Total IN', width: 50, align: 'right' },
+        { key: 'total_out', label: 'Total OUT', width: 50, align: 'right' },
+        { key: 'balance_qty', label: 'Balance', width: 50, align: 'right', format: (v, r) => (r.order_quantity || 0) - (r.total_out || 0) },
+        { key: 'current_stock', label: 'Stock', width: 50, align: 'right' },
+        { key: 'unit', label: 'Unit', width: 35 },
       ];
+
     case 'lowStock':
       return [
         { key: 'item_code', label: 'Code', width: 60 },
