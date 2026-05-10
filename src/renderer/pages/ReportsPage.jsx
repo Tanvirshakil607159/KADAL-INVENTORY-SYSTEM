@@ -9,6 +9,7 @@ const TABS = [
   { id: 'challan', label: 'Challan History' },
 ];
 
+
 export default function ReportsPage() {
   const { addToast } = useStore();
   const [activeTab, setActiveTab] = useState('stock');
@@ -47,6 +48,7 @@ export default function ReportsPage() {
         case 'lowStock': res = await window.kadal.reports.lowStockReport(filters); break;
         case 'challan': res = await window.kadal.reports.challanHistory(filters); break;
       }
+
       if (res?.success) setData(res.data || []);
     } catch (e) { addToast('error', 'Failed to load report'); }
     setLoading(false);
@@ -200,21 +202,48 @@ export default function ReportsPage() {
       case 'challan':
         return (
           <table className="data-table">
-            <thead><tr><th>Challan No</th><th>Date</th><th>Buyer</th><th>Receiver</th><th style={{textAlign:'center'}}>Items</th><th style={{textAlign:'right'}}>Qty</th><th>Status</th></tr></thead>
-            <tbody>{data.map(r => (
-              <tr key={r.id}>
+            <thead>
+              <tr>
+                <th>Challan No</th>
+                <th>Date</th>
+                <th>Receiver</th>
+                <th>Buyer</th>
+                <th>Item Details</th>
+                <th>Style / Order / Purchase</th>
+                <th style={{textAlign:'right'}}>Order Qty</th>
+
+                <th style={{textAlign:'right'}}>Shipped</th>
+                <th style={{textAlign:'right'}}>Total Out</th>
+                <th style={{textAlign:'right'}}>Balance</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>{data.map((r, i) => (
+              <tr key={i}>
                 <td className="text-mono" style={{fontSize:12,color:'var(--accent)'}}>{r.challan_number}</td>
-                <td>{new Date(r.challan_date).toLocaleDateString('en-GB')}</td>
-                <td style={{fontSize:11}}>{r.buyer_names || '-'}</td>
-                <td style={{fontWeight:600}}>{r.receiver_name}</td>
-                <td className="text-center">{r.item_count}</td>
-                <td className="text-right text-mono fw-bold">{r.total_quantity}</td>
+                <td style={{fontSize:11}}>{new Date(r.challan_date).toLocaleDateString('en-GB')}</td>
+                <td style={{fontSize:12}}>{r.receiver_name}</td>
+                <td style={{fontSize:11}}>{r.buyer_name || '-'}</td>
+                <td>
+                  <div style={{fontWeight:600}}>{r.item_name}</div>
+                  <div className="text-muted" style={{fontSize:11}}>{[r.size, r.color].filter(Boolean).join(' / ') || '-'}</div>
+                </td>
+                <td style={{fontSize:12}}>
+                  <div>{r.style_name || '-'}</div>
+                  <div className="text-muted" style={{fontSize:11}}>{r.order_number || '-'} / {r.purchase_no || '-'}</div>
+                </td>
+                <td className="text-right text-mono">{r.order_quantity || 0}</td>
+
+                <td className="text-right text-mono fw-bold text-success">{r.shipped_quantity}</td>
+                <td className="text-right text-mono text-warning">{r.total_shipped}</td>
+                <td className="text-right text-mono fw-bold" style={{color: r.balance > 0 ? 'var(--danger)' : 'var(--success)'}}>{r.balance}</td>
                 <td><span className={`badge badge-${r.status==='ACTIVE'?'success':'danger'}`}>{r.status}</span></td>
               </tr>
             ))}</tbody>
           </table>
         );
     }
+
   };
 
   // Detail view for a specific item's transactions

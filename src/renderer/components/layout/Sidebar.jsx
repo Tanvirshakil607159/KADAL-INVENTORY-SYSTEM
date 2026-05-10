@@ -6,7 +6,6 @@ const navItems = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'inventory', label: 'Inventory', icon: Package },
   { id: 'challan', label: 'Create Challan', icon: FileText },
-  { id: 'challan-history', label: 'Challan History', icon: History },
   { id: 'approvals', label: 'Approvals', icon: CheckCircle },
   { id: 'gate-pass', label: 'Gate Pass', icon: FileText },
   { id: 'reports', label: 'Reports', icon: BarChart3 },
@@ -33,10 +32,9 @@ export default function Sidebar() {
       // Also clear from localStorage
       const unseenDots = JSON.parse(localStorage.getItem('unseen_dots') || '{}');
       // Map sidebar items to their dot key
-      if (itemId === 'challan' || itemId === 'challan-history') {
+      if (itemId === 'challan') {
         delete unseenDots['challan'];
         clearNotificationDot('challan');
-        clearNotificationDot('challan-history');
       } else if (itemId === 'inventory') {
         delete unseenDots['inventory'];
       } else if (itemId === 'gate-pass') {
@@ -60,7 +58,7 @@ export default function Sidebar() {
             if (!['dashboard', 'inventory', 'reports', 'approvals'].includes(item.id)) return null;
           }
           if (user?.roleName === 'Challan') {
-            if (!['dashboard', 'challan', 'challan-history', 'gate-pass', 'reports', 'approvals'].includes(item.id)) return null;
+            if (!['dashboard', 'challan', 'gate-pass', 'reports', 'approvals'].includes(item.id)) return null;
           }
           if ((item.id === 'settings' || item.id === 'backup') && user?.roleName === 'Operator') return null;
           const hasDot = notificationDots[item.id];

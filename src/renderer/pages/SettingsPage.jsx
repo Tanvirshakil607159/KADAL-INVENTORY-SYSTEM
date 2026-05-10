@@ -755,6 +755,34 @@ function SystemSettings() {
           <ArrowDownCircle size={16} /> {checking ? 'Checking...' : 'Check for Updates'}
         </button>
       </div>
+
+      <div className="card" style={{ padding: 24, border: '1px solid var(--danger-subtle)', background: 'rgba(239,68,68,0.02)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+          <AlertCircle size={20} color="var(--danger)" />
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: 'var(--danger)' }}>Database Maintenance</h3>
+        </div>
+        <p className="text-muted" style={{ margin: '0 0 20px', fontSize: 13 }}>
+          <strong>Danger Zone:</strong> This will permanently delete all items, challans, gate passes, and stock transactions. This action cannot be undone.
+        </p>
+
+        <button 
+          className="btn btn-danger" 
+          onClick={async () => {
+            if (window.confirm('ARE YOU ABSOLUTELY SURE? This will delete ALL data (Items, Challans, Gate Passes, Transactions) and cannot be undone.')) {
+              const res = await window.kadal.system.clearData();
+              if (res.success) {
+                addToast('success', 'All data cleared successfully. Please restart the app.');
+                window.location.reload();
+              } else {
+                addToast('error', res.error || 'Failed to clear data');
+              }
+            }
+          }}
+        >
+          <Trash2 size={16} /> Clear All Data & Reset Database
+        </button>
+      </div>
     </div>
+
   );
 }

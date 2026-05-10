@@ -26,6 +26,10 @@ const ChallanService = {
     return await ChallansRepo.getFieldSuggestions(field, query);
   },
 
+  async getTotalDelivered(itemId) {
+    return await ChallansRepo.getTotalDelivered(itemId);
+  },
+
   async create(data) {
     const user = await AuthService.getCurrentUser();
     if (user?.roleName !== 'Admin') {

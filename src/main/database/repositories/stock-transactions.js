@@ -138,7 +138,7 @@ const StockTransactionsRepo = {
     if (filters.buyerName) { whereConditions += ' AND i.buyer_name = ?'; whereParams.push(filters.buyerName); }
 
     const params = [...joinParams, ...whereParams];
-    return dbPrepare(`SELECT i.id, i.item_code, i.name as item_name, i.unit, i.unit_price, i.currency, i.style_name, i.purchase_no, i.order_number, i.order_quantity, i.size, i.color, i.buyer_name, COALESCE(SUM(CASE WHEN st.type = 'IN' THEN st.quantity ELSE 0 END), 0) as total_in, COALESCE(SUM(CASE WHEN st.type = 'OUT' THEN st.quantity ELSE 0 END), 0) as total_out, i.current_stock FROM items i LEFT JOIN stock_transactions st ON ${joinConditions} WHERE ${whereConditions} GROUP BY i.id ORDER BY i.name`).all(...params);
+    return dbPrepare(`SELECT i.id, i.item_code, i.name as item_name, i.unit, i.unit_price, i.currency, i.style_name, i.purchase_no, i.order_number, i.size, i.color, i.buyer_name, COALESCE(SUM(CASE WHEN st.type = 'IN' THEN st.quantity ELSE 0 END), 0) as total_in, COALESCE(SUM(CASE WHEN st.type = 'OUT' THEN st.quantity ELSE 0 END), 0) as total_out, i.current_stock FROM items i LEFT JOIN stock_transactions st ON ${joinConditions} WHERE ${whereConditions} GROUP BY i.id ORDER BY i.name`).all(...params);
   },
 
   async getDailySummary(date) {

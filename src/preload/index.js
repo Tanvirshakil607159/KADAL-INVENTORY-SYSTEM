@@ -91,6 +91,8 @@ contextBridge.exposeInMainWorld('kadal', {
     movementReport: (filters) => ipcRenderer.invoke('reports:movementReport', filters),
     lowStockReport: () => ipcRenderer.invoke('reports:lowStockReport'),
     challanHistory: (filters) => ipcRenderer.invoke('reports:challanHistory', filters),
+    detailedChallanHistory: (filters) => ipcRenderer.invoke('reports:detailedChallanHistory', filters),
+
     dailySummary: (date) => ipcRenderer.invoke('reports:dailySummary', date),
     monthlySummary: (year, month) => ipcRenderer.invoke('reports:monthlySummary', year, month),
     exportExcel: (type, data, options) => ipcRenderer.invoke('reports:exportExcel', type, data, options),
@@ -151,6 +153,10 @@ contextBridge.exposeInMainWorld('kadal', {
 
   // Auto Update
   update: {
-    check: () => ipcRenderer.invoke('update:check'),
+    check: () => ipcRenderer.invoke('system:checkUpdate'),
   },
+  system: {
+    clearData: () => ipcRenderer.invoke('system:clearData'),
+  }
 });
+

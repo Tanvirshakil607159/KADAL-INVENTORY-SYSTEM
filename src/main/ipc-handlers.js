@@ -246,6 +246,10 @@ function registerIpcHandlers() {
     return ChallanService.getFieldSuggestions(field, query);
   }));
 
+  ipcMain.handle('challans:getTotalDelivered', wrapHandler((itemId) => {
+    return ChallanService.getTotalDelivered(itemId);
+  }));
+
   ipcMain.handle('challans:exportPdf', wrapHandler(async (id) => {
     const challan = await ChallansRepo.getById(id);
     if (!challan) throw new Error('Challan not found');
@@ -289,6 +293,11 @@ function registerIpcHandlers() {
   ipcMain.handle('reports:challanHistory', wrapHandler((filters) => {
     return ReportService.challanHistory(filters);
   }));
+  
+  ipcMain.handle('reports:detailedChallanHistory', wrapHandler((filters) => {
+    return ReportService.detailedChallanHistory(filters);
+  }));
+
 
   ipcMain.handle('reports:dailySummary', wrapHandler((date) => {
     return ReportService.dailySummary(date);
@@ -436,7 +445,8 @@ function registerIpcHandlers() {
   }));
 
   // ==================== AUTO UPDATE ====================
-  ipcMain.handle('update:check', wrapHandler(async () => {
+  ipcMain.handle('system:checkUpdate', wrapHandler(async () => {
+
     const UpdateService = require('./services/update-service');
     const { BrowserWindow } = require('electron');
     const mainWindow = BrowserWindow.getAllWindows()[0];
@@ -447,8 +457,13 @@ function registerIpcHandlers() {
     return { success: false, error: 'No main window found' };
   }));
 
+  ipcMain.handle('system:clearData', wrapHandler(() => {
+    return ChallansRepo.clearAllData();
+  }));
+
   console.log('[IPC] All handlers registered');
 }
+
 
 // Report column definitions
 function getReportColumns(type) {
@@ -467,18 +482,15 @@ function getReportColumns(type) {
       ];
     case 'movement':
       return [
-        { key: 'item_name_code', label: 'Item / Code', width: 90, format: (v, r) => `${r.item_name} (${r.item_code})` },
-        { key: 'style_purchase_order', label: 'Style / Purchase / Order', width: 110, format: (v, r) => `${r.style_name || '-'} / ${r.purchase_no || '-'} / ${r.order_number || '-'}` },
-        { key: 'size_color', label: 'Size / Color', width: 70, format: (v, r) => [r.size, r.color].filter(Boolean).join(' / ') || '-' },
-        { key: 'buyer_name', label: 'Buyer', width: 70 },
-        { key: 'order_quantity', label: 'Order Qty', width: 55, align: 'right', format: (v) => v || 0 },
-        { key: 'total_in', label: 'Total IN', width: 50, align: 'right' },
-        { key: 'total_out', label: 'Total OUT', width: 50, align: 'right' },
-        { key: 'balance_qty', label: 'Balance', width: 50, align: 'right', format: (v, r) => (r.order_quantity || 0) - (r.total_out || 0) },
-        { key: 'current_stock', label: 'Stock', width: 50, align: 'right' },
-        { key: 'unit', label: 'Unit', width: 35 },
+        { key: 'item_name_code', label: 'Item / Code', width: 100, format: (v, r) => `${r.item_name} (${r.item_code})` },
+        { key: 'style_purchase_order', label: 'Style / Purchase / Order', width: 120, format: (v, r) => `${r.style_name || '-'} / ${r.purchase_no || '-'} / ${r.order_number || '-'}` },
+        { key: 'size_color', label: 'Size / Color', width: 80, format: (v, r) => [r.size, r.color].filter(Boolean).join(' / ') || '-' },
+        { key: 'buyer_name', label: 'Buyer', width: 80 },
+        { key: 'total_in', label: 'Total IN', width: 60, align: 'right' },
+        { key: 'total_out', label: 'Total OUT', width: 60, align: 'right' },
+        { key: 'current_stock', label: 'Current Stock', width: 70, align: 'right' },
+        { key: 'unit', label: 'Unit', width: 40 },
       ];
-
     case 'lowStock':
       return [
         { key: 'item_code', label: 'Code', width: 60 },
@@ -491,15 +503,21 @@ function getReportColumns(type) {
       ];
     case 'challan':
       return [
-        { key: 'challan_number', label: 'Challan No', width: 90 },
-        { key: 'challan_date', label: 'Date', width: 70, format: (v) => v ? new Date(v).toLocaleDateString('en-GB') : '' },
-        { key: 'buyer_names', label: 'Buyer', width: 100 },
-        { key: 'receiver_name', label: 'Receiver', width: 120 },
-        { key: 'item_names', label: 'Items', width: '*' },
-        { key: 'total_quantity', label: 'Qty', width: 50, align: 'right' },
-        { key: 'status', label: 'Status', width: 60 },
-        { key: 'created_by_name', label: 'Created By', width: 80 },
+        { key: 'challan_number', label: 'Challan No', width: 65 },
+        { key: 'challan_date', label: 'Date', width: 55, format: (v) => v ? new Date(v).toLocaleDateString('en-GB') : '' },
+        { key: 'receiver_name', label: 'Receiver', width: 75 },
+        { key: 'buyer_name', label: 'Buyer', width: 65, format: (v, r) => r.buyer_name || '-' },
+        { key: 'item_name', label: 'Item Details', width: 110, format: (v, r) => `${r.item_name || '-'}\n${[r.size, r.color].filter(Boolean).join(' / ') || '-'}` },
+        { key: 'style_order_purchase', label: 'Style / Order / Purchase', width: 120, format: (v, r) => `${r.style_name || '-'}\n${r.order_number || '-'} / ${r.purchase_no || '-'}` },
+        { key: 'order_quantity', label: 'Order Qty', width: 45, align: 'right', format: (v, r) => r.order_quantity ?? 0 },
+        { key: 'shipped_quantity', label: 'Shipped', width: 45, align: 'right', format: (v, r) => r.shipped_quantity ?? 0 },
+        { key: 'total_shipped', label: 'Total Out', width: 45, align: 'right', format: (v, r) => r.total_shipped ?? 0 },
+        { key: 'balance', label: 'Balance', width: 45, align: 'right', format: (v, r) => r.balance ?? 0 },
+        { key: 'status', label: 'Status', width: 45 },
       ];
+
+
+
     case 'movementDetail':
       return [
         { key: 'created_at', label: 'Date & Time', width: 90, format: (v) => v ? new Date(v).toLocaleString('en-GB') : '' },
@@ -524,6 +542,7 @@ function getReportTitle(type) {
     case 'movement': return 'Stock Movement Report';
     case 'lowStock': return 'Low Stock Alert Report';
     case 'challan': return 'Challan History Report';
+
     case 'movementDetail': return 'Item Stock Movement Details';
     default: return 'Report';
   }

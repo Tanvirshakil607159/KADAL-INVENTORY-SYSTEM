@@ -67,7 +67,8 @@ const ExcelGenerator = {
 
       dataRow.eachCell((cell, colNumber) => {
         cell.font = { size: 9 };
-        cell.alignment = { horizontal: columns[colNumber - 1]?.align || 'left', vertical: 'middle' };
+        cell.alignment = { horizontal: columns[colNumber - 1]?.align || 'left', vertical: 'middle', wrapText: true };
+
         cell.border = {
           top: { style: 'thin', color: { argb: 'FFEEEEEE' } },
           bottom: { style: 'thin', color: { argb: 'FFEEEEEE' } },
