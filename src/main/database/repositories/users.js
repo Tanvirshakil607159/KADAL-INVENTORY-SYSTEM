@@ -115,12 +115,19 @@ const UsersRepo = {
       throw new Error('The default admin user cannot be deleted to prevent system lockout.');
     }
 
-    if (isCloudEnabled()) {
-      const { error } = await getSupabase().from('users').delete().eq('id', id);
-      if (error) throw error;
-      return true;
+    try {
+      if (isCloudEnabled()) {
+        const { error } = await getSupabase().from('users').delete().eq('id', id);
+        if (error) throw error;
+        return true;
+      }
+      return dbPrepare(`DELETE FROM users WHERE id = ?`).run(id);
+    } catch (err) {
+      if (err.message.includes('foreign key constraint') || err.code === '23503' || err.message.includes('REFERENCE constraint')) {
+        throw new Error('This user has history records (Audit Logs, Challans, or Transactions) and cannot be deleted. Please deactivate the user instead to preserve system integrity.');
+      }
+      throw err;
     }
-    return dbPrepare(`DELETE FROM users WHERE id = ?`).run(id);
   },
 };
 module.exports = UsersRepo;

@@ -113,7 +113,7 @@ function CompanySettings() {
 }
 
 function UserSettings() {
-  const { addToast } = useStore();
+  const { addToast, showConfirm } = useStore();
   const [users, setUsers] = useState([]);
   const [roles, setRoles] = useState([]);
   const [showForm, setShowForm] = useState(false);
@@ -148,6 +148,14 @@ function UserSettings() {
   };
 
   const del = async (id) => {
+    const confirmed = await showConfirm({
+      title: 'Delete User',
+      message: 'Are you sure you want to delete this user? This action cannot be undone. Note: Users with existing records (like challans) should be deactivated instead.',
+      confirmText: 'Delete User',
+      type: 'danger'
+    });
+    if (!confirmed) return;
+
     const res = await window.kadal.users.delete(id);
     if (res.success) { load(); addToast('success', 'User deleted'); }
     else addToast('error', res.data?.error || res.error);

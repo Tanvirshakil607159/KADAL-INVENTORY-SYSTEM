@@ -59,14 +59,23 @@ const UpdateService = {
 
     autoUpdater.on('error', (err) => {
       console.error('[Update] Error:', err.message);
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        dialog.showMessageBox(mainWindow, {
+          type: 'error',
+          title: 'Update Error',
+          message: `An error occurred during the update process: ${err.message}`
+        });
+      }
     });
 
     // Check for updates immediately
     try {
-      await autoUpdater.checkForUpdates();
+      console.log('[Update] Checking for updates...');
+      const result = await autoUpdater.checkForUpdates();
+      console.log('[Update] Check result:', result ? 'Update found' : 'No update');
     } catch (e) {
       if (e.message.includes('ENOENT') && e.message.includes('app-update.yml')) {
-        console.warn('[Update] Auto-update skipped: app-update.yml not found (this is normal in some development/unpacked builds).');
+        console.warn('[Update] Auto-update skipped: app-update.yml not found.');
       } else {
         console.error('[Update] Check failed:', e.message);
       }
