@@ -113,11 +113,12 @@ function CompanySettings() {
 }
 
 function UserSettings() {
-  const { addToast, showConfirm } = useStore();
+  const { addToast, showConfirm, user } = useStore();
   const [users, setUsers] = useState([]);
   const [roles, setRoles] = useState([]);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ username:'', fullName:'', password:'', roleId: 2, perms: { inventory: false, challan: false, reports: false, settings: false } });
+  const [editingUser, setEditingUser] = useState(null);
+  const [form, setForm] = useState({ username:'', fullName:'', password:'', roleId: 2, perms: { inventory: false, challan: false, reports: false, settings: false, maintenance: false } });
 
   const load = async () => {
     const resUsers = await window.kadal.users.getAll();
@@ -127,8 +128,10 @@ function UserSettings() {
   };
   useEffect(() => { load(); }, []);
 
-  const handleCreate = async () => {
-    if (!form.username || !form.fullName || !form.password) { addToast('error','All fields required'); return; }
+  const handleSaveUser = async () => {
+    if (!editingUser && (!form.username || !form.fullName || !form.password)) { addToast('error','All fields required'); return; }
+    if (editingUser && !form.fullName) { addToast('error','Full Name is required'); return; }
+    
     const customPermissions = JSON.stringify({
       inventory: form.perms.inventory ? 'rw' : 'none',
       challan: form.perms.challan ? 'rw' : 'none',
@@ -136,10 +139,56 @@ function UserSettings() {
       users: form.perms.settings ? 'rw' : 'none',
       settings: form.perms.settings ? 'rw' : 'none',
       backup: form.perms.settings ? 'rw' : 'none',
+      maintenance: form.perms.maintenance ? 'rw' : 'none',
     });
-    const res = await window.kadal.users.create({ ...form, customPermissions });
-    if (res.success) { addToast('success','User created'); setShowForm(false); setForm({username:'',fullName:'',password:'',roleId:2,perms:{inventory:false,challan:false,reports:false,settings:false}}); load(); }
+
+    let res;
+    if (editingUser) {
+      res = await window.kadal.users.update(editingUser.id, { 
+        fullName: form.fullName, 
+        roleId: form.roleId, 
+        customPermissions,
+        password: form.password || undefined // Only update if provided
+      });
+    } else {
+      res = await window.kadal.users.create({ ...form, customPermissions });
+    }
+
+    if (res.success) { 
+      addToast('success', editingUser ? 'User updated' : 'User created'); 
+      setShowForm(false); 
+      setEditingUser(null);
+      setForm({username:'',fullName:'',password:'',roleId:2,perms:{inventory:false,challan:false,reports:false,settings:false}}); 
+      load(); 
+    }
     else addToast('error', res.error);
+  };
+
+  const handleEdit = (u) => {
+    setEditingUser(u);
+    let perms = { inventory: false, challan: false, reports: false, settings: false, maintenance: false };
+    try {
+      const p = typeof u.custom_permissions === 'string' ? JSON.parse(u.custom_permissions) : (u.custom_permissions || {});
+      // If no custom perms, fall back to role perms (though the repo already merges them)
+      const rawPerms = p && Object.keys(p).length > 0 ? p : (typeof u.permissions === 'string' ? JSON.parse(u.permissions) : (u.permissions || {}));
+      
+      perms = {
+        inventory: rawPerms.inventory === 'rw',
+        challan: rawPerms.challan === 'rw',
+        reports: rawPerms.reports === 'r' || rawPerms.reports === 'rw',
+        settings: rawPerms.settings === 'rw',
+        maintenance: rawPerms.maintenance === 'rw'
+      };
+    } catch (e) {}
+
+    setForm({
+      username: u.username,
+      fullName: u.full_name,
+      password: '', // Don't show existing hash
+      roleId: u.role_id,
+      perms
+    });
+    setShowForm(true);
   };
 
   const toggle = async (id) => {
@@ -173,8 +222,9 @@ function UserSettings() {
             <td><span className={`badge badge-${u.is_active?'success':'danger'}`}>{u.is_active?'Active':'Inactive'}</span></td>
             <td className="text-muted">{u.last_login?new Date(u.last_login).toLocaleString('en-GB'):'-'}</td>
             <td>
-              <button className="btn btn-ghost btn-sm" onClick={()=>toggle(u.id)}>{u.is_active?'Deactivate':'Activate'}</button>
-              <button className="btn btn-ghost btn-icon btn-sm" onClick={()=>del(u.id)} style={{marginLeft:8}}><Trash2 size={14} color="var(--danger)" /></button>
+              <button className="btn btn-ghost btn-icon btn-sm" onClick={()=>handleEdit(u)} title="Edit Role/Permissions"><Edit2 size={14}/></button>
+              <button className="btn btn-ghost btn-sm" onClick={()=>toggle(u.id)} style={{marginLeft:4}}>{u.is_active?'Deactivate':'Activate'}</button>
+              <button className="btn btn-ghost btn-icon btn-sm" onClick={()=>del(u.id)} style={{marginLeft:4}}><Trash2 size={14} color="var(--danger)" /></button>
             </td></tr>
           ))}</tbody>
         </table>
@@ -182,17 +232,23 @@ function UserSettings() {
       {showForm && (
         <div className="modal-overlay" onClick={()=>setShowForm(false)}>
           <div className="modal" onClick={e=>e.stopPropagation()}>
-            <div className="modal-header"><h3 className="modal-title">Add User</h3><button className="btn btn-ghost btn-icon btn-sm" onClick={()=>setShowForm(false)}>✕</button></div>
+            <div className="modal-header">
+              <h3 className="modal-title">{editingUser ? 'Edit User' : 'Add User'}</h3>
+              <button className="btn btn-ghost btn-icon btn-sm" onClick={()=>{setShowForm(false); setEditingUser(null);}}>✕</button>
+            </div>
             <div className="modal-body">
-              <div className="form-group"><label className="form-label">Username</label><input className="form-input" value={form.username} onChange={e=>setForm(f=>({...f,username:e.target.value}))} /></div>
+              <div className="form-group"><label className="form-label">Username</label><input className="form-input" value={form.username} onChange={e=>setForm(f=>({...f,username:e.target.value}))} disabled={!!editingUser} /></div>
               <div className="form-group"><label className="form-label">Full Name</label><input className="form-input" value={form.fullName} onChange={e=>setForm(f=>({...f,fullName:e.target.value}))} /></div>
-              <div className="form-group"><label className="form-label">Password</label><input className="form-input" type="password" value={form.password} onChange={e=>setForm(f=>({...f,password:e.target.value}))} /></div>
+              <div className="form-group">
+                <label className="form-label">Password {editingUser && '(Leave blank to keep current)'}</label>
+                <input className="form-input" type="password" value={form.password} onChange={e=>setForm(f=>({...f,password:e.target.value}))} placeholder={editingUser ? '••••••••' : ''} />
+              </div>
               <div className="form-group">
                 <label className="form-label">User Role</label>
                 <select className="form-select" value={form.roleId} onChange={e => {
                   const rid = parseInt(e.target.value);
                   const role = roles.find(r => r.id === rid);
-                  let newPerms = { inventory: false, challan: false, reports: false, settings: false };
+                  let newPerms = { inventory: false, challan: false, reports: false, settings: false, maintenance: false };
                   if (role) {
                     try {
                       const p = JSON.parse(role.permissions);
@@ -200,34 +256,52 @@ function UserSettings() {
                         inventory: p.inventory === 'rw',
                         challan: p.challan === 'rw',
                         reports: p.reports === 'r' || p.reports === 'rw',
-                        settings: p.settings === 'rw'
+                        settings: p.settings === 'rw',
+                        maintenance: p.maintenance === 'rw'
                       };
                     } catch(e) {}
                   }
                   setForm(f => ({...f, roleId: rid, perms: newPerms }));
                 }}>
-                  {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                  {roles.filter(r => {
+                    if (user?.roleName === 'Super Admin') return r.name === 'Admin';
+                    return true;
+                  }).map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
                 </select>
               </div>
               <div className="form-group">
                 <label className="form-label">Access Permissions</label>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
-                    <input type="checkbox" checked={form.perms.inventory} onChange={e=>setForm(f=>({...f, perms: {...f.perms, inventory: e.target.checked}}))} /> Manage Inventory
-                  </label>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
-                    <input type="checkbox" checked={form.perms.challan} onChange={e=>setForm(f=>({...f, perms: {...f.perms, challan: e.target.checked}}))} /> Manage Challans
-                  </label>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
-                    <input type="checkbox" checked={form.perms.reports} onChange={e=>setForm(f=>({...f, perms: {...f.perms, reports: e.target.checked}}))} /> View Reports
-                  </label>
+                  {!(user?.roleName === 'Super Admin') && (
+                    <>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+                        <input type="checkbox" checked={form.perms.inventory} onChange={e=>setForm(f=>({...f, perms: {...f.perms, inventory: e.target.checked}}))} /> Manage Inventory
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+                        <input type="checkbox" checked={form.perms.challan} onChange={e=>setForm(f=>({...f, perms: {...f.perms, challan: e.target.checked}}))} /> Manage Challans
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+                        <input type="checkbox" checked={form.perms.reports} onChange={e=>setForm(f=>({...f, perms: {...f.perms, reports: e.target.checked}}))} /> View Reports
+                      </label>
+                    </>
+                  )}
                   <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
                     <input type="checkbox" checked={form.perms.settings} onChange={e=>setForm(f=>({...f, perms: {...f.perms, settings: e.target.checked}}))} /> Admin Access
                   </label>
+                  {!(user?.roleName === 'Super Admin') && (
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, opacity: (user?.roleName === 'Super Admin') ? 1 : 0.6, cursor: (user?.roleName === 'Super Admin') ? 'pointer' : 'not-allowed' }}>
+                      <input 
+                        type="checkbox" 
+                        checked={form.perms.maintenance} 
+                        onChange={e=>setForm(f=>({...f, perms: {...f.perms, maintenance: e.target.checked}}))} 
+                        disabled={user?.roleName !== 'Super Admin'}
+                      /> Database Maintenance
+                    </label>
+                  )}
                 </div>
               </div>
             </div>
-            <div className="modal-footer"><button className="btn btn-outline" onClick={()=>setShowForm(false)}>Cancel</button><button className="btn btn-primary" onClick={handleCreate}>Create</button></div>
+            <div className="modal-footer"><button className="btn btn-outline" onClick={()=>{setShowForm(false); setEditingUser(null);}}>Cancel</button><button className="btn btn-primary" onClick={handleSaveUser}>{editingUser ? 'Update' : 'Create'}</button></div>
           </div>
         </div>
       )}
@@ -734,8 +808,10 @@ function CloudSync() {
 }
 
 function SystemSettings() {
-  const { addToast } = useStore();
+  const { addToast, user } = useStore();
   const [checking, setChecking] = useState(false);
+
+  const hasMaintenance = user?.permissions?.maintenance === 'rw';
 
   const handleCheckUpdate = async () => {
     setChecking(true);
@@ -764,32 +840,34 @@ function SystemSettings() {
         </button>
       </div>
 
-      <div className="card" style={{ padding: 24, border: '1px solid var(--danger-subtle)', background: 'rgba(239,68,68,0.02)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-          <AlertCircle size={20} color="var(--danger)" />
-          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: 'var(--danger)' }}>Database Maintenance</h3>
-        </div>
-        <p className="text-muted" style={{ margin: '0 0 20px', fontSize: 13 }}>
-          <strong>Danger Zone:</strong> This will permanently delete all items, challans, gate passes, and stock transactions. This action cannot be undone.
-        </p>
+      {hasMaintenance && (
+        <div className="card" style={{ padding: 24, border: '1px solid var(--danger-subtle)', background: 'rgba(239,68,68,0.02)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+            <AlertCircle size={20} color="var(--danger)" />
+            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: 'var(--danger)' }}>Database Maintenance</h3>
+          </div>
+          <p className="text-muted" style={{ margin: '0 0 20px', fontSize: 13 }}>
+            <strong>Danger Zone:</strong> This will permanently delete all items, challans, gate passes, and stock transactions. This action cannot be undone.
+          </p>
 
-        <button 
-          className="btn btn-danger" 
-          onClick={async () => {
-            if (window.confirm('ARE YOU ABSOLUTELY SURE? This will delete ALL data (Items, Challans, Gate Passes, Transactions) and cannot be undone.')) {
-              const res = await window.kadal.system.clearData();
-              if (res.success) {
-                addToast('success', 'All data cleared successfully. Please restart the app.');
-                window.location.reload();
-              } else {
-                addToast('error', res.error || 'Failed to clear data');
+          <button 
+            className="btn btn-danger" 
+            onClick={async () => {
+              if (window.confirm('ARE YOU ABSOLUTELY SURE? This will delete ALL data (Items, Challans, Gate Passes, Transactions) and cannot be undone.')) {
+                const res = await window.kadal.system.clearData();
+                if (res.success) {
+                  addToast('success', 'All data cleared successfully. Please restart the app.');
+                  window.location.reload();
+                } else {
+                  addToast('error', res.error || 'Failed to clear data');
+                }
               }
-            }
-          }}
-        >
-          <Trash2 size={16} /> Clear All Data & Reset Database
-        </button>
-      </div>
+            }}
+          >
+            <Trash2 size={16} /> Clear All Data & Reset Database
+          </button>
+        </div>
+      )}
     </div>
 
   );

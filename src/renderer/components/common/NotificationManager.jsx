@@ -13,7 +13,7 @@ export default function NotificationManager() {
     const checkNotifications = async () => {
       try {
         // 1. Admin: Check for pending approvals → red dot on "approvals"
-        if (user.roleName === 'Admin') {
+        if (user.roleName === 'Admin' || user.roleName === 'Super Admin') {
           const pendingRes = await window.kadal.approvals.getAll({ status: 'PENDING' });
           if (pendingRes.success) {
             const hasPending = pendingRes.data.length > 0;

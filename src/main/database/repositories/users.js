@@ -87,10 +87,11 @@ const UsersRepo = {
   },
 
   async toggleActive(id) {
-    // Safety: Protect the default admin user from being deactivated
+    // Safety: Protect core admin users from being deactivated
     const userToToggle = await this.getById(id);
-    if (userToToggle?.username === 'admin') {
-      throw new Error('The default admin user cannot be deactivated.');
+    const protectedUsers = ['admin', 'superadmin'];
+    if (protectedUsers.includes(userToToggle?.username?.toLowerCase())) {
+      throw new Error(`The ${userToToggle.username} user cannot be deactivated.`);
     }
 
     if (isCloudEnabled()) {
@@ -112,10 +113,11 @@ const UsersRepo = {
   },
 
   async delete(id) {
-    // Safety: Protect the default admin user from being deleted
+    // Safety: Protect core admin users from being deleted
     const userToDelete = await this.getById(id);
-    if (userToDelete?.username === 'admin') {
-      throw new Error('The default admin user cannot be deleted to prevent system lockout.');
+    const protectedUsers = ['admin', 'superadmin'];
+    if (protectedUsers.includes(userToDelete?.username?.toLowerCase())) {
+      throw new Error(`The ${userToDelete.username} user cannot be deleted to prevent system lockout.`);
     }
 
     try {

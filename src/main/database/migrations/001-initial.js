@@ -98,6 +98,30 @@ function runMigrations(db) {
     db.run("INSERT INTO _migrations (name) VALUES ('010-add-gate-pass-approval')");
     console.log('[DB] Migration 010-add-gate-pass-approval applied successfully');
   }
+  // NEW MIGRATION: 011-update-roles
+  const applied11 = db.exec("SELECT * FROM _migrations WHERE name = '011-update-roles'");
+  if (applied11.length === 0 || applied11[0].values.length === 0) {
+    console.log('[DB] Running migration: 011-update-roles');
+    applyEleventhMigration(db);
+    db.run("INSERT INTO _migrations (name) VALUES ('011-update-roles')");
+    console.log('[DB] Migration 011-update-roles applied successfully');
+  }
+  // NEW MIGRATION: 012-add-super-admin-user
+  const applied12 = db.exec("SELECT * FROM _migrations WHERE name = '012-add-super-admin-user'");
+  if (applied12.length === 0 || applied12[0].values.length === 0) {
+    console.log('[DB] Running migration: 012-add-super-admin-user');
+    applyTwelfthMigration(db);
+    db.run("INSERT INTO _migrations (name) VALUES ('012-add-super-admin-user')");
+    console.log('[DB] Migration 012-add-super-admin-user applied successfully');
+  }
+  // NEW MIGRATION: 013-fix-superadmin-login
+  const applied13 = db.exec("SELECT * FROM _migrations WHERE name = '013-fix-superadmin-login'");
+  if (applied13.length === 0 || applied13[0].values.length === 0) {
+    console.log('[DB] Running migration: 013-fix-superadmin-login');
+    applyThirteenthMigration(db);
+    db.run("INSERT INTO _migrations (name) VALUES ('013-fix-superadmin-login')");
+    console.log('[DB] Migration 013-fix-superadmin-login applied successfully');
+  }
 }
 
 function applyEighthMigration(db) {
@@ -122,6 +146,60 @@ function applyNinthMigration(db) {
 
 function applyTenthMigration(db) {
   db.run("INSERT OR IGNORE INTO settings (key, value, description) VALUES ('require_gate_pass_approval', 'false', 'Require admin approval for all gate passes')");
+}
+
+function applyEleventhMigration(db) {
+  const superAdminPerms = JSON.stringify({ 
+    inventory: 'rw', challan: 'rw', reports: 'rw', users: 'rw', settings: 'rw', backup: 'rw', maintenance: 'rw' 
+  });
+  const adminPerms = JSON.stringify({ 
+    inventory: 'rw', challan: 'rw', reports: 'rw', users: 'rw', settings: 'rw', backup: 'rw', maintenance: 'none' 
+  });
+
+  // Insert Super Admin role
+  db.run("INSERT OR IGNORE INTO roles (name, permissions) VALUES ('Super Admin', ?)", [superAdminPerms]);
+  
+  // Update Admin role permissions
+  db.run("UPDATE roles SET permissions = ? WHERE name = 'Admin'", [adminPerms]);
+
+  // Update existing 'admin' user to Super Admin role
+  db.run(`
+    UPDATE users 
+    SET role_id = (SELECT id FROM roles WHERE name = 'Super Admin') 
+    WHERE username = 'admin' OR username = 'Admin'
+  `);
+}
+
+function applyTwelfthMigration(db) {
+  const hash = bcrypt.hashSync('superadmin', 10);
+  db.run(`
+    INSERT OR IGNORE INTO users (username, password_hash, full_name, role_id, is_active) 
+    SELECT 'superadmin', ?, 'Super Administrator', id, 1 FROM roles WHERE name = 'Super Admin'
+  `, [hash]);
+}
+
+function applyThirteenthMigration(db) {
+  const hash = bcrypt.hashSync('superadmin', 10);
+  // Ensure the role exists first (it should from 011)
+  const superAdminPerms = JSON.stringify({ 
+    inventory: 'rw', challan: 'rw', reports: 'rw', users: 'rw', settings: 'rw', backup: 'rw', maintenance: 'rw' 
+  });
+  db.run("INSERT OR IGNORE INTO roles (name, permissions) VALUES ('Super Admin', ?)", [superAdminPerms]);
+
+  // Force update superadmin user
+  db.run(`
+    UPDATE users 
+    SET password_hash = ?, 
+        role_id = (SELECT id FROM roles WHERE name = 'Super Admin'),
+        is_active = 1
+    WHERE username = 'superadmin'
+  `, [hash]);
+
+  // Also ensure it exists if UPDATE failed because it didn't exist
+  db.run(`
+    INSERT OR IGNORE INTO users (username, password_hash, full_name, role_id, is_active) 
+    SELECT 'superadmin', ?, 'Super Administrator', id, 1 FROM roles WHERE name = 'Super Admin'
+  `, [hash]);
 }
 
 function applySeventhMigration(db) {

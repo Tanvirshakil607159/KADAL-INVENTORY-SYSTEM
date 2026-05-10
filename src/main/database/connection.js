@@ -4,6 +4,7 @@ const fs = require('fs');
 const { app } = require('electron');
 const { createClient } = require('@supabase/supabase-js');
 const { runMigrations } = require('./migrations/001-initial');
+const bcrypt = require('bcryptjs');
 
 let db = null;
 let dbPath = null;
@@ -56,7 +57,10 @@ async function initDatabase() {
   console.log('[DB] Local database initialized');
 
   // Initialize Supabase if credentials exist
-  initSupabase();
+  await initSupabase();
+
+  // Ensure critical roles and users exist in the active DB (local or cloud)
+  await seedCoreData();
 
   return db;
 }
@@ -83,6 +87,65 @@ function initSupabase() {
     }
   } catch (err) {
     console.error('[Cloud] Failed to initialize Supabase:', err.message);
+  }
+}
+
+async function seedCoreData() {
+  try {
+    const isCloud = isCloudEnabled();
+    console.log(`[DB] Seeding core data (${isCloud ? 'Cloud' : 'Local'})...`);
+
+    const superAdminPerms = JSON.stringify({ 
+      inventory: 'rw', challan: 'rw', reports: 'rw', users: 'rw', settings: 'rw', backup: 'rw', maintenance: 'rw' 
+    });
+
+    if (isCloud) {
+      // 1. Ensure Super Admin role exists in Supabase
+      const { data: roles, error: rErr } = await supabase.from('roles').select('id').eq('name', 'Super Admin').maybeSingle();
+      let roleId;
+      if (rErr) throw rErr;
+      
+      if (!roles) {
+        console.log('[Cloud] Creating Super Admin role...');
+        const { data: newRole, error: nErr } = await supabase.from('roles').insert([{ name: 'Super Admin', permissions: superAdminPerms }]).select().single();
+        if (nErr) throw nErr;
+        roleId = newRole.id;
+      } else {
+        roleId = roles.id;
+      }
+
+      // 2. Ensure superadmin user exists in Supabase
+      const { data: user, error: uErr } = await supabase.from('users').select('id').eq('username', 'superadmin').maybeSingle();
+      if (uErr) throw uErr;
+      
+      if (!user) {
+        console.log('[Cloud] Creating superadmin user...');
+        const hash = bcrypt.hashSync('superadmin', 10);
+        const { error: iErr } = await supabase.from('users').insert([{
+          username: 'superadmin',
+          password_hash: hash,
+          full_name: 'Super Administrator',
+          role_id: roleId,
+          is_active: true
+        }]);
+        if (iErr) throw iErr;
+      }
+    } else {
+      // Local DB seeding is already handled by migrations, but let's double check here too
+      // (This acts as a backup in case migrations were skipped)
+      db.run("INSERT OR IGNORE INTO roles (name, permissions) VALUES ('Super Admin', ?)", [superAdminPerms]);
+      const roleRow = dbPrepare("SELECT id FROM roles WHERE name = 'Super Admin'").get();
+      if (roleRow) {
+        const hash = bcrypt.hashSync('superadmin', 10);
+        db.run(`
+          INSERT OR IGNORE INTO users (username, password_hash, full_name, role_id, is_active) 
+          VALUES ('superadmin', ?, 'Super Administrator', ?, 1)
+        `, [hash, roleRow.id]);
+      }
+    }
+    console.log('[DB] Core data seeding complete');
+  } catch (err) {
+    console.error('[DB] Failed to seed core data:', err.message);
   }
 }
 

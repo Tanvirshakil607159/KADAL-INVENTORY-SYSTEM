@@ -11,7 +11,7 @@ export default function ApprovalsPage() {
   const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const isAdmin = user?.roleName === 'Admin';
+  const isAdmin = user?.roleName === 'Admin' || user?.roleName === 'Super Admin';
 
   const loadRequests = async () => {
     setLoading(true);
