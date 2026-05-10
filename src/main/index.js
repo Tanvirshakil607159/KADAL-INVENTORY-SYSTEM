@@ -12,7 +12,9 @@ function createWindow() {
       contextIsolation: true, nodeIntegration: false, sandbox: false,
     },
     show: false, backgroundColor: '#0f1117', autoHideMenuBar: true,
+    icon: path.join(__dirname, '../../assets/logo.png'),
   });
+
 
   mainWindow.once('ready-to-show', () => mainWindow.show());
 

@@ -54,8 +54,13 @@ const UpdateService = {
     try {
       await autoUpdater.checkForUpdates();
     } catch (e) {
-      console.error('[Update] Check failed:', e.message);
+      if (e.message.includes('ENOENT') && e.message.includes('app-update.yml')) {
+        console.warn('[Update] Auto-update skipped: app-update.yml not found (this is normal in some development/unpacked builds).');
+      } else {
+        console.error('[Update] Check failed:', e.message);
+      }
     }
+
 
     // Check for updates every 4 hours
     setInterval(() => {
@@ -77,8 +82,17 @@ const UpdateService = {
         });
       }
     } catch (err) {
-      dialog.showErrorBox('Update Error', `Failed to check for updates: ${err.message}`);
+      if (err.message.includes('ENOENT') && err.message.includes('app-update.yml')) {
+        dialog.showMessageBox(mainWindow, {
+          type: 'warning',
+          title: 'Updates Not Configured',
+          message: 'The update configuration file (app-update.yml) is missing. This usually means the application was not built with update support or is being run in a development environment.'
+        });
+      } else {
+        dialog.showErrorBox('Update Error', `Failed to check for updates: ${err.message}`);
+      }
     }
+
   }
 };
 

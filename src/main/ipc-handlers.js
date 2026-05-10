@@ -247,7 +247,7 @@ function registerIpcHandlers() {
   }));
 
   ipcMain.handle('challans:exportPdf', wrapHandler(async (id) => {
-    const challan = ChallansRepo.getById(id);
+    const challan = await ChallansRepo.getById(id);
     if (!challan) throw new Error('Challan not found');
     const settings = SettingsRepo.getAll();
     return PdfGenerator.generateChallanPdf(challan, settings);
@@ -269,8 +269,8 @@ function registerIpcHandlers() {
   ipcMain.handle('gatePass:getNextNumber', wrapHandler(() => {
     return GatePassService.getNextNumber();
   }));
-  ipcMain.handle('gatePass:getUsedChallanIds', wrapHandler(() => {
-    return GatePassRepo.getUsedChallanIds();
+  ipcMain.handle('gatePass:getUsedChallanIds', wrapHandler(async () => {
+    return await GatePassRepo.getUsedChallanIds();
   }));
 
   // ==================== REPORTS ====================

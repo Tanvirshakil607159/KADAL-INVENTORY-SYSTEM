@@ -28,7 +28,25 @@ function getPrinter() {
   return pdfmake;
 }
 
+const logoPath = path.join(__dirname, '../../assets/logo.png');
+let logoBase64Cache = null;
+
+function getLogoBase64() {
+  if (logoBase64Cache) return logoBase64Cache;
+  try {
+    if (fs.existsSync(logoPath)) {
+      const buffer = fs.readFileSync(logoPath);
+      logoBase64Cache = `data:image/png;base64,${buffer.toString('base64')}`;
+      return logoBase64Cache;
+    }
+  } catch (e) {
+    console.error('[PdfGenerator] Failed to load logo for watermark:', e.message);
+  }
+  return null;
+}
+
 const PdfGenerator = {
+
   async generateChallanPdf(challan, settings = {}) {
     const companyName = settings.company_name || 'KA Design Accessories LTD';
     const companyAddress = settings.company_address || '';
@@ -37,7 +55,18 @@ const PdfGenerator = {
     const docDefinition = {
       pageSize: 'A4',
       pageMargins: [40, 40, 40, 60],
+      background: (currentPage, pageSize) => {
+        const logo = getLogoBase64();
+        if (!logo) return null;
+        return {
+          image: logo,
+          width: 400,
+          opacity: 0.05,
+          absolutePosition: { x: (pageSize.width - 400) / 2, y: (pageSize.height - 400) / 2 }
+        };
+      },
       content: [
+
         // Header
         {
           columns: [
@@ -188,7 +217,18 @@ const PdfGenerator = {
     const docDefinition = {
       pageSize: 'A4',
       pageMargins: [40, 40, 40, 60],
+      background: (currentPage, pageSize) => {
+        const logo = getLogoBase64();
+        if (!logo) return null;
+        return {
+          image: logo,
+          width: 400,
+          opacity: 0.05,
+          absolutePosition: { x: (pageSize.width - 400) / 2, y: (pageSize.height - 400) / 2 }
+        };
+      },
       content: [
+
         // Header
         {
           columns: [
@@ -336,7 +376,19 @@ const PdfGenerator = {
       pageSize: 'A4',
       pageOrientation: columns.length > 5 ? 'landscape' : 'portrait',
       pageMargins: [30, 40, 30, 50],
+      background: (currentPage, pageSize) => {
+        const logo = getLogoBase64();
+        if (!logo) return null;
+        const width = columns.length > 5 ? 500 : 400;
+        return {
+          image: logo,
+          width: width,
+          opacity: 0.05,
+          absolutePosition: { x: (pageSize.width - width) / 2, y: (pageSize.height - width) / 2 }
+        };
+      },
       content: [
+
         settings.company_logo ? { image: settings.company_logo, fit: [350, 180], margin: [0, 0, 0, 8] } : { text: companyName, style: 'companyName' },
         { text: title, style: 'reportTitle' },
         { text: `Generated: ${new Date().toLocaleString('en-GB')}`, style: 'dateInfo' },

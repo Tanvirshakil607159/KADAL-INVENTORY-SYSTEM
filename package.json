@@ -59,9 +59,11 @@
     ],
     "asar": true,
     "win": {
+      "icon": "assets/logo.png",
       "target": [
         "nsis"
       ],
+
       "publish": [
         "github"
       ]
