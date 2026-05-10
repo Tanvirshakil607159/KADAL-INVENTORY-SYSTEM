@@ -154,6 +154,11 @@ contextBridge.exposeInMainWorld('kadal', {
   // Auto Update
   update: {
     check: () => ipcRenderer.invoke('system:checkUpdate'),
+    onDownloadProgress: (callback) => {
+      const subscription = (_event, progress) => callback(progress);
+      ipcRenderer.on('update:downloadProgress', subscription);
+      return () => ipcRenderer.removeListener('update:downloadProgress', subscription);
+    }
   },
   system: {
     clearData: () => ipcRenderer.invoke('system:clearData'),

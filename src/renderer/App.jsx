@@ -15,6 +15,7 @@ import LoginPage from './pages/LoginPage';
 import ApprovalsPage from './pages/ApprovalsPage';
 import GatePassPage from './pages/GatePassPage';
 import NotificationManager from './components/common/NotificationManager';
+import UpdateProgress from './components/common/UpdateProgress';
 
 export default function App() {
   const { currentPage, isLoggedIn, setUser } = useStore();
@@ -61,6 +62,7 @@ export default function App() {
       <div className="main-content">
         <TopBar />
         <NotificationManager />
+        <UpdateProgress />
         <div className="page-content">{renderPage()}</div>
       </div>
       <ToastContainer />

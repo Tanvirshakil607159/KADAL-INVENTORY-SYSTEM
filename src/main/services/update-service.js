@@ -30,6 +30,17 @@ const UpdateService = {
       }
     });
 
+    autoUpdater.on('download-progress', (progressObj) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('update:downloadProgress', {
+          percent: progressObj.percent,
+          bytesPerSecond: progressObj.bytesPerSecond,
+          total: progressObj.total,
+          transferred: progressObj.transferred
+        });
+      }
+    });
+
     autoUpdater.on('update-downloaded', async (info) => {
       console.log('[Update] Update downloaded');
       
