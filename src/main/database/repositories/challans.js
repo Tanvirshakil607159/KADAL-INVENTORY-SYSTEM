@@ -437,6 +437,7 @@ const ChallansRepo = {
     if (isCloudEnabled()) {
       const supabase = getSupabase();
       await supabase.from('gate_passes').delete().neq('id', 0);
+      await supabase.from('audit_logs').delete().neq('id', 0);
       await supabase.from('approvals').delete().neq('id', 0);
       await supabase.from('stock_transactions').delete().neq('id', 0);
       await supabase.from('challan_items').delete().neq('id', 0);
