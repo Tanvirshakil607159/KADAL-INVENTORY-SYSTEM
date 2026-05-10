@@ -7,6 +7,8 @@ export default function LoginPage() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [isRegister, setIsRegister] = useState(false);
+  const [regForm, setRegForm] = useState({ username: '', fullName: '', password: '', confirm: '' });
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -27,6 +29,33 @@ export default function LoginPage() {
     } catch (err) {
       addToast('error', 'An error occurred during login');
       console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRegister = async (e) => {
+    e.preventDefault();
+    if (!regForm.username || !regForm.fullName || !regForm.password) {
+      addToast('error', 'All fields are required');
+      return;
+    }
+    if (regForm.password !== regForm.confirm) {
+      addToast('error', 'Passwords do not match');
+      return;
+    }
+    
+    setLoading(true);
+    try {
+      const res = await window.kadal.auth.register(regForm.username, regForm.password, regForm.fullName);
+      if (res.success) {
+        addToast('success', 'Registration successful! Please wait for Admin approval.');
+        setIsRegister(false);
+      } else {
+        addToast('error', res.error);
+      }
+    } catch (err) {
+      addToast('error', 'Failed to register');
     } finally {
       setLoading(false);
     }
@@ -53,37 +82,99 @@ export default function LoginPage() {
           </div>
 
           <div className="login-welcome">
-            <h2>Welcome Back</h2>
-            <p>Please enter your credentials to access your dashboard</p>
+            <h2>{isRegister ? 'Create Account' : 'Welcome Back'}</h2>
+            <p>{isRegister ? 'Enter your details to register a new account' : 'Please enter your credentials to access your dashboard'}</p>
           </div>
 
-          <form className="login-form-modern" onSubmit={handleLogin}>
-            <div className="input-group-modern">
-              <label>Username</label>
-              <div className="input-wrapper-modern">
-                <User size={18} className="input-icon" />
-                <input 
-                  type="text" 
-                  placeholder="admin"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  autoFocus
-                />
-              </div>
-            </div>
+          <form className="login-form-modern" onSubmit={isRegister ? handleRegister : handleLogin}>
+            {isRegister ? (
+              <>
+                <div className="input-group-modern">
+                  <label>Full Name</label>
+                  <div className="input-wrapper-modern">
+                    <ShieldCheck size={18} className="input-icon" />
+                    <input 
+                      type="text" 
+                      placeholder="John Doe"
+                      value={regForm.fullName}
+                      onChange={(e) => setRegForm({...regForm, fullName: e.target.value})}
+                      required
+                    />
+                  </div>
+                </div>
 
-            <div className="input-group-modern">
-              <label>Password</label>
-              <div className="input-wrapper-modern">
-                <Lock size={18} className="input-icon" />
-                <input 
-                  type="password" 
-                  placeholder="••••••••"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-              </div>
-            </div>
+                <div className="input-group-modern">
+                  <label>Username</label>
+                  <div className="input-wrapper-modern">
+                    <User size={18} className="input-icon" />
+                    <input 
+                      type="text" 
+                      placeholder="johndoe"
+                      value={regForm.username}
+                      onChange={(e) => setRegForm({...regForm, username: e.target.value})}
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="input-group-modern">
+                  <label>Password</label>
+                  <div className="input-wrapper-modern">
+                    <Lock size={18} className="input-icon" />
+                    <input 
+                      type="password" 
+                      placeholder="••••••••"
+                      value={regForm.password}
+                      onChange={(e) => setRegForm({...regForm, password: e.target.value})}
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="input-group-modern">
+                  <label>Confirm Password</label>
+                  <div className="input-wrapper-modern">
+                    <Lock size={18} className="input-icon" />
+                    <input 
+                      type="password" 
+                      placeholder="••••••••"
+                      value={regForm.confirm}
+                      onChange={(e) => setRegForm({...regForm, confirm: e.target.value})}
+                      required
+                    />
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="input-group-modern">
+                  <label>Username</label>
+                  <div className="input-wrapper-modern">
+                    <User size={18} className="input-icon" />
+                    <input 
+                      type="text" 
+                      placeholder="admin"
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value)}
+                      autoFocus
+                    />
+                  </div>
+                </div>
+
+                <div className="input-group-modern">
+                  <label>Password</label>
+                  <div className="input-wrapper-modern">
+                    <Lock size={18} className="input-icon" />
+                    <input 
+                      type="password" 
+                      placeholder="••••••••"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                    />
+                  </div>
+                </div>
+              </>
+            )}
 
             <button 
               type="submit" 
@@ -94,12 +185,18 @@ export default function LoginPage() {
                 <div className="spinner-small"></div>
               ) : (
                 <>
-                  <span>Sign In</span>
+                  <span>{isRegister ? 'Register' : 'Sign In'}</span>
                   <LogIn size={20} />
                 </>
               )}
             </button>
           </form>
+
+          <div className="login-switch-mode">
+            <button className="btn-link" onClick={() => setIsRegister(!isRegister)}>
+              {isRegister ? 'Already have an account? Sign In' : "Don't have an account? Create one"}
+            </button>
+          </div>
 
           <div className="login-footer-modern">
             <div className="footer-line"></div>

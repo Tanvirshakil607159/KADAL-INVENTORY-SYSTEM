@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('kadal', {
     logout: () => ipcRenderer.invoke('auth:logout'),
     changePassword: (userId, oldPw, newPw) => ipcRenderer.invoke('auth:changePassword', userId, oldPw, newPw),
     getCurrentUser: () => ipcRenderer.invoke('auth:getCurrentUser'),
+    register: (username, password, fullName) => ipcRenderer.invoke('auth:register', username, password, fullName),
   },
 
   // Users

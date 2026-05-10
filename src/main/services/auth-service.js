@@ -24,6 +24,28 @@ const AuthService = {
     };
     return { success: true, user: currentUser };
   },
+  
+  async register(username, password, fullName) {
+    if (!username || !password || !fullName) return { success: false, error: 'All fields are required' };
+    if (password.length < 4) return { success: false, error: 'Password must be at least 4 characters' };
+    
+    const existing = await UsersRepo.getByUsername(username, false);
+    if (existing) return { success: false, error: 'Username already taken' };
+
+    const hash = bcrypt.hashSync(password, 10);
+    // Role 2 is typically "Operator" or similar. Default to inactive (0).
+    const userId = await UsersRepo.create({ 
+      username, 
+      passwordHash: hash, 
+      fullName, 
+      roleId: 2, 
+      isActive: 0 
+    });
+    
+    await AuditLogsRepo.create({ userId, action: 'REGISTER', entityType: 'user', entityId: userId });
+    
+    return { success: true };
+  },
 
   logout() {
     if (currentUser) AuditLogsRepo.create({ userId: currentUser.id, action: 'LOGOUT', entityType: 'user', entityId: currentUser.id });

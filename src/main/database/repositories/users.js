@@ -32,14 +32,16 @@ const UsersRepo = {
     return user;
   },
 
-  async getByUsername(username) {
+  async getByUsername(username, activeOnly = true) {
     if (isCloudEnabled()) {
-      const { data: user, error } = await getSupabase()
+      let query = getSupabase()
         .from('users')
         .select(`*, roles (name, permissions)`)
-        .eq('username', username)
-        .eq('is_active', true)
-        .maybeSingle();
+        .eq('username', username);
+      
+      if (activeOnly) query = query.eq('is_active', true);
+      
+      const { data: user, error } = await query.maybeSingle();
       if (error) throw error;
       if (user) {
         user.role_name = user.roles?.name;
@@ -47,20 +49,21 @@ const UsersRepo = {
       }
       return user;
     }
-    const user = dbPrepare(`SELECT u.*, r.name as role_name, r.permissions FROM users u JOIN roles r ON u.role_id = r.id WHERE u.username = ? AND u.is_active = 1`).get(username);
+    const filter = activeOnly ? 'AND u.is_active = 1' : '';
+    const user = dbPrepare(`SELECT u.*, r.name as role_name, r.permissions FROM users u LEFT JOIN roles r ON u.role_id = r.id WHERE u.username = ? ${filter}`).get(username);
     if (user && user.custom_permissions) user.permissions = user.custom_permissions;
     return user;
   },
 
-  async create({ username, passwordHash, fullName, roleId, customPermissions }) {
+  async create({ username, passwordHash, fullName, roleId, customPermissions, isActive = 1 }) {
     if (isCloudEnabled()) {
       const { data, error } = await getSupabase().from('users').insert([{
-        username, password_hash: passwordHash, full_name: fullName, role_id: roleId, custom_permissions: customPermissions || null
+        username, password_hash: passwordHash, full_name: fullName, role_id: roleId, custom_permissions: customPermissions || null, is_active: isActive
       }]).select().single();
       if (error) throw error;
       return data.id;
     }
-    return dbPrepare(`INSERT INTO users (username, password_hash, full_name, role_id, custom_permissions) VALUES (?, ?, ?, ?, ?)`).run(username, passwordHash, fullName, roleId, customPermissions || null).lastInsertRowid;
+    return dbPrepare(`INSERT INTO users (username, password_hash, full_name, role_id, custom_permissions, is_active) VALUES (?, ?, ?, ?, ?, ?)`).run(username, passwordHash, fullName, roleId, customPermissions || null, isActive).lastInsertRowid;
   },
 
   async update(id, { fullName, roleId, customPermissions }) {

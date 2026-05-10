@@ -53,6 +53,10 @@ function registerIpcHandlers() {
     return AuthService.getCurrentUser();
   }));
 
+  ipcMain.handle('auth:register', wrapHandler((username, password, fullName) => {
+    return AuthService.register(username, password, fullName);
+  }));
+
   // ==================== USERS ====================
   ipcMain.handle('users:getAll', wrapHandler(() => {
     return UsersRepo.getAll();
