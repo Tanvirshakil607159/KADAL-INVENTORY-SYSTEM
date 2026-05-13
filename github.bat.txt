@@ -1,0 +1,1 @@
+$token = gh auth token; $env:GH_TOKEN = $token; cmd /c npm run release

@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('kadal', {
     changePassword: (userId, oldPw, newPw) => ipcRenderer.invoke('auth:changePassword', userId, oldPw, newPw),
     getCurrentUser: () => ipcRenderer.invoke('auth:getCurrentUser'),
     register: (username, password, fullName) => ipcRenderer.invoke('auth:register', username, password, fullName),
+    syncSession: (user) => ipcRenderer.invoke('auth:syncSession', user),
   },
 
   // Users
@@ -83,7 +84,11 @@ contextBridge.exposeInMainWorld('kadal', {
     getNextNumber: () => ipcRenderer.invoke('challans:getNextNumber'),
     getFieldSuggestions: (field, query) => ipcRenderer.invoke('challans:getFieldSuggestions', field, query),
     exportPdf: (id) => ipcRenderer.invoke('challans:exportPdf', id),
+    exportExcel: (id) => ipcRenderer.invoke('challans:exportExcel', id),
     getTotalDelivered: (itemId) => ipcRenderer.invoke('challans:getTotalDelivered', itemId),
+    delete: (id) => ipcRenderer.invoke('challans:delete', id),
+    clearHistory: () => ipcRenderer.invoke('challans:clearHistory'),
+    deleteSuggestion: (field, value) => ipcRenderer.invoke('challans:deleteSuggestion', field, value),
   },
 
   // Reports
@@ -98,21 +103,56 @@ contextBridge.exposeInMainWorld('kadal', {
     monthlySummary: (year, month) => ipcRenderer.invoke('reports:monthlySummary', year, month),
     exportExcel: (type, data, options) => ipcRenderer.invoke('reports:exportExcel', type, data, options),
     exportPdf: (type, data, options) => ipcRenderer.invoke('reports:exportPdf', type, data, options),
+    issueReport: (filters) => ipcRenderer.invoke('reports:issueReport', filters),
+    returnReport: (filters) => ipcRenderer.invoke('reports:returnReport', filters),
+    factoryProductionReport: (filters) => ipcRenderer.invoke('reports:factoryProductionReport', filters),
+    employeeOutstandingReport: (filters) => ipcRenderer.invoke('reports:employeeOutstandingReport', filters),
+    issueReturnSummary: (filters) => ipcRenderer.invoke('reports:issueReturnSummary', filters),
   },
   approvals: {
     getAll: (status) => ipcRenderer.invoke('approvals:getAll', status),
     getById: (id) => ipcRenderer.invoke('approvals:getById', id),
     approve: (id, notes) => ipcRenderer.invoke('approvals:approve', id, notes),
     reject: (id, notes) => ipcRenderer.invoke('approvals:reject', id, notes),
+    updateData: (id, data) => ipcRenderer.invoke('approvals:updateData', id, data),
   },
 
   gatePass: {
     getAll: (filters) => ipcRenderer.invoke('gatePass:getAll', filters),
     getById: (id) => ipcRenderer.invoke('gatePass:getById', id),
     create: (data) => ipcRenderer.invoke('gatePass:create', data),
+    delete: (id) => ipcRenderer.invoke('gatePass:delete', id),
     exportPdf: (id) => ipcRenderer.invoke('gatePass:exportPdf', id),
     getNextNumber: () => ipcRenderer.invoke('gatePass:getNextNumber'),
     getUsedChallanIds: () => ipcRenderer.invoke('gatePass:getUsedChallanIds'),
+    clearHistory: () => ipcRenderer.invoke('gatePass:clearHistory'),
+  },
+
+  // Issues
+  issues: {
+    getAll: (filters) => ipcRenderer.invoke('issues:getAll', filters),
+    getById: (id) => ipcRenderer.invoke('issues:getById', id),
+    create: (data) => ipcRenderer.invoke('issues:create', data),
+    getNextId: () => ipcRenderer.invoke('issues:getNextId'),
+    getOutstandingItems: (issueId) => ipcRenderer.invoke('issues:getOutstandingItems', issueId),
+    delete: (id) => ipcRenderer.invoke('issues:delete', id),
+    exportPdf: (id) => ipcRenderer.invoke('issues:exportPdf', id),
+    exportExcel: (id) => ipcRenderer.invoke('issues:exportExcel', id),
+  },
+
+  // Returns
+  returns: {
+    getAll: (filters) => ipcRenderer.invoke('returns:getAll', filters),
+    getById: (id) => ipcRenderer.invoke('returns:getById', id),
+    create: (data) => ipcRenderer.invoke('returns:create', data),
+  },
+
+  // Recipients
+  recipients: {
+    getAll: (filters) => ipcRenderer.invoke('recipients:getAll', filters),
+    create: (data) => ipcRenderer.invoke('recipients:create', data),
+    update: (id, data) => ipcRenderer.invoke('recipients:update', id, data),
+    delete: (id) => ipcRenderer.invoke('recipients:delete', id),
   },
 
   // Backup
@@ -163,6 +203,7 @@ contextBridge.exposeInMainWorld('kadal', {
   },
   system: {
     clearData: () => ipcRenderer.invoke('system:clearData'),
-  }
+  },
+
 });
 

@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import useStore from '../store/useStore';
-import { Search, FileText, XCircle, Eye, Download, FileSpreadsheet } from 'lucide-react';
+import { Search, FileText, XCircle, Eye, Download, FileSpreadsheet, Trash2, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 
 export default function ChallanHistoryPage() {
-  const { addToast, showConfirm } = useStore();
+  const { addToast, showConfirm, user } = useStore();
   const [challans, setChallans] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -11,6 +11,47 @@ export default function ChallanHistoryPage() {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [detail, setDetail] = useState(null);
+  const [sortConfig, setSortConfig] = useState({ key: 'challan_number', direction: 'desc' });
+
+  const handleSort = (key) => {
+    setSortConfig(prev => ({
+      key,
+      direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc'
+    }));
+  };
+
+  const sortedChallans = [...challans].sort((a, b) => {
+    if (!sortConfig.key) return 0;
+    let valA = a[sortConfig.key];
+    let valB = b[sortConfig.key];
+    
+    if (['total_quantity', 'id'].includes(sortConfig.key)) {
+      valA = Number(valA) || 0;
+      valB = Number(valB) || 0;
+    } else {
+      valA = (valA || '').toString().toLowerCase();
+      valB = (valB || '').toString().toLowerCase();
+    }
+
+    if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
+    if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
+    return 0;
+  });
+
+  const SortHeader = ({ label, field, className = "" }) => (
+    <th 
+      className={`sortable ${className}`} 
+      onClick={() => handleSort(field)}
+    >
+      <div className="flex items-center justify-between">
+        {label}
+        <span className={`sort-icon-container ${sortConfig.key === field ? 'active' : ''}`}>
+          {sortConfig.key !== field ? <ArrowUpDown size={12} /> : 
+           sortConfig.direction === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />}
+        </span>
+      </div>
+    </th>
+  );
 
   const loadData = async () => {
     setLoading(true);
@@ -33,6 +74,23 @@ export default function ChallanHistoryPage() {
     if (!confirmed) return;
     const res = await window.kadal.challans.cancel(challan.id, reason);
     if (res.success) { addToast('success', 'Challan cancelled and stock reversed'); loadData(); setDetail(null); }
+    else addToast('error', res.error);
+  };
+
+  const handleDelete = async (challan) => {
+    const confirmed = await showConfirm({ 
+      title: 'Delete Challan', 
+      message: `Permanently DELETE challan ${challan.challan_number}? This action cannot be undone and will NOT reverse stock. Use only for data cleanup.`, 
+      type: 'danger', 
+      confirmText: 'Yes, Delete Permanently' 
+    });
+    if (!confirmed) return;
+    const res = await window.kadal.challans.delete(challan.id);
+    if (res.success) { 
+      addToast('success', 'Challan deleted successfully'); 
+      loadData(); 
+      setDetail(null); 
+    }
     else addToast('error', res.error);
   };
 
@@ -89,6 +147,11 @@ export default function ChallanHistoryPage() {
             <div style={{ display: 'flex', gap: 8 }}>
               <button className="btn btn-primary btn-sm" onClick={() => exportPdf(detail.id)}><Download size={14} /> Export PDF</button>
               {detail.status === 'ACTIVE' && <button className="btn btn-danger btn-sm" onClick={() => handleCancel(detail)}><XCircle size={14} /> Cancel</button>}
+              {(user?.roleName === 'Super Admin' || user?.role_name === 'Super Admin') && (
+                <button className="btn btn-ghost btn-sm" style={{ color: 'var(--danger)' }} onClick={() => handleDelete(detail)}>
+                  <Trash2 size={14} /> Delete
+                </button>
+              )}
             </div>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 20 }}>
@@ -101,7 +164,7 @@ export default function ChallanHistoryPage() {
             <div>
               <p className="text-muted" style={{ fontSize: 12 }}>Details</p>
               <p>Date: <strong>{new Date(detail.challan_date).toLocaleDateString('en-GB')}</strong></p>
-              <p>Status: <span className={`badge badge-${detail.status === 'ACTIVE' ? 'success' : 'danger'}`}>{detail.status}</span></p>
+              <p>Status: <span className={`badge badge-${detail.status === 'ACTIVE' ? 'success' : 'danger'}`}>{detail.status === 'ACTIVE' ? 'Active' : 'Inactive'}</span></p>
               <p>Created by: {detail.created_by_name}</p>
             </div>
           </div>
@@ -170,7 +233,7 @@ export default function ChallanHistoryPage() {
           <select className="form-select" value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{ width: 'auto', minWidth: 120, padding: '8px 32px 8px 12px', fontSize: 13 }}>
             <option value="">All Status</option>
             <option value="ACTIVE">Active</option>
-            <option value="CANCELLED">Cancelled</option>
+            <option value="CANCELLED">Inactive</option>
           </select>
           <div className="filter-group" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
             <button className="btn btn-outline btn-sm" onClick={setFilterToday}>Today</button>
@@ -195,21 +258,37 @@ export default function ChallanHistoryPage() {
       ) : (
         <div className="table-wrapper">
           <table className="data-table">
-            <thead><tr><th>Challan No</th><th>Date</th><th>Receiver</th><th>Items</th><th style={{textAlign:'right'}}>Qty</th><th>Status</th><th>Created By</th><th>Actions</th></tr></thead>
+            <thead>
+              <tr>
+                <SortHeader label="Challan No" field="challan_number" />
+                <SortHeader label="Date" field="challan_date" />
+                <SortHeader label="Receiver" field="receiver_name" />
+                <SortHeader label="Items" field="item_names" />
+                <SortHeader label="Qty" field="total_quantity" className="text-right" />
+                <SortHeader label="Status" field="status" />
+                <SortHeader label="Created By" field="created_by_name" />
+                <th>Actions</th>
+              </tr>
+            </thead>
             <tbody>
-              {challans.map(c => (
+              {sortedChallans.map(c => (
                 <tr key={c.id}>
                   <td className="text-mono" style={{ fontSize: 12, color: 'var(--accent)' }}>{c.challan_number}</td>
                   <td>{new Date(c.challan_date).toLocaleDateString('en-GB')}</td>
                   <td style={{ fontWeight: 600 }}>{c.receiver_name}</td>
                   <td className="text-muted" style={{ maxWidth: 200, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={c.item_names}>{c.item_names || '-'}</td>
                   <td className="text-right text-mono fw-bold">{c.total_quantity}</td>
-                  <td><span className={`badge badge-${c.status === 'ACTIVE' ? 'success' : 'danger'}`}>{c.status}</span></td>
+                  <td><span className={`badge badge-${c.status === 'ACTIVE' ? 'success' : 'danger'}`}>{c.status === 'ACTIVE' ? 'Active' : 'Inactive'}</span></td>
                   <td className="text-muted">{c.created_by_name}</td>
                   <td>
                     <div className="table-actions">
                       <button className="btn btn-ghost btn-icon btn-sm" title="View" onClick={() => viewDetail(c.id)}><Eye size={15} /></button>
                       <button className="btn btn-ghost btn-icon btn-sm" title="PDF" onClick={() => exportPdf(c.id)}><Download size={15} color="var(--accent)" /></button>
+                      {(user?.roleName === 'Super Admin' || user?.role_name === 'Super Admin') && (
+                        <button className="btn btn-ghost btn-icon btn-sm" title="Delete Permanently" onClick={() => handleDelete(c)}>
+                          <Trash2 size={15} color="var(--danger)" />
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>

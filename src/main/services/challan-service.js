@@ -123,5 +123,33 @@ const ChallanService = {
     await AuditLogsRepo.create({ userId: user?.id, action: 'CANCEL', entityType: 'challan', entityId: id, oldValue: { status: 'ACTIVE' }, newValue: { status: 'CANCELLED', reason } });
     return { success: true };
   },
+
+  async delete(id) {
+    const challan = await ChallansRepo.getById(id);
+    if (!challan) throw new Error('Challan not found');
+
+    const user = await AuthService.getCurrentUser();
+
+    // Reverse stock only if it was ACTIVE
+    if (challan.status === 'ACTIVE') {
+      for (const item of challan.items) {
+        const dbItem = await ItemsRepo.getById(item.item_id);
+        if (dbItem) {
+          const stockBefore = dbItem.current_stock;
+          const stockAfter = stockBefore + item.quantity;
+          await ItemsRepo.updateStock(item.item_id, stockAfter);
+          await StockTransactionsRepo.create({
+            itemId: item.item_id, type: 'IN', quantity: item.quantity, stockBefore, stockAfter,
+            reference: `Challan Deleted: ${challan.challan_number}`,
+            notes: `Stock reversed due to permanent deletion.`, createdBy: user?.id,
+          });
+        }
+      }
+    }
+
+    await ChallansRepo.delete(id);
+    await AuditLogsRepo.create({ userId: user?.id, action: 'DELETE', entityType: 'challan', entityId: id, oldValue: { challanNumber: challan.challan_number } });
+    return { success: true };
+  },
 };
 module.exports = ChallanService;

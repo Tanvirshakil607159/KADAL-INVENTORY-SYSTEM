@@ -55,6 +55,11 @@ const AuthService = {
 
   getCurrentUser() { return currentUser; },
 
+  syncSession(user) {
+    currentUser = user;
+    return { success: true };
+  },
+
   async changePassword(userId, oldPassword, newPassword) {
     const fullUser = await UsersRepo.getById(userId);
     if (!fullUser) return { success: false, error: 'User not found' };

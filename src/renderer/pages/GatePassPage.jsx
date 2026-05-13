@@ -3,8 +3,9 @@ import useStore from '../store/useStore';
 import { Search, Plus, Trash2, Printer, FileText, Package, Box, Truck } from 'lucide-react';
 
 export default function GatePassPage() {
-  const { addToast } = useStore();
-  const [activeTab, setActiveTab] = useState('create'); // 'create' or 'history'
+  const { addToast, user, showConfirm } = useStore();
+  const canEdit = user?.permissions?.challan === 'rw';
+  const [activeTab, setActiveTab] = useState(canEdit ? 'create' : 'history'); // 'create' or 'history'
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(false);
   
@@ -17,6 +18,10 @@ export default function GatePassPage() {
   const [plasticBags, setPlasticBags] = useState(0);
   const [creating, setCreating] = useState(false);
   const [usedChallanIds, setUsedChallanIds] = useState(new Set());
+
+  useEffect(() => {
+    if (!canEdit) setActiveTab('history');
+  }, [canEdit]);
 
   const loadUsedChallanIds = async () => {
     try {
@@ -109,7 +114,7 @@ export default function GatePassPage() {
   return (
     <div className="page-container">
       <div className="tabs">
-        <button className={`tab ${activeTab === 'create' ? 'active' : ''}`} onClick={() => setActiveTab('create')}>Create Gate Pass</button>
+        {canEdit && <button className={`tab ${activeTab === 'create' ? 'active' : ''}`} onClick={() => setActiveTab('create')}>Create Gate Pass</button>}
         <button className={`tab ${activeTab === 'history' ? 'active' : ''}`} onClick={() => setActiveTab('history')}>GP History</button>
       </div>
 
@@ -251,6 +256,25 @@ export default function GatePassPage() {
                           <button className="btn btn-ghost btn-icon btn-sm" title="Print PDF" onClick={() => exportPdf(gp.id)}>
                             <Printer size={16} />
                           </button>
+                          {(user?.roleName === 'Super Admin') && (
+                            <button className="btn btn-ghost btn-icon btn-sm" title="Delete Permanently" onClick={async () => {
+                              const confirmed = await showConfirm({
+                                title: 'Delete Gate Pass',
+                                message: `Permanently DELETE gate pass ${gp.gate_pass_number}? This will unblock its challans.`,
+                                type: 'danger',
+                                confirmText: 'Delete'
+                              });
+                              if (!confirmed) return;
+                              const res = await window.kadal.gatePass.delete(gp.id);
+                              if (res.success) {
+                                addToast('success', 'Gate Pass deleted');
+                                loadHistory();
+                                loadUsedChallanIds();
+                              } else addToast('error', res.error);
+                            }} style={{marginLeft: 4}}>
+                              <Trash2 size={16} color="var(--danger)" />
+                            </button>
+                          )}
                         </td>
                       </tr>
                     );

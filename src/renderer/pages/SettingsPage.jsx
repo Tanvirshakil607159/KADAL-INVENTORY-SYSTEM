@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import useStore from '../store/useStore';
-import { Save, Plus, Trash2, Edit2, Users, Tag, Truck, Building, Upload, FileSpreadsheet, Link, CheckCircle, AlertCircle, Download, Cloud, RefreshCw, ArrowUpCircle, ArrowDownCircle, FolderOpen } from 'lucide-react';
+import { Save, Plus, Trash2, Edit2, Users, Tag, Truck, Building, Upload, FileSpreadsheet, Link, CheckCircle, AlertCircle, Download, Cloud, RefreshCw, ArrowUpCircle, ArrowDownCircle, FolderOpen, XCircle } from 'lucide-react';
 
 const TABS = [
   { id: 'company', label: 'Company', icon: Building },
@@ -11,6 +11,7 @@ const TABS = [
   { id: 'buyers', label: 'Buyers', icon: Tag },
   { id: 'import', label: 'Import Store Data', icon: Upload },
   { id: 'sync', label: 'Cloud Sync', icon: Cloud },
+  { id: 'recipients', label: 'Recipients', icon: Users },
   { id: 'system', label: 'System Update', icon: RefreshCw },
 ];
 
@@ -27,19 +28,22 @@ export default function SettingsPage() {
       {activeTab === 'buyers' && <BuyerSettings />}
       {activeTab === 'import' && <ImportData />}
       {activeTab === 'sync' && <CloudSync />}
+      {activeTab === 'recipients' && <RecipientSettings />}
       {activeTab === 'system' && <SystemSettings />}
     </div>
   );
 }
 
 function CompanySettings() {
-  const { addToast } = useStore();
+  const { addToast, user } = useStore();
   const [settings, setSettings] = useState({});
   const [saving, setSaving] = useState(false);
+  const canEdit = user?.permissions?.settings === 'rw';
 
   useEffect(() => { window.kadal.settings.getAll().then(r => { if(r.success) setSettings(r.data); }); }, []);
 
   const handleSave = async () => {
+    if (!canEdit) return;
     setSaving(true);
     const res = await window.kadal.settings.setBulk(settings);
     if (res?.success) addToast('success', 'Settings saved');
@@ -50,6 +54,7 @@ function CompanySettings() {
   const set = (k, v) => setSettings(s => ({...s, [k]: v}));
 
   const handleLogoUpload = (e) => {
+    if (!canEdit) return;
     const file = e.target.files[0];
     if (!file) return;
     if (file.size > 2 * 1024 * 1024) {
@@ -66,7 +71,7 @@ function CompanySettings() {
   return (
     <div className="card" style={{maxWidth:600}}>
       <div className="form-row">
-        <div className="form-group" style={{ flex: 1 }}><label className="form-label">Company Name</label><input className="form-input" value={settings.company_name||''} onChange={e=>set('company_name',e.target.value)} /></div>
+        <div className="form-group" style={{ flex: 1 }}><label className="form-label">Company Name</label><input className="form-input" value={settings.company_name||''} onChange={e=>set('company_name',e.target.value)} disabled={!canEdit} /></div>
       </div>
       <div className="form-group">
         <label className="form-label">Company Logo</label>
@@ -74,51 +79,47 @@ function CompanySettings() {
           {settings.company_logo && (
             <div style={{ position: 'relative' }}>
               <img src={settings.company_logo} alt="Logo" style={{ height: 60, width: 'auto', objectFit: 'contain', background: '#fff', padding: 4, borderRadius: 'var(--radius)', border: '1px solid var(--border)' }} />
-              <button className="btn btn-ghost btn-icon btn-sm" style={{ position: 'absolute', top: -8, right: -8, background: 'var(--danger)', color: 'white' }} onClick={() => set('company_logo', '')} title="Remove Logo">✕</button>
+              {canEdit && <button className="btn btn-ghost btn-icon btn-sm" style={{ position: 'absolute', top: -8, right: -8, background: 'var(--danger)', color: 'white' }} onClick={() => set('company_logo', '')} title="Remove Logo">✕</button>}
             </div>
           )}
-          <input type="file" accept="image/png, image/jpeg, image/jpg" onChange={handleLogoUpload} className="form-input" style={{ flex: 1 }} />
+          <input type="file" accept="image/png, image/jpeg, image/jpg" onChange={handleLogoUpload} className="form-input" style={{ flex: 1 }} disabled={!canEdit} />
         </div>
         <div className="text-muted" style={{ fontSize: 11, marginTop: 4 }}>Recommended: PNG/JPG with transparent background, max 2MB. This will be used in the Delivery Challan PDF instead of the text name.</div>
       </div>
-      <div className="form-group"><label className="form-label">Address</label><textarea className="form-textarea" rows={2} value={settings.company_address||''} onChange={e=>set('company_address',e.target.value)} /></div>
+      <div className="form-group"><label className="form-label">Address</label><textarea className="form-textarea" rows={2} value={settings.company_address||''} onChange={e=>set('company_address',e.target.value)} disabled={!canEdit} /></div>
       <div className="form-row">
-        <div className="form-group"><label className="form-label">Phone</label><input className="form-input" value={settings.company_phone||''} onChange={e=>set('company_phone',e.target.value)} /></div>
-        <div className="form-group"><label className="form-label">Email</label><input className="form-input" value={settings.company_email||''} onChange={e=>set('company_email',e.target.value)} /></div>
+        <div className="form-group"><label className="form-label">Phone</label><input className="form-input" value={settings.company_phone||''} onChange={e=>set('company_phone',e.target.value)} disabled={!canEdit} /></div>
+        <div className="form-group"><label className="form-label">Email</label><input className="form-input" value={settings.company_email||''} onChange={e=>set('company_email',e.target.value)} disabled={!canEdit} /></div>
       </div>
       <div className="form-row">
-        <div className="form-group"><label className="form-label">Challan Prefix</label><input className="form-input" value={settings.challan_prefix||''} onChange={e=>set('challan_prefix',e.target.value)} /></div>
-        <div className="form-group"><label className="form-label">Low Stock Threshold</label><input className="form-input" type="number" value={settings.low_stock_threshold||''} onChange={e=>set('low_stock_threshold',e.target.value)} /></div>
+        <div className="form-group"><label className="form-label">Challan Prefix</label><input className="form-input" value={settings.challan_prefix||''} onChange={e=>set('challan_prefix',e.target.value)} disabled={!canEdit} /></div>
+        <div className="form-group"><label className="form-label">Low Stock Threshold</label><input className="form-input" type="number" value={settings.low_stock_threshold||''} onChange={e=>set('low_stock_threshold',e.target.value)} disabled={!canEdit} /></div>
       </div>
       <div style={{ borderTop: '1px solid var(--border)', paddingTop: 16, marginTop: 8 }}>
         <h4 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Approval Module Settings</h4>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontSize: 13 }}>
-            <input type="checkbox" checked={settings.require_challan_approval === 'true'} onChange={e => set('require_challan_approval', e.target.checked ? 'true' : 'false')} />
+            <input type="checkbox" checked={settings.require_challan_approval === 'true'} onChange={e => set('require_challan_approval', e.target.checked ? 'true' : 'false')} disabled={!canEdit} />
             Require Admin Approval for all Challans (Non-Admins)
           </label>
           <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontSize: 13 }}>
-            <input type="checkbox" checked={settings.require_inventory_approval === 'true'} onChange={e => set('require_inventory_approval', e.target.checked ? 'true' : 'false')} />
+            <input type="checkbox" checked={settings.require_inventory_approval === 'true'} onChange={e => set('require_inventory_approval', e.target.checked ? 'true' : 'false')} disabled={!canEdit} />
             Require Admin Approval for Stock Movements (Non-Admins)
           </label>
           <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontSize: 13 }}>
-            <input type="checkbox" checked={settings.require_gate_pass_approval === 'true'} onChange={e => set('require_gate_pass_approval', e.target.checked ? 'true' : 'false')} />
+            <input type="checkbox" checked={settings.require_gate_pass_approval === 'true'} onChange={e => set('require_gate_pass_approval', e.target.checked ? 'true' : 'false')} disabled={!canEdit} />
             Require Admin Approval for all Gate Passes (Non-Admins)
           </label>
         </div>
       </div>
-      <button className="btn btn-primary mt-4" onClick={handleSave} disabled={saving}><Save size={16} /> {saving?'Saving...':'Save Settings'}</button>
+      {canEdit && <button className="btn btn-primary mt-4" onClick={handleSave} disabled={saving}><Save size={16} /> {saving?'Saving...':'Save Settings'}</button>}
     </div>
   );
 }
 
 function UserSettings() {
-  const { addToast, showConfirm, user } = useStore();
+  const { addToast, showConfirm, user, roles, setRoles, openModal } = useStore();
   const [users, setUsers] = useState([]);
-  const [roles, setRoles] = useState([]);
-  const [showForm, setShowForm] = useState(false);
-  const [editingUser, setEditingUser] = useState(null);
-  const [form, setForm] = useState({ username:'', fullName:'', password:'', roleId: 2, perms: { inventory: false, challan: false, reports: false, settings: false, maintenance: false } });
 
   const load = async () => {
     const resUsers = await window.kadal.users.getAll();
@@ -128,50 +129,11 @@ function UserSettings() {
   };
   useEffect(() => { load(); }, []);
 
-  const handleSaveUser = async () => {
-    if (!editingUser && (!form.username || !form.fullName || !form.password)) { addToast('error','All fields required'); return; }
-    if (editingUser && !form.fullName) { addToast('error','Full Name is required'); return; }
-    
-    const customPermissions = JSON.stringify({
-      inventory: form.perms.inventory ? 'rw' : 'none',
-      challan: form.perms.challan ? 'rw' : 'none',
-      reports: form.perms.reports ? 'r' : 'none',
-      users: form.perms.settings ? 'rw' : 'none',
-      settings: form.perms.settings ? 'rw' : 'none',
-      backup: form.perms.settings ? 'rw' : 'none',
-      maintenance: form.perms.maintenance ? 'rw' : 'none',
-    });
-
-    let res;
-    if (editingUser) {
-      res = await window.kadal.users.update(editingUser.id, { 
-        fullName: form.fullName, 
-        roleId: form.roleId, 
-        customPermissions,
-        password: form.password || undefined // Only update if provided
-      });
-    } else {
-      res = await window.kadal.users.create({ ...form, customPermissions });
-    }
-
-    if (res.success) { 
-      addToast('success', editingUser ? 'User updated' : 'User created'); 
-      setShowForm(false); 
-      setEditingUser(null);
-      setForm({username:'',fullName:'',password:'',roleId:2,perms:{inventory:false,challan:false,reports:false,settings:false}}); 
-      load(); 
-    }
-    else addToast('error', res.error);
-  };
-
   const handleEdit = (u) => {
-    setEditingUser(u);
     let perms = { inventory: false, challan: false, reports: false, settings: false, maintenance: false };
     try {
       const p = typeof u.custom_permissions === 'string' ? JSON.parse(u.custom_permissions) : (u.custom_permissions || {});
-      // If no custom perms, fall back to role perms (though the repo already merges them)
       const rawPerms = p && Object.keys(p).length > 0 ? p : (typeof u.permissions === 'string' ? JSON.parse(u.permissions) : (u.permissions || {}));
-      
       perms = {
         inventory: rawPerms.inventory === 'rw',
         challan: rawPerms.challan === 'rw',
@@ -181,14 +143,11 @@ function UserSettings() {
       };
     } catch (e) {}
 
-    setForm({
-      username: u.username,
-      fullName: u.full_name,
-      password: '', // Don't show existing hash
-      roleId: u.role_id,
-      perms
+    openModal('USER_FORM', { 
+      editingUser: u, 
+      initialForm: { username: u.username, fullName: u.full_name, password: '', roleId: u.role_id, perms },
+      onSaved: load
     });
-    setShowForm(true);
   };
 
   const toggle = async (id) => {
@@ -199,12 +158,11 @@ function UserSettings() {
   const del = async (id) => {
     const confirmed = await showConfirm({
       title: 'Delete User',
-      message: 'Are you sure you want to delete this user? This action cannot be undone. Note: Users with existing records (like challans) should be deactivated instead.',
+      message: 'Are you sure you want to delete this user? This action cannot be undone.',
       confirmText: 'Delete User',
       type: 'danger'
     });
     if (!confirmed) return;
-
     const res = await window.kadal.users.delete(id);
     if (res.success) { load(); addToast('success', 'User deleted'); }
     else addToast('error', res.data?.error || res.error);
@@ -212,119 +170,59 @@ function UserSettings() {
 
   return (
     <div>
-      <div className="toolbar"><div className="toolbar-left"></div><button className="btn btn-primary btn-sm" onClick={()=>setShowForm(true)}><Plus size={14}/> Add User</button></div>
+      <div className="toolbar"><div className="toolbar-left"></div>{user?.permissions?.settings === 'rw' && <button className="btn btn-primary btn-sm" onClick={()=>openModal('USER_FORM', { initialForm: {username:'',fullName:'',password:'',roleId:2,perms:{inventory:false,challan:false,reports:false,settings:false,maintenance:false}}, onSaved: load })}><Plus size={14}/> Add User</button>}</div>
       <div className="table-wrapper">
         <table className="data-table">
           <thead><tr><th>Username</th><th>Full Name</th><th>Role</th><th>Status</th><th>Last Login</th><th>Actions</th></tr></thead>
-          <tbody>{users.map(u=>(
-            <tr key={u.id}><td className="text-mono">{u.username}</td><td style={{fontWeight:600}}>{u.full_name}</td>
-            <td><span className="badge badge-info">{u.custom_permissions ? 'Custom' : u.role_name}</span></td>
-            <td><span className={`badge badge-${u.is_active?'success':'danger'}`}>{u.is_active?'Active':'Inactive'}</span></td>
-            <td className="text-muted">{u.last_login?new Date(u.last_login).toLocaleString('en-GB'):'-'}</td>
-            <td>
-              <button className="btn btn-ghost btn-icon btn-sm" onClick={()=>handleEdit(u)} title="Edit Role/Permissions"><Edit2 size={14}/></button>
-              <button className="btn btn-ghost btn-sm" onClick={()=>toggle(u.id)} style={{marginLeft:4}}>{u.is_active?'Deactivate':'Activate'}</button>
-              <button className="btn btn-ghost btn-icon btn-sm" onClick={()=>del(u.id)} style={{marginLeft:4}}><Trash2 size={14} color="var(--danger)" /></button>
-            </td></tr>
-          ))}</tbody>
+            <tbody>{users.map(u=>{
+              const isTargetSuperAdmin = u.role_name === 'Super Admin';
+              const canEdit = (user?.roleName === 'Super Admin' || !isTargetSuperAdmin) && user?.permissions?.settings === 'rw';
+              
+              return (
+                <tr key={u.id}>
+                  <td className="text-mono">{u.username}</td>
+                  <td style={{fontWeight:600}}>{u.full_name}</td>
+                  <td><span className="badge badge-info">{u.custom_permissions ? 'Custom' : u.role_name}</span></td>
+                  <td><span className={`badge badge-${u.is_active?'success':'danger'}`}>{u.is_active?'Active':'Inactive'}</span></td>
+                  <td className="text-muted">{u.last_login?new Date(u.last_login).toLocaleString('en-GB'):'-'}</td>
+                  <td>
+                    {canEdit ? (
+                      <>
+                        <button className="btn btn-ghost btn-icon btn-sm" onClick={()=>handleEdit(u)} title="Edit Role/Permissions"><Edit2 size={14}/></button>
+                        <button className="btn btn-ghost btn-sm" onClick={()=>toggle(u.id)} style={{marginLeft:4}}>{u.is_active?'Deactivate':'Activate'}</button>
+                        <button className="btn btn-ghost btn-icon btn-sm" onClick={()=>del(u.id)} style={{marginLeft:4}}><Trash2 size={14} color="var(--danger)" /></button>
+                      </>
+                    ) : (
+                      <span className="text-muted" style={{fontSize:11}}>View Only</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}</tbody>
         </table>
       </div>
-      {showForm && (
-        <div className="modal-overlay" onClick={()=>setShowForm(false)}>
-          <div className="modal" onClick={e=>e.stopPropagation()}>
-            <div className="modal-header">
-              <h3 className="modal-title">{editingUser ? 'Edit User' : 'Add User'}</h3>
-              <button className="btn btn-ghost btn-icon btn-sm" onClick={()=>{setShowForm(false); setEditingUser(null);}}>✕</button>
-            </div>
-            <div className="modal-body">
-              <div className="form-group"><label className="form-label">Username</label><input className="form-input" value={form.username} onChange={e=>setForm(f=>({...f,username:e.target.value}))} disabled={!!editingUser} /></div>
-              <div className="form-group"><label className="form-label">Full Name</label><input className="form-input" value={form.fullName} onChange={e=>setForm(f=>({...f,fullName:e.target.value}))} /></div>
-              <div className="form-group">
-                <label className="form-label">Password {editingUser && '(Leave blank to keep current)'}</label>
-                <input className="form-input" type="password" value={form.password} onChange={e=>setForm(f=>({...f,password:e.target.value}))} placeholder={editingUser ? '••••••••' : ''} />
-              </div>
-              <div className="form-group">
-                <label className="form-label">User Role</label>
-                <select className="form-select" value={form.roleId} onChange={e => {
-                  const rid = parseInt(e.target.value);
-                  const role = roles.find(r => r.id === rid);
-                  let newPerms = { inventory: false, challan: false, reports: false, settings: false, maintenance: false };
-                  if (role) {
-                    try {
-                      const p = JSON.parse(role.permissions);
-                      newPerms = {
-                        inventory: p.inventory === 'rw',
-                        challan: p.challan === 'rw',
-                        reports: p.reports === 'r' || p.reports === 'rw',
-                        settings: p.settings === 'rw',
-                        maintenance: p.maintenance === 'rw'
-                      };
-                    } catch(e) {}
-                  }
-                  setForm(f => ({...f, roleId: rid, perms: newPerms }));
-                }}>
-                  {roles.filter(r => {
-                    if (user?.roleName === 'Super Admin') return r.name === 'Admin';
-                    return true;
-                  }).map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-                </select>
-              </div>
-              <div className="form-group">
-                <label className="form-label">Access Permissions</label>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                  {!(user?.roleName === 'Super Admin') && (
-                    <>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
-                        <input type="checkbox" checked={form.perms.inventory} onChange={e=>setForm(f=>({...f, perms: {...f.perms, inventory: e.target.checked}}))} /> Manage Inventory
-                      </label>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
-                        <input type="checkbox" checked={form.perms.challan} onChange={e=>setForm(f=>({...f, perms: {...f.perms, challan: e.target.checked}}))} /> Manage Challans
-                      </label>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
-                        <input type="checkbox" checked={form.perms.reports} onChange={e=>setForm(f=>({...f, perms: {...f.perms, reports: e.target.checked}}))} /> View Reports
-                      </label>
-                    </>
-                  )}
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
-                    <input type="checkbox" checked={form.perms.settings} onChange={e=>setForm(f=>({...f, perms: {...f.perms, settings: e.target.checked}}))} /> Admin Access
-                  </label>
-                  {!(user?.roleName === 'Super Admin') && (
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, opacity: (user?.roleName === 'Super Admin') ? 1 : 0.6, cursor: (user?.roleName === 'Super Admin') ? 'pointer' : 'not-allowed' }}>
-                      <input 
-                        type="checkbox" 
-                        checked={form.perms.maintenance} 
-                        onChange={e=>setForm(f=>({...f, perms: {...f.perms, maintenance: e.target.checked}}))} 
-                        disabled={user?.roleName !== 'Super Admin'}
-                      /> Database Maintenance
-                    </label>
-                  )}
-                </div>
-              </div>
-            </div>
-            <div className="modal-footer"><button className="btn btn-outline" onClick={()=>{setShowForm(false); setEditingUser(null);}}>Cancel</button><button className="btn btn-primary" onClick={handleSaveUser}>{editingUser ? 'Update' : 'Create'}</button></div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
 
 function CategorySettings() {
-  const { addToast } = useStore();
+  const { addToast, user } = useStore();
   const [cats, setCats] = useState([]);
   const [name, setName] = useState('');
+  const canEdit = user?.permissions?.settings === 'rw';
 
   const load = () => window.kadal.categories.getAll().then(r => { if(r.success) setCats(r.data); });
   useEffect(() => { load(); }, []);
 
   const add = async () => {
-    if (!name.trim()) return;
+    if (!canEdit || !name.trim()) return;
     const res = await window.kadal.categories.create({name});
     if (res.success) { setName(''); load(); addToast('success','Category added'); }
     else addToast('error', res.error);
   };
 
   const del = async (id) => {
+    if (!canEdit) return;
     const res = await window.kadal.categories.delete(id);
     if (res.success) { load(); addToast('success','Deleted'); }
     else addToast('error', res.data?.error||res.error);
@@ -332,16 +230,18 @@ function CategorySettings() {
 
   return (
     <div style={{maxWidth:500}}>
-      <div style={{display:'flex',gap:8,marginBottom:16}}>
-        <input className="form-input" placeholder="New category name..." value={name} onChange={e=>setName(e.target.value)} onKeyDown={e=>e.key==='Enter'&&add()} />
-        <button className="btn btn-primary" onClick={add}><Plus size={16}/></button>
-      </div>
+      {canEdit && (
+        <div style={{display:'flex',gap:8,marginBottom:16}}>
+          <input className="form-input" placeholder="New category name..." value={name} onChange={e=>setName(e.target.value)} onKeyDown={e=>e.key==='Enter'&&add()} />
+          <button className="btn btn-primary" onClick={add}><Plus size={16}/></button>
+        </div>
+      )}
       <div className="table-wrapper">
         <table className="data-table">
-          <thead><tr><th>Category</th><th>Actions</th></tr></thead>
+          <thead><tr><th>Category</th>{canEdit && <th>Actions</th>}</tr></thead>
           <tbody>{cats.map(c=>(
             <tr key={c.id}><td style={{fontWeight:600}}>{c.name}</td>
-            <td><button className="btn btn-ghost btn-icon btn-sm" onClick={()=>del(c.id)}><Trash2 size={14} color="var(--danger)"/></button></td></tr>
+            {canEdit && <td><button className="btn btn-ghost btn-icon btn-sm" onClick={()=>del(c.id)}><Trash2 size={14} color="var(--danger)"/></button></td>}</tr>
           ))}</tbody>
         </table>
       </div>
@@ -350,21 +250,23 @@ function CategorySettings() {
 }
 
 function UnitSettings() {
-  const { addToast } = useStore();
+  const { addToast, user } = useStore();
   const [units, setUnits] = useState([]);
   const [name, setName] = useState('');
+  const canEdit = user?.permissions?.settings === 'rw';
 
   const load = () => window.kadal.units.getAll().then(r => { if(r.success) setUnits(r.data); });
   useEffect(() => { load(); }, []);
 
   const add = async () => {
-    if (!name.trim()) return;
+    if (!canEdit || !name.trim()) return;
     const res = await window.kadal.units.create({name});
     if (res.success) { setName(''); load(); addToast('success','Unit added'); }
     else addToast('error', res.error);
   };
 
   const del = async (id) => {
+    if (!canEdit) return;
     const res = await window.kadal.units.delete(id);
     if (res.success) { load(); addToast('success','Deleted'); }
     else addToast('error', res.data?.error||res.error);
@@ -372,16 +274,18 @@ function UnitSettings() {
 
   return (
     <div style={{maxWidth:500}}>
-      <div style={{display:'flex',gap:8,marginBottom:16}}>
-        <input className="form-input" placeholder="New unit name (e.g. pcs, kg)..." value={name} onChange={e=>setName(e.target.value)} onKeyDown={e=>e.key==='Enter'&&add()} />
-        <button className="btn btn-primary" onClick={add}><Plus size={16}/></button>
-      </div>
+      {canEdit && (
+        <div style={{display:'flex',gap:8,marginBottom:16}}>
+          <input className="form-input" placeholder="New unit name (e.g. pcs, kg)..." value={name} onChange={e=>setName(e.target.value)} onKeyDown={e=>e.key==='Enter'&&add()} />
+          <button className="btn btn-primary" onClick={add}><Plus size={16}/></button>
+        </div>
+      )}
       <div className="table-wrapper">
         <table className="data-table">
-          <thead><tr><th>Unit</th><th>Actions</th></tr></thead>
+          <thead><tr><th>Unit</th>{canEdit && <th>Actions</th>}</tr></thead>
           <tbody>{units.map(u=>(
             <tr key={u.id}><td style={{fontWeight:600}}>{u.name}</td>
-            <td><button className="btn btn-ghost btn-icon btn-sm" onClick={()=>del(u.id)}><Trash2 size={14} color="var(--danger)"/></button></td></tr>
+            {canEdit && <td><button className="btn btn-ghost btn-icon btn-sm" onClick={()=>del(u.id)}><Trash2 size={14} color="var(--danger)"/></button></td>}</tr>
           ))}</tbody>
         </table>
       </div>
@@ -390,30 +294,15 @@ function UnitSettings() {
 }
 
 function SupplierSettings() {
-  const { addToast } = useStore();
+  const { addToast, openModal, user } = useStore();
   const [suppliers, setSuppliers] = useState([]);
-  const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({name:'',contactPerson:'',phone:'',email:'',address:''});
-  const [suggestions, setSuggestions] = useState({ name: [], contactPerson: [], phone: [], email: [] });
-
-  const fetchSuggestions = async (field, value) => {
-    try {
-      const res = await window.kadal.suppliers.getFieldSuggestions(field, value || '');
-      if (res.success) setSuggestions(prev => ({ ...prev, [field]: res.data }));
-    } catch (e) {}
-  };
+  const canEdit = user?.permissions?.settings === 'rw';
 
   const load = () => window.kadal.suppliers.getAll().then(r => { if(r.success) setSuppliers(r.data); });
   useEffect(() => { load(); }, []);
 
-  const save = async () => {
-    if (!form.name.trim()) { addToast('error','Name required'); return; }
-    const res = await window.kadal.suppliers.create(form);
-    if (res.success) { setShowForm(false); setForm({name:'',contactPerson:'',phone:'',email:'',address:''}); load(); addToast('success','Supplier added'); }
-    else addToast('error', res.error);
-  };
-
   const del = async (id) => {
+    if (!canEdit) return;
     const res = await window.kadal.suppliers.delete(id);
     if (res.success) { load(); addToast('success','Deleted'); }
     else addToast('error', res.data?.error||res.error);
@@ -421,69 +310,38 @@ function SupplierSettings() {
 
   return (
     <div>
-      <div className="toolbar"><div></div><button className="btn btn-primary btn-sm" onClick={()=>setShowForm(true)}><Plus size={14}/> Add Supplier</button></div>
+      <div className="toolbar"><div className="toolbar-left"></div>{canEdit && <button className="btn btn-primary btn-sm" onClick={()=>openModal('SUPPLIER_FORM', { initialForm: {name:'',contactPerson:'',phone:'',email:'',address:''}, onSaved: load })}><Plus size={14}/> Add Supplier</button>}</div>
       <div className="table-wrapper">
         <table className="data-table">
-          <thead><tr><th>Name</th><th>Contact</th><th>Phone</th><th>Email</th><th>Actions</th></tr></thead>
+          <thead><tr><th>Name</th><th>Contact</th><th>Phone</th><th>Email</th>{canEdit && <th>Actions</th>}</tr></thead>
           <tbody>{suppliers.map(s=>(
             <tr key={s.id}><td style={{fontWeight:600}}>{s.name}</td><td>{s.contact_person||'-'}</td><td>{s.phone||'-'}</td><td>{s.email||'-'}</td>
-            <td><button className="btn btn-ghost btn-icon btn-sm" onClick={()=>del(s.id)}><Trash2 size={14} color="var(--danger)"/></button></td></tr>
+            {canEdit && <td><button className="btn btn-ghost btn-icon btn-sm" onClick={()=>del(s.id)}><Trash2 size={14} color="var(--danger)"/></button></td>}</tr>
           ))}</tbody>
         </table>
       </div>
-      {showForm && (
-        <div className="modal-overlay" onClick={()=>setShowForm(false)}>
-          <div className="modal" onClick={e=>e.stopPropagation()}>
-            <div className="modal-header"><h3 className="modal-title">Add Supplier</h3><button className="btn btn-ghost btn-icon btn-sm" onClick={()=>setShowForm(false)}>✕</button></div>
-            <div className="modal-body">
-              <div className="form-group">
-                <label className="form-label">Company Name *</label>
-                <input className="form-input" list="supp-name-list" value={form.name} onChange={e=>{setForm(f=>({...f,name:e.target.value})); fetchSuggestions('name', e.target.value);}} onFocus={()=>fetchSuggestions('name', form.name)} autoComplete="off" />
-                <datalist id="supp-name-list">{suggestions.name.map((s,i) => <option key={i} value={s} />)}</datalist>
-              </div>
-              <div className="form-row">
-                <div className="form-group">
-                  <label className="form-label">Contact Person</label>
-                  <input className="form-input" list="supp-contact-list" value={form.contactPerson} onChange={e=>{setForm(f=>({...f,contactPerson:e.target.value})); fetchSuggestions('contactPerson', e.target.value);}} onFocus={()=>fetchSuggestions('contactPerson', form.contactPerson)} autoComplete="off" />
-                  <datalist id="supp-contact-list">{suggestions.contactPerson.map((s,i) => <option key={i} value={s} />)}</datalist>
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Phone</label>
-                  <input className="form-input" list="supp-phone-list" value={form.phone} onChange={e=>{setForm(f=>({...f,phone:e.target.value})); fetchSuggestions('phone', e.target.value);}} onFocus={()=>fetchSuggestions('phone', form.phone)} autoComplete="off" />
-                  <datalist id="supp-phone-list">{suggestions.phone.map((s,i) => <option key={i} value={s} />)}</datalist>
-                </div>
-              </div>
-              <div className="form-group">
-                <label className="form-label">Email</label>
-                <input className="form-input" list="supp-email-list" value={form.email} onChange={e=>{setForm(f=>({...f,email:e.target.value})); fetchSuggestions('email', e.target.value);}} onFocus={()=>fetchSuggestions('email', form.email)} autoComplete="off" />
-                <datalist id="supp-email-list">{suggestions.email.map((s,i) => <option key={i} value={s} />)}</datalist>
-              </div>
-              <div className="form-group"><label className="form-label">Address</label><textarea className="form-textarea" rows={2} value={form.address} onChange={e=>setForm(f=>({...f,address:e.target.value}))} /></div>
-            </div>
-            <div className="modal-footer"><button className="btn btn-outline" onClick={()=>setShowForm(false)}>Cancel</button><button className="btn btn-primary" onClick={save}>Add Supplier</button></div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
 
 function BuyerSettings() {
-  const { addToast } = useStore();
+  const { addToast, user } = useStore();
   const [buyers, setBuyers] = useState([]);
   const [name, setName] = useState('');
+  const canEdit = user?.permissions?.settings === 'rw';
 
   const load = () => window.kadal.buyers.getAll().then(r => { if(r.success) setBuyers(r.data); });
   useEffect(() => { load(); }, []);
 
   const add = async () => {
-    if (!name.trim()) return;
+    if (!canEdit || !name.trim()) return;
     const res = await window.kadal.buyers.create({name});
     if (res.success) { setName(''); load(); addToast('success','Buyer added'); }
     else addToast('error', res.error);
   };
 
   const del = async (id) => {
+    if (!canEdit) return;
     const res = await window.kadal.buyers.delete(id);
     if (res.success) { load(); addToast('success','Deleted'); }
     else addToast('error', res.data?.error||res.error);
@@ -491,16 +349,18 @@ function BuyerSettings() {
 
   return (
     <div style={{maxWidth:500}}>
-      <div style={{display:'flex',gap:8,marginBottom:16}}>
-        <input className="form-input" placeholder="New buyer name..." value={name} onChange={e=>setName(e.target.value)} onKeyDown={e=>e.key==='Enter'&&add()} />
-        <button className="btn btn-primary" onClick={add}><Plus size={16}/></button>
-      </div>
+      {canEdit && (
+        <div style={{display:'flex',gap:8,marginBottom:16}}>
+          <input className="form-input" placeholder="New buyer name..." value={name} onChange={e=>setName(e.target.value)} onKeyDown={e=>e.key==='Enter'&&add()} />
+          <button className="btn btn-primary" onClick={add}><Plus size={16}/></button>
+        </div>
+      )}
       <div className="table-wrapper">
         <table className="data-table">
-          <thead><tr><th>Buyer Name</th><th>Actions</th></tr></thead>
+          <thead><tr><th>Buyer Name</th>{canEdit && <th>Actions</th>}</tr></thead>
           <tbody>{buyers.map(b=>(
             <tr key={b.id}><td style={{fontWeight:600}}>{b.name}</td>
-            <td><button className="btn btn-ghost btn-icon btn-sm" onClick={()=>del(b.id)}><Trash2 size={14} color="var(--danger)"/></button></td></tr>
+            {canEdit && <td><button className="btn btn-ghost btn-icon btn-sm" onClick={()=>del(b.id)}><Trash2 size={14} color="var(--danger)"/></button></td>}</tr>
           ))}</tbody>
         </table>
       </div>
@@ -841,13 +701,70 @@ function SystemSettings() {
       </div>
 
       {hasMaintenance && (
+        <div className="card mb-4" style={{ padding: 24, border: '1px solid var(--danger-subtle)', background: 'rgba(239,68,68,0.02)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+            <Trash2 size={20} color="var(--danger)" />
+            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: 'var(--danger)' }}>Clear History</h3>
+          </div>
+          <p className="text-muted" style={{ margin: '0 0 20px', fontSize: 13 }}>
+            <strong>Clear Challan History:</strong> This will delete all Challans, Challan Items, Gate Passes, and associated stock transactions. It will <strong>NOT</strong> delete Items, Categories, or Suppliers.
+          </p>
+
+          <button 
+            className="btn btn-outline" 
+            style={{ borderColor: 'var(--danger)', color: 'var(--danger)', marginBottom: 8, width: '100%' }}
+            disabled={user?.roleName !== 'Super Admin'}
+            onClick={async () => {
+              if (user?.roleName !== 'Super Admin') {
+                addToast('error', 'Only Super Admin can perform this action');
+                return;
+              }
+              if (window.confirm('DELETE ALL CHALLAN HISTORY? This will permanently remove all challans and gate passes. Items and stock levels will NOT be reset.')) {
+                const res = await window.kadal.challans.clearHistory();
+                if (res.success) {
+                  addToast('success', 'Challan history cleared successfully');
+                } else {
+                  addToast('error', res.error || 'Failed to clear history');
+                }
+              }
+            }}
+          >
+            <Trash2 size={16} /> Clear All Challan History
+          </button>
+
+          <button 
+            className="btn btn-outline" 
+            style={{ borderColor: 'var(--warning)', color: 'var(--warning)', width: '100%', marginTop: 8 }}
+            disabled={user?.roleName !== 'Super Admin'}
+            onClick={async () => {
+              if (user?.roleName !== 'Super Admin') {
+                addToast('error', 'Only Super Admin can perform this action');
+                return;
+              }
+              if (window.confirm('CLEAR GATE PASS HISTORY? This will delete all Gate Passes and pending Gate Pass requests, unblocking associated Challans.')) {
+                const res = await window.kadal.gatePass.clearHistory();
+                if (res.success) {
+                  addToast('success', 'Gate Pass history cleared successfully');
+                } else {
+                  addToast('error', res.error || 'Failed to clear history');
+                }
+              }
+            }}
+          >
+            <XCircle size={16} /> Clear Gate Pass History
+          </button>
+          {user?.roleName !== 'Super Admin' && <p style={{ color: 'var(--danger)', fontSize: 11, marginTop: 8 }}>Only Super Admin can clear history.</p>}
+        </div>
+      )}
+
+      {hasMaintenance && (
         <div className="card" style={{ padding: 24, border: '1px solid var(--danger-subtle)', background: 'rgba(239,68,68,0.02)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
             <AlertCircle size={20} color="var(--danger)" />
-            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: 'var(--danger)' }}>Database Maintenance</h3>
+            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: 'var(--danger)' }}>Database Maintenance (Factory Reset)</h3>
           </div>
           <p className="text-muted" style={{ margin: '0 0 20px', fontSize: 13 }}>
-            <strong>Danger Zone:</strong> This will permanently delete all items, challans, gate passes, and stock transactions. This action cannot be undone.
+            <strong>Danger Zone:</strong> This will permanently delete <strong>EVERYTHING</strong> (Items, Users, Categories, etc.). Use only for a complete system reset.
           </p>
 
           <button 
@@ -870,5 +787,57 @@ function SystemSettings() {
       )}
     </div>
 
+  );
+}
+
+function RecipientSettings() {
+  const { addToast, user } = useStore();
+  const [recipients, setRecipients] = useState([]);
+  const [name, setName] = useState('');
+  const [type, setType] = useState('EMPLOYEE');
+  const canEdit = user?.permissions?.settings === 'rw';
+
+  const load = () => window.kadal.recipients.getAll().then(r => { if(r.success) setRecipients(r.data); });
+  useEffect(() => { load(); }, []);
+
+  const add = async () => {
+    if (!canEdit || !name.trim()) return;
+    const res = await window.kadal.recipients.create({ name, type });
+    if (res.success) { setName(''); load(); addToast('success', 'Recipient added'); }
+    else addToast('error', res.error);
+  };
+
+  const del = async (id) => {
+    if (!canEdit) return;
+    const res = await window.kadal.recipients.delete(id);
+    if (res.success) { load(); addToast('success', 'Deleted'); }
+    else addToast('error', res.data?.error || res.error);
+  };
+
+  return (
+    <div style={{ maxWidth: 600 }}>
+      {canEdit && (
+        <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+          <input className="form-input" placeholder="Recipient name..." value={name} onChange={e => setName(e.target.value)} onKeyDown={e => e.key === 'Enter' && add()} />
+          <select className="form-input" style={{ width: 150 }} value={type} onChange={e => setType(e.target.value)}>
+            <option value="EMPLOYEE">Employee</option>
+            <option value="FACTORY">Factory</option>
+          </select>
+          <button className="btn btn-primary" onClick={add}><Plus size={16} /></button>
+        </div>
+      )}
+      <div className="table-wrapper">
+        <table className="data-table">
+          <thead><tr><th>Name</th><th>Type</th>{canEdit && <th>Actions</th>}</tr></thead>
+          <tbody>{recipients.map(r => (
+            <tr key={r.id}>
+              <td style={{ fontWeight: 600 }}>{r.name}</td>
+              <td><span className={`badge badge-${r.type === 'FACTORY' ? 'info' : 'warning'}`}>{r.type}</span></td>
+              {canEdit && <td><button className="btn btn-ghost btn-icon btn-sm" onClick={() => del(r.id)}><Trash2 size={14} color="var(--danger)" /></button></td>}
+            </tr>
+          ))}</tbody>
+        </table>
+      </div>
+    </div>
   );
 }

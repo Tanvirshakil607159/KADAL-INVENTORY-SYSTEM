@@ -2,6 +2,23 @@ const { app, BrowserWindow, dialog } = require('electron');
 const path = require('path');
 
 let mainWindow = null;
+const gotTheLock = app.requestSingleInstanceLock();
+
+if (!gotTheLock) {
+  app.quit();
+} else {
+  app.on('second-instance', (event, commandLine, workingDirectory) => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  });
+
+  // Fix for GPU Cache and Access Denied errors
+  app.commandLine.appendSwitch('disable-gpu-cache');
+  app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
+  app.commandLine.appendSwitch('disable-http-cache'); // Help with "Unable to move cache"
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({

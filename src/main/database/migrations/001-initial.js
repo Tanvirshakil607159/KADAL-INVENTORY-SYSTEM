@@ -122,6 +122,46 @@ function runMigrations(db) {
     db.run("INSERT INTO _migrations (name) VALUES ('013-fix-superadmin-login')");
     console.log('[DB] Migration 013-fix-superadmin-login applied successfully');
   }
+  // NEW MIGRATION: 014-finalize-super-admin-rbac
+  const applied14 = db.exec("SELECT * FROM _migrations WHERE name = '014-finalize-super-admin-rbac'");
+  if (applied14.length === 0 || applied14[0].values.length === 0) {
+    console.log('[DB] Running migration: 014-finalize-super-admin-rbac');
+    applyFourteenthMigration(db);
+    db.run("INSERT INTO _migrations (name) VALUES ('014-finalize-super-admin-rbac')");
+    console.log('[DB] Migration 014-finalize-super-admin-rbac applied successfully');
+  }
+  // NEW MIGRATION: 015-add-monitoring-role
+  const applied15 = db.exec("SELECT * FROM _migrations WHERE name = '015-add-monitoring-role'");
+  if (applied15.length === 0 || applied15[0].values.length === 0) {
+    console.log('[DB] Running migration: 015-add-monitoring-role');
+    applyFifteenthMigration(db);
+    db.run("INSERT INTO _migrations (name) VALUES ('015-add-monitoring-role')");
+    console.log('[DB] Migration 015-add-monitoring-role applied successfully');
+  }
+  // NEW MIGRATION: 016-add-issue-module
+  const applied16 = db.exec("SELECT * FROM _migrations WHERE name = '016-add-issue-module'");
+  if (applied16.length === 0 || applied16[0].values.length === 0) {
+    console.log('[DB] Running migration: 016-add-issue-module');
+    applySixteenthMigration(db);
+    db.run("INSERT INTO _migrations (name) VALUES ('016-add-issue-module')");
+    console.log('[DB] Migration 016-add-issue-module applied successfully');
+  }
+  // NEW MIGRATION: 017-enhance-issue-module
+  const applied17 = db.exec("SELECT * FROM _migrations WHERE name = '017-enhance-issue-module'");
+  if (applied17.length === 0 || applied17[0].values.length === 0) {
+    console.log('[DB] Running migration: 017-enhance-issue-module');
+    applySeventeenthMigration(db);
+    db.run("INSERT INTO _migrations (name) VALUES ('017-enhance-issue-module')");
+    console.log('[DB] Migration 017-enhance-issue-module applied successfully');
+  }
+  // NEW MIGRATION: 018-add-approval-links
+  const applied18 = db.exec("SELECT * FROM _migrations WHERE name = '018-add-approval-links'");
+  if (applied18.length === 0 || applied18[0].values.length === 0) {
+    console.log('[DB] Running migration: 018-add-approval-links');
+    applyEighteenthMigration(db);
+    db.run("INSERT INTO _migrations (name) VALUES ('018-add-approval-links')");
+    console.log('[DB] Migration 018-add-approval-links applied successfully');
+  }
 }
 
 function applyEighthMigration(db) {
@@ -200,6 +240,38 @@ function applyThirteenthMigration(db) {
     INSERT OR IGNORE INTO users (username, password_hash, full_name, role_id, is_active) 
     SELECT 'superadmin', ?, 'Super Administrator', id, 1 FROM roles WHERE name = 'Super Admin'
   `, [hash]);
+}
+
+function applyFourteenthMigration(db) {
+  const superAdminPerms = JSON.stringify({ 
+    inventory: 'rw', challan: 'rw', reports: 'rw', users: 'rw', settings: 'rw', backup: 'rw', maintenance: 'rw' 
+  });
+  const adminPerms = JSON.stringify({ 
+    inventory: 'rw', challan: 'rw', reports: 'rw', users: 'rw', settings: 'rw', backup: 'rw', maintenance: 'none' 
+  });
+
+  // Ensure roles exist with correct perms
+  db.run("UPDATE roles SET permissions = ? WHERE name = 'Super Admin'", [superAdminPerms]);
+  db.run("UPDATE roles SET permissions = ? WHERE name = 'Admin'", [adminPerms]);
+
+  // Ensure 'superadmin' user is Super Admin
+  db.run(`
+    UPDATE users SET role_id = (SELECT id FROM roles WHERE name = 'Super Admin')
+    WHERE username = 'superadmin'
+  `);
+
+  // Ensure 'admin' user is Admin (NOT Super Admin anymore)
+  db.run(`
+    UPDATE users SET role_id = (SELECT id FROM roles WHERE name = 'Admin')
+    WHERE username = 'admin' OR username = 'Admin'
+  `);
+}
+
+function applyFifteenthMigration(db) {
+  const monitoringPerms = JSON.stringify({ 
+    inventory: 'r', challan: 'r', reports: 'r', users: 'r', settings: 'r', backup: 'none', maintenance: 'none' 
+  });
+  db.run("INSERT OR IGNORE INTO roles (name, permissions) VALUES ('Monitoring', ?)", [monitoringPerms]);
 }
 
 function applySeventhMigration(db) {
@@ -371,6 +443,105 @@ function applyInitialMigration(db) {
     ['theme', 'dark', 'UI theme'],
   ];
   settings.forEach(([k, v, d]) => db.run("INSERT OR IGNORE INTO settings (key, value, description) VALUES (?, ?, ?)", [k, v, d]));
+}
+
+function applySixteenthMigration(db) {
+  // 1. Recipients Table
+  db.run(`CREATE TABLE IF NOT EXISTS recipients (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    type TEXT NOT NULL CHECK(type IN ('FACTORY', 'EMPLOYEE')),
+    contact_info TEXT,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  // 2. Issues Table
+  db.run(`CREATE TABLE IF NOT EXISTS issues (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    issue_id TEXT NOT NULL UNIQUE,
+    issue_type TEXT NOT NULL CHECK(issue_type IN ('FACTORY', 'EMPLOYEE')),
+    recipient_id INTEGER NOT NULL REFERENCES recipients(id),
+    recipient_name TEXT NOT NULL,
+    issue_date DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expected_return_date DATETIME,
+    remarks TEXT,
+    attachment_path TEXT,
+    status TEXT NOT NULL DEFAULT 'PENDING' CHECK(status IN ('PENDING', 'PARTIAL', 'RETURNED')),
+    created_by INTEGER NOT NULL REFERENCES users(id),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  // 3. Issue Items Table
+  db.run(`CREATE TABLE IF NOT EXISTS issue_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    issue_id INTEGER NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+    item_id INTEGER NOT NULL REFERENCES items(id),
+    quantity REAL NOT NULL CHECK(quantity > 0),
+    returned_quantity REAL NOT NULL DEFAULT 0,
+    damage_quantity REAL NOT NULL DEFAULT 0,
+    rejected_quantity REAL NOT NULL DEFAULT 0,
+    unit TEXT NOT NULL,
+    style_no TEXT,
+    order_number TEXT,
+    purchase_no TEXT,
+    notes TEXT
+  )`);
+
+  // 4. Returns Table
+  db.run(`CREATE TABLE IF NOT EXISTS returns (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    issue_id INTEGER NOT NULL REFERENCES issues(id),
+    return_date DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    remarks TEXT,
+    created_by INTEGER NOT NULL REFERENCES users(id),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  // 5. Return Items Table
+  db.run(`CREATE TABLE IF NOT EXISTS return_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    return_id INTEGER NOT NULL REFERENCES returns(id) ON DELETE CASCADE,
+    issue_item_id INTEGER NOT NULL REFERENCES issue_items(id),
+    returned_quantity REAL NOT NULL DEFAULT 0,
+    damage_quantity REAL NOT NULL DEFAULT 0,
+    rejected_quantity REAL NOT NULL DEFAULT 0,
+    notes TEXT
+  )`);
+
+  // 6. Factory Production Table
+  db.run(`CREATE TABLE IF NOT EXISTS factory_production (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    issue_id INTEGER NOT NULL REFERENCES issues(id),
+    product_name TEXT NOT NULL,
+    production_quantity REAL NOT NULL DEFAULT 0,
+    wastage_quantity REAL NOT NULL DEFAULT 0,
+    balance_quantity REAL NOT NULL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  // Seed some example recipients
+  db.run("INSERT OR IGNORE INTO recipients (name, type) VALUES ('Factory A', 'FACTORY')");
+  db.run("INSERT OR IGNORE INTO recipients (name, type) VALUES ('Factory B', 'FACTORY')");
+  db.run("INSERT OR IGNORE INTO recipients (name, type) VALUES ('John Doe', 'EMPLOYEE')");
+  db.run("INSERT OR IGNORE INTO recipients (name, type) VALUES ('Jane Smith', 'EMPLOYEE')");
+}
+
+function applySeventeenthMigration(db) {
+  // Add consumed_quantity for factory production reconciliation
+  try { db.run(`ALTER TABLE issue_items ADD COLUMN consumed_quantity REAL NOT NULL DEFAULT 0`); } catch (e) {}
+  // Add approval fields to returns
+  try { db.run(`ALTER TABLE returns ADD COLUMN approved_by INTEGER REFERENCES users(id)`); } catch (e) {}
+  try { db.run(`ALTER TABLE returns ADD COLUMN approval_status TEXT DEFAULT 'PENDING'`); } catch (e) {}
+  // Issue module settings
+  db.run("INSERT OR IGNORE INTO settings (key, value, description) VALUES ('issue_prefix', 'ISS', 'Issue ID prefix')");
+  db.run("INSERT OR IGNORE INTO settings (key, value, description) VALUES ('require_return_approval', 'false', 'Require admin approval for returns')");
+}
+
+function applyEighteenthMigration(db) {
+  try { db.run(`ALTER TABLE approvals ADD COLUMN entity_id INTEGER`); } catch (e) {}
+  try { db.run(`ALTER TABLE approvals ADD COLUMN entity_number TEXT`); } catch (e) {}
 }
 
 module.exports = { runMigrations };

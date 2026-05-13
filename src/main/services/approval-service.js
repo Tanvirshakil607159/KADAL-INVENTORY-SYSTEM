@@ -40,13 +40,19 @@ const ApprovalService = {
           break;
         case 'CREATE_GATE_PASS':
           const GatePassService = require('./gate-pass-service');
-          result = await GatePassService._executeCreate(data);
+          result = await GatePassService._executeCreate(data, { excludeApprovalId: id });
           break;
         default:
           throw new Error('Unknown approval type: ' + request.type);
       }
 
-      await ApprovalsRepo.updateStatus(id, 'APPROVED', notes);
+      await ApprovalsRepo.updateStatus(
+        id, 
+        'APPROVED', 
+        notes, 
+        result?.id || null, 
+        result?.challanNumber || result?.gatePassNumber || null
+      );
       return { success: true, result };
     } catch (err) {
       console.error('[Approval Error]', err);

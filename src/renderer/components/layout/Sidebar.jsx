@@ -1,6 +1,6 @@
 import React from 'react';
 import useStore from '../../store/useStore';
-import { LayoutDashboard, Package, FileText, History, BarChart3, Settings, HardDrive, LogOut, CheckCircle } from 'lucide-react';
+import { LayoutDashboard, Package, FileText, History, BarChart3, Settings, HardDrive, LogOut, CheckCircle, Send } from 'lucide-react';
 
 const navItems = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -8,6 +8,7 @@ const navItems = [
   { id: 'challan', label: 'Create Challan', icon: FileText },
   { id: 'approvals', label: 'Approvals', icon: CheckCircle },
   { id: 'gate-pass', label: 'Gate Pass', icon: FileText },
+  { id: 'issue', label: 'Issue', icon: Send },
   { id: 'reports', label: 'Reports', icon: BarChart3 },
   { id: 'settings', label: 'Settings', icon: Settings },
   { id: 'backup', label: 'Backup & Restore', icon: HardDrive },
@@ -61,6 +62,12 @@ export default function Sidebar() {
             if (!['dashboard', 'challan', 'gate-pass', 'reports', 'approvals'].includes(item.id)) return null;
           }
           if ((item.id === 'settings' || item.id === 'backup') && user?.roleName === 'Operator') return null;
+          
+          // Hide Backup/Restore if no maintenance permission
+          if (item.id === 'backup') {
+            const perms = typeof user?.permissions === 'string' ? JSON.parse(user.permissions) : (user?.permissions || {});
+            if (user?.roleName !== 'Super Admin' && perms.maintenance !== 'rw') return null;
+          }
           const hasDot = notificationDots[item.id];
           return (
             <div

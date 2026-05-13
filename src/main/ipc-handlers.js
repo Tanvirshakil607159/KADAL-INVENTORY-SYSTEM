@@ -23,6 +23,11 @@ const ApprovalsRepo = require('./database/repositories/approvals');
 const ApprovalService = require('./services/approval-service');
 const GatePassService = require('./services/gate-pass-service');
 const RolesRepo = require('./database/repositories/roles');
+const GatePassRepo = require('./database/repositories/gate-passes');
+const IssueService = require('./services/issue-service');
+const ReturnService = require('./services/return-service');
+const RecipientsRepo = require('./database/repositories/recipients');
+const IssuesRepo = require('./database/repositories/issues');
 
 function wrapHandler(fn) {
   return async (event, ...args) => {
@@ -55,6 +60,10 @@ function registerIpcHandlers() {
 
   ipcMain.handle('auth:register', wrapHandler((username, password, fullName) => {
     return AuthService.register(username, password, fullName);
+  }));
+  
+  ipcMain.handle('auth:syncSession', wrapHandler((user) => {
+    return AuthService.syncSession(user);
   }));
 
   // ==================== USERS ====================
@@ -257,8 +266,62 @@ function registerIpcHandlers() {
   ipcMain.handle('challans:exportPdf', wrapHandler(async (id) => {
     const challan = await ChallansRepo.getById(id);
     if (!challan) throw new Error('Challan not found');
-    const settings = SettingsRepo.getAll();
+    const settings = await SettingsRepo.getAll();
     return PdfGenerator.generateChallanPdf(challan, settings);
+  }));
+
+  ipcMain.handle('challans:exportExcel', wrapHandler(async (id) => {
+    const challan = await ChallansRepo.getById(id);
+    if (!challan) throw new Error('Challan not found');
+    const settings = await SettingsRepo.getAll();
+    
+    const columns = [
+      { key: 'item_name', label: 'Item Name' },
+      { key: 'item_code', label: 'Code' },
+      { key: 'style_name', label: 'Style' },
+      { key: 'order_number', label: 'Order No' },
+      { key: 'purchase_no', label: 'Purchase No' },
+      { key: 'size', label: 'Size' },
+      { key: 'color', label: 'Color' },
+      { key: 'quantity', label: 'Quantity', align: 'right' },
+      { key: 'unit', label: 'Unit' },
+      { key: 'notes', label: 'Notes' }
+    ];
+
+    const subtitles = [
+      `Challan No: ${challan.challan_number}`,
+      `Date: ${new Date(challan.challan_date).toLocaleDateString('en-GB')}`,
+      `Receiver: ${challan.receiver_name}`,
+      `Contact: ${challan.receiver_contact || '-'}`,
+      `Address: ${challan.receiver_address || '-'}`
+    ];
+
+    return ExcelGenerator.generateReport(`Challan-${challan.challan_number}`, columns, challan.items, settings, { subtitles });
+  }));
+
+  ipcMain.handle('challans:delete', wrapHandler(async (id) => {
+    return ChallanService.delete(id);
+  }));
+
+  ipcMain.handle('challans:clearHistory', wrapHandler(async () => {
+    return ChallansRepo.clearChallanHistory();
+  }));
+
+  ipcMain.handle('challans:deleteSuggestion', wrapHandler(async (field, value) => {
+    const s = await SettingsRepo.getAll();
+    let blacklist = {};
+    try {
+      blacklist = typeof s.suggestion_blacklist === 'string' 
+        ? JSON.parse(s.suggestion_blacklist) 
+        : (s.suggestion_blacklist || {});
+    } catch (e) { blacklist = {}; }
+
+    if (!blacklist[field]) blacklist[field] = [];
+    if (!blacklist[field].includes(value)) {
+      blacklist[field].push(value);
+      await SettingsRepo.set('suggestion_blacklist', JSON.stringify(blacklist));
+    }
+    return true;
   }));
 
   // ==================== GATE PASS ====================
@@ -280,36 +343,28 @@ function registerIpcHandlers() {
   ipcMain.handle('gatePass:getUsedChallanIds', wrapHandler(async () => {
     return await GatePassRepo.getUsedChallanIds();
   }));
+  ipcMain.handle('gatePass:delete', wrapHandler((id) => {
+    return GatePassRepo.delete(id);
+  }));
 
   // ==================== REPORTS ====================
-  ipcMain.handle('reports:stockReport', wrapHandler((filters) => {
-    return ReportService.stockReport(filters);
-  }));
-
-  ipcMain.handle('reports:movementReport', wrapHandler((filters) => {
-    return ReportService.movementReport(filters);
-  }));
-
-  ipcMain.handle('reports:lowStockReport', wrapHandler(() => {
-    return ReportService.lowStockReport();
-  }));
-
-  ipcMain.handle('reports:challanHistory', wrapHandler((filters) => {
-    return ReportService.challanHistory(filters);
-  }));
+  console.log('[IPC] Registering Report Handlers...');
+  const reportChannels = [
+    'reports:stockReport', 'reports:movementReport', 'reports:lowStockReport',
+    'reports:challanHistory', 'reports:detailedChallanHistory',
+    'reports:dailySummary', 'reports:monthlySummary', 'reports:exportExcel', 'reports:exportPdf'
+  ];
   
-  ipcMain.handle('reports:detailedChallanHistory', wrapHandler((filters) => {
-    return ReportService.detailedChallanHistory(filters);
-  }));
+  reportChannels.forEach(channel => ipcMain.removeHandler(channel));
 
+  ipcMain.handle('reports:stockReport', wrapHandler((filters) => ReportService.stockReport(filters)));
+  ipcMain.handle('reports:movementReport', wrapHandler((filters) => ReportService.movementReport(filters)));
+  ipcMain.handle('reports:lowStockReport', wrapHandler(() => ReportService.lowStockReport()));
+  ipcMain.handle('reports:challanHistory', wrapHandler((filters) => ReportService.challanHistory(filters)));
+  ipcMain.handle('reports:detailedChallanHistory', wrapHandler((filters) => ReportService.detailedChallanHistory(filters)));
 
-  ipcMain.handle('reports:dailySummary', wrapHandler((date) => {
-    return ReportService.dailySummary(date);
-  }));
-
-  ipcMain.handle('reports:monthlySummary', wrapHandler((year, month) => {
-    return ReportService.monthlySummary(year, month);
-  }));
+  ipcMain.handle('reports:dailySummary', wrapHandler((date) => ReportService.dailySummary(date)));
+  ipcMain.handle('reports:monthlySummary', wrapHandler((year, month) => ReportService.monthlySummary(year, month)));
 
   ipcMain.handle('reports:exportExcel', wrapHandler(async (type, data, options) => {
     const settings = SettingsRepo.getAll();
@@ -321,6 +376,10 @@ function registerIpcHandlers() {
     const settings = SettingsRepo.getAll();
     const columns = getReportColumns(type);
     return PdfGenerator.generateReportPdf(getReportTitle(type), columns, data, settings, options);
+  }));
+
+  ipcMain.handle('gatePass:clearHistory', wrapHandler(async () => {
+    return GatePassRepo.clearGatePassHistory();
   }));
 
   // ==================== BACKUP ====================
@@ -368,26 +427,25 @@ function registerIpcHandlers() {
     return ApprovalService.approve(id, notes);
   }));
 
-  ipcMain.handle('approvals:reject', wrapHandler((id, notes) => {
-    return ApprovalService.reject(id, notes);
-  }));
+  ipcMain.handle('approvals:reject', wrapHandler((id, notes) => ApprovalService.reject(id, notes)));
+  ipcMain.handle('approvals:updateData', wrapHandler((id, data) => ApprovalsRepo.updateData(id, data)));
 
   // ==================== SETTINGS ====================
-  ipcMain.handle('settings:getAll', wrapHandler(() => {
-    return SettingsRepo.getAll();
+  ipcMain.handle('settings:getAll', wrapHandler(async () => {
+    return await SettingsRepo.getAll();
   }));
 
-  ipcMain.handle('settings:get', wrapHandler((key) => {
-    return SettingsRepo.get(key);
+  ipcMain.handle('settings:get', wrapHandler(async (key) => {
+    return await SettingsRepo.get(key);
   }));
 
-  ipcMain.handle('settings:set', wrapHandler((key, value) => {
-    SettingsRepo.set(key, value);
+  ipcMain.handle('settings:set', wrapHandler(async (key, value) => {
+    await SettingsRepo.set(key, value);
     return { success: true };
   }));
 
-  ipcMain.handle('settings:setBulk', wrapHandler((settings) => {
-    SettingsRepo.setBulk(settings);
+  ipcMain.handle('settings:setBulk', wrapHandler(async (settings) => {
+    await SettingsRepo.setBulk(settings);
     return { success: true };
   }));
 
@@ -400,7 +458,8 @@ function registerIpcHandlers() {
       lowStockCount,
       todayChallans,
       recentChallans,
-      lowStockItems
+      lowStockItems,
+      issueStats
     ] = await Promise.all([
       ItemsRepo.getCount(),
       ItemsRepo.getTotalStock(),
@@ -408,7 +467,8 @@ function registerIpcHandlers() {
       ItemsRepo.getLowStockCount(),
       ChallansRepo.getTodayCount(),
       ChallansRepo.getRecent(8),
-      ItemsRepo.getLowStockItems()
+      ItemsRepo.getLowStockItems(),
+      IssueService.getIssueStats()
     ]);
 
     return {
@@ -419,6 +479,7 @@ function registerIpcHandlers() {
       todayChallans,
       recentChallans,
       lowStockItems,
+      ...issueStats,
     };
   }));
 
@@ -464,6 +525,56 @@ function registerIpcHandlers() {
   ipcMain.handle('system:clearData', wrapHandler(() => {
     return ChallansRepo.clearAllData();
   }));
+
+  // ==================== RECIPIENTS ====================
+  ipcMain.handle('recipients:getAll', wrapHandler((filters) => RecipientsRepo.getAll(filters)));
+  ipcMain.handle('recipients:create', wrapHandler((data) => RecipientsRepo.create(data)));
+  ipcMain.handle('recipients:update', wrapHandler((id, data) => RecipientsRepo.update(id, data)));
+  ipcMain.handle('recipients:delete', wrapHandler((id) => RecipientsRepo.delete(id)));
+
+  // ==================== ISSUES ====================
+  ipcMain.handle('issues:getAll', wrapHandler((filters) => IssueService.getAll(filters)));
+  ipcMain.handle('issues:getById', wrapHandler((id) => IssueService.getById(id)));
+  ipcMain.handle('issues:create', wrapHandler((data) => IssueService.create(data)));
+  ipcMain.handle('issues:getNextId', wrapHandler(() => IssueService.getNextId()));
+  ipcMain.handle('issues:getOutstandingItems', wrapHandler((issueId) => IssueService.getOutstandingItems(issueId)));
+  ipcMain.handle('issues:delete', wrapHandler((id) => IssueService.deleteIssue(id)));
+
+  ipcMain.handle('issues:exportPdf', wrapHandler(async (id) => {
+    const issue = await IssueService.getById(id);
+    const settings = await SettingsRepo.getAll();
+    return PdfGenerator.generateIssuePdf(issue, settings);
+  }));
+
+  ipcMain.handle('issues:exportExcel', wrapHandler(async (id) => {
+    const issue = await IssueService.getById(id);
+    const settings = await SettingsRepo.getAll();
+    const columns = [
+      { label: 'Item Name', key: 'item_name' },
+      { label: 'SPO', key: 'spo', format: (v, r) => [r.style_no, r.order_number, r.purchase_no].filter(Boolean).join(' / ') || '-' },
+      { label: 'Issued Qty', key: 'quantity', align: 'right' },
+      { label: 'Returned Qty', key: 'returned_quantity', align: 'right' },
+      { label: 'Unit', key: 'unit' }
+    ];
+    const subtitles = [
+      `Issue No: ${issue.issue_id}`,
+      `Date: ${new Date(issue.issue_date).toLocaleDateString('en-GB')}`,
+      `Recipient: ${issue.recipient_name} (${issue.issue_type})`
+    ];
+    return ExcelGenerator.generateReport(`Issue-${issue.issue_id}`, columns, issue.items, settings, { subtitles });
+  }));
+
+  // ==================== RETURNS ====================
+  ipcMain.handle('returns:getAll', wrapHandler((filters) => ReturnService.getAll(filters)));
+  ipcMain.handle('returns:getById', wrapHandler((id) => ReturnService.getById(id)));
+  ipcMain.handle('returns:create', wrapHandler((data) => ReturnService.create(data)));
+
+  // ==================== ISSUE REPORTS ====================
+  ipcMain.handle('reports:issueReport', wrapHandler((filters) => IssueService.issueReport(filters)));
+  ipcMain.handle('reports:returnReport', wrapHandler((filters) => IssueService.returnReport(filters)));
+  ipcMain.handle('reports:factoryProductionReport', wrapHandler((filters) => IssueService.factoryProductionReport(filters)));
+  ipcMain.handle('reports:employeeOutstandingReport', wrapHandler((filters) => IssueService.employeeOutstandingReport(filters)));
+  ipcMain.handle('reports:issueReturnSummary', wrapHandler((filters) => IssueService.issueReturnSummary(filters)));
 
   console.log('[IPC] All handlers registered');
 }
@@ -535,6 +646,57 @@ function getReportColumns(type) {
         { key: 'created_by_name', label: 'By', width: 60 },
         { key: 'notes', label: 'Notes', width: '*' },
       ];
+    case 'issueReport':
+      return [
+        { key: 'issue_id', label: 'Issue ID', width: 65 },
+        { key: 'issue_date', label: 'Date', width: 55, format: (v) => v ? new Date(v).toLocaleDateString('en-GB') : '' },
+        { key: 'issue_type', label: 'Type', width: 45 },
+        { key: 'recipient_name', label: 'Recipient', width: 80 },
+        { key: 'item_name', label: 'Item', width: 80 },
+        { key: 'item_code', label: 'Code', width: 60 },
+        { key: 'quantity', label: 'Issued', width: 45, align: 'right' },
+        { key: 'returned_quantity', label: 'Returned', width: 50, align: 'right' },
+        { key: 'damage_quantity', label: 'Damaged', width: 45, align: 'right' },
+        { key: 'rejected_quantity', label: 'Rejected', width: 45, align: 'right' },
+        { key: 'outstanding', label: 'Outstanding', width: 55, align: 'right' },
+        { key: 'status', label: 'Status', width: 45 },
+      ];
+    case 'returnReport':
+      return [
+        { key: 'issue_id', label: 'Issue ID', width: 65 },
+        { key: 'return_date', label: 'Return Date', width: 60, format: (v) => v ? new Date(v).toLocaleDateString('en-GB') : '' },
+        { key: 'recipient_name', label: 'Recipient', width: 80 },
+        { key: 'item_name', label: 'Item', width: 80 },
+        { key: 'item_code', label: 'Code', width: 60 },
+        { key: 'returned_quantity', label: 'Good Qty', width: 50, align: 'right' },
+        { key: 'damage_quantity', label: 'Damaged', width: 50, align: 'right' },
+        { key: 'rejected_quantity', label: 'Rejected', width: 50, align: 'right' },
+        { key: 'created_by_name', label: 'By', width: 60 },
+      ];
+    case 'employeeOutstanding':
+      return [
+        { key: 'recipient_name', label: 'Employee', width: 80 },
+        { key: 'issue_id', label: 'Issue ID', width: 65 },
+        { key: 'issue_date', label: 'Issue Date', width: 60, format: (v) => v ? new Date(v).toLocaleDateString('en-GB') : '' },
+        { key: 'item_name', label: 'Item', width: 80 },
+        { key: 'item_code', label: 'Code', width: 60 },
+        { key: 'quantity', label: 'Issued', width: 45, align: 'right' },
+        { key: 'outstanding', label: 'Outstanding', width: 55, align: 'right' },
+        { key: 'expected_return_date', label: 'Due Date', width: 60, format: (v) => v ? new Date(v).toLocaleDateString('en-GB') : '-' },
+      ];
+    case 'issueReturnSummary':
+      return [
+        { key: 'issue_id', label: 'Issue ID', width: 65 },
+        { key: 'issue_type', label: 'Type', width: 45 },
+        { key: 'recipient_name', label: 'Recipient', width: 80 },
+        { key: 'issue_date', label: 'Date', width: 55, format: (v) => v ? new Date(v).toLocaleDateString('en-GB') : '' },
+        { key: 'total_issued', label: 'Issued', width: 45, align: 'right' },
+        { key: 'total_returned', label: 'Returned', width: 50, align: 'right' },
+        { key: 'total_damaged', label: 'Damaged', width: 45, align: 'right' },
+        { key: 'total_rejected', label: 'Rejected', width: 45, align: 'right' },
+        { key: 'outstanding', label: 'Outstanding', width: 55, align: 'right' },
+        { key: 'status', label: 'Status', width: 45 },
+      ];
     default:
       return [];
   }
@@ -546,8 +708,11 @@ function getReportTitle(type) {
     case 'movement': return 'Stock Movement Report';
     case 'lowStock': return 'Low Stock Alert Report';
     case 'challan': return 'Challan History Report';
-
     case 'movementDetail': return 'Item Stock Movement Details';
+    case 'issueReport': return 'Issue Report';
+    case 'returnReport': return 'Return Report';
+    case 'employeeOutstanding': return 'Employee Outstanding Report';
+    case 'issueReturnSummary': return 'Issue vs Return Summary';
     default: return 'Report';
   }
 }

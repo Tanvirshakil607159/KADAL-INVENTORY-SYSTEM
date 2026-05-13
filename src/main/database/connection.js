@@ -36,17 +36,43 @@ async function initDatabase() {
     locateFile: () => wasmPath,
   });
 
-  // Load existing DB or create new (used for local settings and offline cache)
-  if (fs.existsSync(filePath)) {
-    const fileBuffer = fs.readFileSync(filePath);
-    db = new SQL.Database(fileBuffer);
-  } else {
-    db = new SQL.Database();
-  }
+  try {
+    // Load existing DB or create new (used for local settings and offline cache)
+    if (fs.existsSync(filePath)) {
+      const stats = fs.statSync(filePath);
+      console.log(`[DB] File size: ${stats.size} bytes`);
+      
+      const fileBuffer = fs.readFileSync(filePath);
+      db = new SQL.Database(fileBuffer);
+      
+      // Try a simple operation to verify database integrity
+      db.run('SELECT 1');
+    } else {
+      db = new SQL.Database();
+    }
 
-  // Enable WAL mode and foreign keys
-  db.run('PRAGMA journal_mode = WAL');
-  db.run('PRAGMA foreign_keys = ON');
+    // Enable WAL mode and foreign keys
+    db.run('PRAGMA journal_mode = WAL');
+    db.run('PRAGMA foreign_keys = ON');
+
+  } catch (err) {
+    console.error('[DB] CRITICAL: Failed to load database file:', err.message);
+    
+    if (fs.existsSync(filePath)) {
+      const corruptBackup = `${filePath}.corrupt.${Date.now()}`;
+      console.warn(`[DB] Renaming corrupted database to: ${corruptBackup}`);
+      try {
+        fs.renameSync(filePath, corruptBackup);
+      } catch (renameErr) {
+        console.error('[DB] Failed to rename corrupted file:', renameErr.message);
+      }
+    }
+
+    console.info('[DB] Initializing a fresh local database...');
+    db = new SQL.Database();
+    db.run('PRAGMA journal_mode = WAL');
+    db.run('PRAGMA foreign_keys = ON');
+  }
 
   // Run migrations for local tables
   runMigrations(db);
@@ -95,8 +121,8 @@ async function seedCoreData() {
     const isCloud = isCloudEnabled();
     console.log(`[DB] Seeding core data (${isCloud ? 'Cloud' : 'Local'})...`);
 
-    const superAdminPerms = JSON.stringify({ 
-      inventory: 'rw', challan: 'rw', reports: 'rw', users: 'rw', settings: 'rw', backup: 'rw', maintenance: 'rw' 
+    const superAdminPerms = JSON.stringify({
+      inventory: 'rw', challan: 'rw', reports: 'rw', users: 'rw', settings: 'rw', backup: 'rw', maintenance: 'rw'
     });
 
     if (isCloud) {
@@ -104,7 +130,7 @@ async function seedCoreData() {
       const { data: roles, error: rErr } = await supabase.from('roles').select('id').eq('name', 'Super Admin').maybeSingle();
       let roleId;
       if (rErr) throw rErr;
-      
+
       if (!roles) {
         console.log('[Cloud] Creating Super Admin role...');
         const { data: newRole, error: nErr } = await supabase.from('roles').insert([{ name: 'Super Admin', permissions: superAdminPerms }]).select().single();
@@ -114,10 +140,20 @@ async function seedCoreData() {
         roleId = roles.id;
       }
 
+      // 1.1 Ensure Monitoring role exists in Supabase
+      const { data: mRole } = await supabase.from('roles').select('id').eq('name', 'Monitoring').maybeSingle();
+      if (!mRole) {
+        console.log('[Cloud] Creating Monitoring role...');
+        const monitoringPerms = JSON.stringify({ 
+          inventory: 'r', challan: 'r', reports: 'r', users: 'r', settings: 'r', backup: 'none', maintenance: 'none' 
+        });
+        await supabase.from('roles').insert([{ name: 'Monitoring', permissions: monitoringPerms }]);
+      }
+
       // 2. Ensure superadmin user exists in Supabase
       const { data: user, error: uErr } = await supabase.from('users').select('id').eq('username', 'superadmin').maybeSingle();
       if (uErr) throw uErr;
-      
+
       if (!user) {
         console.log('[Cloud] Creating superadmin user...');
         const hash = bcrypt.hashSync('superadmin', 10);
@@ -243,8 +279,8 @@ function dbTransaction(fn) {
   };
 }
 
-module.exports = { 
+module.exports = {
   initDatabase, getDb, getSupabase, isCloudEnabled, initSupabase,
-  closeDatabase, getDbPath, dbPrepare, dbExec, dbTransaction, 
-  saveDatabase, setRestoring 
+  closeDatabase, getDbPath, dbPrepare, dbExec, dbTransaction,
+  saveDatabase, setRestoring
 };

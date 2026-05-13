@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Package, BarChart3, AlertTriangle, FileText, TrendingDown, CircleDollarSign } from 'lucide-react';
+import { Package, BarChart3, AlertTriangle, FileText, TrendingDown, CircleDollarSign, RotateCcw, Clock, ShieldAlert } from 'lucide-react';
 
 export default function DashboardPage() {
   const [stats, setStats] = useState(null);
@@ -44,6 +44,21 @@ export default function DashboardPage() {
           <div className="stat-card-icon" style={{ background: 'rgba(139,92,246,0.15)', color: '#8b5cf6' }}><FileText size={20} /></div>
           <div className="stat-card-value">{stats?.todayChallans || 0}</div>
           <div className="stat-card-label">Today's Challans</div>
+        </div>
+        <div className="stat-card" style={{ '--stat-color': '#ec4899' }}>
+          <div className="stat-card-icon" style={{ background: 'rgba(236,72,153,0.15)', color: '#ec4899' }}><RotateCcw size={20} /></div>
+          <div className="stat-card-value">{stats?.pendingReturns || 0}</div>
+          <div className="stat-card-label">Pending Returns</div>
+        </div>
+        <div className="stat-card" style={{ '--stat-color': '#ef4444' }}>
+          <div className="stat-card-icon" style={{ background: 'rgba(239,68,68,0.15)', color: '#ef4444' }}><Clock size={20} /></div>
+          <div className="stat-card-value">{stats?.overdueReturns || 0}</div>
+          <div className="stat-card-label">Overdue Returns</div>
+        </div>
+        <div className="stat-card" style={{ '--stat-color': '#f97316' }}>
+          <div className="stat-card-icon" style={{ background: 'rgba(249,115,22,0.15)', color: '#f97316' }}><ShieldAlert size={20} /></div>
+          <div className="stat-card-value">{stats?.totalDamaged || 0}</div>
+          <div className="stat-card-label">Damaged/Rejected</div>
         </div>
       </div>
 

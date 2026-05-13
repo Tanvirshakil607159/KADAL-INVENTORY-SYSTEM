@@ -1,251 +1,295 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import useStore from '../store/useStore';
-import { CheckCircle, XCircle, Info, Clock, User, FileText, Package, History } from 'lucide-react';
+import { Clock, CheckCircle, XCircle, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 
 export default function ApprovalsPage() {
-  const { addToast, user } = useStore();
-  const [activeTab, setActiveTab] = useState('pending');
-  const [showAll, setShowAll] = useState(true);
+  const { user, addToast, openModal, setCategories, setSuppliers, setUnits } = useStore();
   const [requests, setRequests] = useState([]);
-  const [selectedRequest, setSelectedRequest] = useState(null);
-  const [notes, setNotes] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState('pending'); // pending | history
+  const [buyers, setBuyers] = useState([]);
+  const [distinctValues, setDistinctValues] = useState({ names: [], colors: [], sizes: [], styles: [], purchases: [], orders: [] });
+  const [sortConfig, setSortConfig] = useState({ key: 'created_at', direction: 'desc' });
 
-  const isAdmin = user?.roleName === 'Admin' || user?.roleName === 'Super Admin';
+  const handleSort = (key) => {
+    setSortConfig(prev => ({
+      key,
+      direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc'
+    }));
+  };
 
-  const loadRequests = async () => {
+  const sortedRequests = [...requests].sort((a, b) => {
+    if (!sortConfig.key) return 0;
+    let valA = a[sortConfig.key];
+    let valB = b[sortConfig.key];
+    
+    valA = (valA || '').toString().toLowerCase();
+    valB = (valB || '').toString().toLowerCase();
+
+    if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
+    if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
+    return 0;
+  });
+
+  const SortHeader = ({ label, field, className = "" }) => (
+    <th 
+      className={`sortable ${className}`} 
+      onClick={() => handleSort(field)}
+    >
+      <div className="flex items-center justify-between">
+        {label}
+        <span className={`sort-icon-container ${sortConfig.key === field ? 'active' : ''}`}>
+          {sortConfig.key !== field ? <ArrowUpDown size={12} /> : 
+           sortConfig.direction === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />}
+        </span>
+      </div>
+    </th>
+  );
+
+  const isAdmin = user?.roleName === 'Super Admin' || user?.roleName === 'Admin';
+
+  const load = async () => {
     setLoading(true);
-    const filters = {
-      status: activeTab === 'pending' ? 'PENDING' : undefined,
-    };
-    if (!isAdmin || !showAll) {
-      filters.requestedBy = user?.id;
-    }
-    const res = await window.kadal.approvals.getAll(filters);
-    if (res.success) {
-      if (activeTab === 'history') {
-        setRequests(res.data.filter(r => r.status !== 'PENDING'));
-      } else {
-        setRequests(res.data);
-      }
-    }
+    try {
+      const [appRes, buyersRes, dvRes, catsRes, suppRes, unitsRes] = await Promise.all([
+        window.kadal.approvals.getAll(),
+        window.kadal.buyers.getAll(),
+        window.kadal.items.getDistinctValues(),
+        window.kadal.categories.getAll(),
+        window.kadal.suppliers.getAll(),
+        window.kadal.units.getAll()
+      ]);
+      if (appRes.success) setRequests(appRes.data);
+      if (buyersRes.success) setBuyers(buyersRes.data);
+      if (dvRes.success) setDistinctValues(dvRes.data);
+      if (catsRes.success) setCategories(catsRes.data);
+      if (suppRes.success) setSuppliers(suppRes.data);
+      if (unitsRes.success) setUnits(unitsRes.data);
+    } catch (e) { addToast('error', 'Failed to load approvals'); }
     setLoading(false);
   };
 
-  useEffect(() => {
-    loadRequests();
-  }, [activeTab, showAll]);
+  useEffect(() => { load(); }, []);
 
-  const handleApprove = async () => {
-    if (!selectedRequest) return;
-    const res = await window.kadal.approvals.approve(selectedRequest.id, notes);
-    if (res.success) {
-      addToast('success', 'Request approved successfully');
-      setSelectedRequest(null);
-      setNotes('');
-      loadRequests();
-    } else {
-      addToast('error', res.error || 'Failed to approve');
-    }
-  };
-
-  const handleReject = async () => {
-    if (!selectedRequest) return;
-    const res = await window.kadal.approvals.reject(selectedRequest.id, notes);
-    if (res.success) {
-      addToast('success', 'Request rejected');
-      setSelectedRequest(null);
-      setNotes('');
-      loadRequests();
-    } else {
-      addToast('error', res.error || 'Failed to reject');
-    }
-  };
+  const filteredRequests = sortedRequests.filter(r => 
+    activeTab === 'pending' ? r.status === 'PENDING' : r.status !== 'PENDING'
+  );
 
   const renderDataDetail = (data, type) => {
-    try {
-      const parsed = JSON.parse(data);
-      if (type === 'CREATE_CHALLAN') {
-        return (
-          <div className="approval-review-container">
-            <div className="approval-section">
-              <div className="approval-section-title"><User size={14}/> Receiver Information</div>
-              <div className="approval-grid">
-                <div className="approval-item">
-                  <label>Receiver Name</label>
-                  <span>{parsed.receiverName}</span>
-                </div>
-                <div className="approval-item">
-                  <label>Contact/Address</label>
-                  <span>{parsed.receiverContact || 'N/A'}</span>
-                </div>
+    if (!data) return null;
+    
+    const renderProperty = (label, value) => (
+      <div className="approval-data-item">
+        <label>{label}</label>
+        <span>{value || '-'}</span>
+      </div>
+    );
+
+    // Ensure data is an object
+    let safeData = data;
+    if (typeof data === 'string') {
+      try { safeData = JSON.parse(data); } catch (e) { return <pre>{data}</pre>; }
+    }
+    if (!safeData) return null;
+
+    switch (type) {
+      case 'CREATE_ITEM':
+      case 'UPDATE_ITEM':
+        const itemData = (type === 'UPDATE_ITEM' ? safeData.data : safeData) || {};
+        const oldData = (type === 'UPDATE_ITEM' ? safeData.oldData : null);
+
+        const renderField = (label, newValue, oldValue = null) => {
+          const isChanged = oldValue !== null && String(newValue) !== String(oldValue);
+          return (
+            <div className={`approval-data-item ${isChanged ? 'field-changed' : ''}`}>
+              <label>{label}</label>
+              <div className="flex flex-col">
+                <span className="new-value">{newValue || '-'}</span>
+                {isChanged && <span className="old-value">Was: {oldValue || '-'}</span>}
               </div>
             </div>
+          );
+        };
 
-            <div className="approval-section">
-              <div className="approval-section-title"><Package size={14}/> Items to Deliver</div>
-              <table className="approval-table">
+        return (
+          <div className="approval-details-rich">
+            <div className="approval-data-grid">
+              {renderField('Name', itemData.name, oldData?.name)}
+              {renderField('Code', itemData.itemCode || itemData.item_code, oldData?.item_code)}
+              {renderField('Category', itemData.categoryName || itemData.category_name || itemData.category_id, oldData?.category_name)}
+              {renderField('Supplier', itemData.supplierName || itemData.supplier_name || itemData.supplier_id, oldData?.supplier_name)}
+              {renderField('Buyer', itemData.buyerName || itemData.buyer_name, oldData?.buyer_name)}
+              {renderField('Style', itemData.styleName || itemData.style_name, oldData?.style_name)}
+              {renderField('Order No', itemData.orderNumber || itemData.order_number, oldData?.order_number)}
+              {renderField('Purchase No', itemData.purchaseNo || itemData.purchase_no, oldData?.purchase_no)}
+              {renderField('Size', itemData.size, oldData?.size)}
+              {renderField('Color', itemData.color, oldData?.color)}
+              {renderField('Unit', itemData.unit, oldData?.unit)}
+              {renderField('Unit Price', itemData.unitPrice || itemData.unit_price, oldData?.unit_price)}
+              {renderField('Opening Stock', itemData.openingStock || itemData.opening_stock, oldData?.opening_stock)}
+              {renderField('Min Level', itemData.minStockLevel || itemData.min_stock_level, oldData?.min_stock_level)}
+            </div>
+            {itemData.notes && (
+              <div className="mt-3 p-2 bg-light rounded" style={{ fontSize: 12 }}>
+                <strong>Notes:</strong> {itemData.notes}
+              </div>
+            )}
+          </div>
+        );
+
+      case 'STOCK_MOVEMENT':
+        return (
+          <div className="approval-details-rich">
+            <div className="approval-data-grid">
+              {renderProperty('Item', safeData.itemName)}
+              {renderProperty('Type', safeData.type)}
+              {renderProperty('Quantity', safeData.quantity)}
+              {renderProperty('Reference', safeData.reference)}
+            </div>
+            {safeData.notes && (
+              <div className="mt-3 p-2 bg-light rounded" style={{ fontSize: 12 }}>
+                <strong>Notes:</strong> {safeData.notes}
+              </div>
+            )}
+          </div>
+        );
+
+      case 'CREATE_CHALLAN':
+        return (
+          <div className="approval-details-rich">
+            <div className="approval-data-grid mb-3">
+              {renderProperty('Receiver', safeData.receiverName)}
+              {renderProperty('Contact', safeData.receiverContact)}
+              {renderProperty('Address', safeData.receiverAddress)}
+              {renderProperty('Date', safeData.challanDate ? new Date(safeData.challanDate).toLocaleDateString() : 'Today')}
+            </div>
+            <div className="table-wrapper" style={{ maxHeight: 300, border: '1px solid var(--border)' }}>
+              <table className="data-table table-sm">
                 <thead>
                   <tr>
                     <th>Item Name</th>
-                    <th className="text-right">Quantity</th>
-                    <th className="text-right">Unit</th>
+                    <th>Code</th>
+                    <th>Size/Color</th>
+                    <th>Style/Order</th>
+                    <th className="text-right">Qty</th>
+                    <th>Unit</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {parsed.items.map((it, idx) => (
-                    <tr key={idx}>
-                      <td>{it.name}</td>
-                      <td className="text-right fw-bold">{it.quantity}</td>
-                      <td className="text-right">{it.unit}</td>
+                  {safeData.items?.map((it, i) => (
+                    <tr key={i}>
+                      <td style={{ fontWeight: 600 }}>{it.name}</td>
+                      <td className="text-mono" style={{ fontSize: 11 }}>{it.itemCode || '-'}</td>
+                      <td style={{ fontSize: 11 }}>{[it.size, it.color].filter(Boolean).join(' / ') || '-'}</td>
+                      <td style={{ fontSize: 11 }}>{[it.styleName, it.orderNumber].filter(Boolean).join(' / ') || '-'}</td>
+                      <td className="text-right fw-bold" style={{ color: 'var(--primary)' }}>{it.quantity}</td>
+                      <td className="text-muted">{it.unit}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-            
-            {parsed.notes && (
-              <div className="approval-section">
-                <div className="approval-section-title"><FileText size={14}/> Notes</div>
-                <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{parsed.notes}</p>
+            {safeData.notes && (
+              <div className="mt-3 p-2 bg-light rounded" style={{ fontSize: 12 }}>
+                <strong>General Notes:</strong> {safeData.notes}
               </div>
             )}
           </div>
         );
-      }
-      
-      if (type === 'CREATE_GATE_PASS') {
+
+      case 'CREATE_GATE_PASS':
         return (
-          <div className="approval-review-container">
-            <div className="approval-section">
-              <div className="approval-section-title"><FileText size={14}/> Gate Pass Details</div>
-              <div className="approval-grid">
-                <div className="approval-item">
-                  <label>Linked Challans</label>
-                  <span>{parsed.challanIds?.length || 0} items</span>
-                </div>
-                <div className="approval-item">
-                  <label>Poly Bags</label>
-                  <span>{parsed.polyBags || 0}</span>
-                </div>
-                <div className="approval-item">
-                  <label>Cartons</label>
-                  <span>{parsed.cartons || 0}</span>
-                </div>
-                <div className="approval-item">
-                  <label>Plastic Bags</label>
-                  <span>{parsed.plasticBags || 0}</span>
-                </div>
+          <div className="approval-details-rich">
+            <div className="approval-data-grid mb-3">
+              {renderProperty('Poly Bags', safeData.polyBags)}
+              {renderProperty('Cartons', safeData.cartons)}
+              {renderProperty('Plastic Bags', safeData.plasticBags)}
+            </div>
+            <div className="p-3 bg-light rounded">
+              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>Included Challan IDs:</div>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {safeData.challanIds?.map((cid, i) => (
+                  <span key={i} className="badge badge-info">ID: {cid}</span>
+                ))}
               </div>
             </div>
           </div>
         );
-      }
 
-      if (type === 'CREATE_ITEM' || type === 'UPDATE_ITEM') {
-        return (
-          <div className="approval-review-container">
-            <div className="approval-section">
-              <div className="approval-section-title"><Package size={14}/> {type === 'CREATE_ITEM' ? 'New Item Details' : 'Updated Item Details'}</div>
-              <div className="approval-grid">
-                {parsed.itemCode && <div className="approval-item"><label>Code</label><span>{parsed.itemCode}</span></div>}
-                <div className="approval-item"><label>Name</label><span>{parsed.name || parsed.data?.name}</span></div>
-                {parsed.openingStock !== undefined && <div className="approval-item"><label>Opening Stock</label><span>{parsed.openingStock}</span></div>}
-                {parsed.data?.unitPrice !== undefined && <div className="approval-item"><label>New Price</label><span>{parsed.data.unitPrice}</span></div>}
-              </div>
-            </div>
-          </div>
-        );
-      }
-
-      if (type === 'STOCK_MOVEMENT') {
-        return (
-          <div className="approval-review-container">
-            <div className="approval-section">
-              <div className="approval-section-title"><History size={14}/> Stock Movement</div>
-              <div className="approval-grid">
-                <div className="approval-item"><label>Item</label><span>{parsed.itemName || parsed.itemId}</span></div>
-                <div className="approval-item"><label>Type</label><span className={`badge ${parsed.type === 'IN' ? 'badge-success' : 'badge-danger'}`}>{parsed.type}</span></div>
-                <div className="approval-item"><label>Quantity</label><span className="fw-bold">{parsed.quantity}</span></div>
-                <div className="approval-item"><label>Reference</label><span>{parsed.reference || 'N/A'}</span></div>
-                <div className="approval-item full-width"><label>Reason/Notes</label><span>{parsed.notes || 'No notes provided'}</span></div>
-              </div>
-            </div>
-          </div>
-        );
-      }
-
-      return <pre style={{ background: 'var(--bg-primary)', padding: 10, borderRadius: 6, fontSize: 12 }}>{JSON.stringify(parsed, null, 2)}</pre>;
-    } catch (e) {
-      return <div className="text-danger">Error parsing data: {e.message}</div>;
+      default:
+        return <pre style={{ fontSize: 11, background: '#f5f5f5', padding: 10 }}>{JSON.stringify(safeData, null, 2)}</pre>;
     }
   };
 
-  return (
-    <div className="page-container">
-      <header className="page-header">
-        <div className="header-title">
-          <CheckCircle size={24} className="text-primary" />
-          <h1>Approvals Management</h1>
-        </div>
-        <div className="header-actions flex items-center gap-4">
-          {isAdmin && (
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
-              <input type="checkbox" checked={showAll} onChange={e => setShowAll(e.target.checked)} />
-              Show All Users' Requests
-            </label>
-          )}
-        </div>
-      </header>
+  const handleReview = (request) => {
+    openModal('APPROVAL_REVIEW', { 
+      selectedRequest: request, 
+      renderDataDetail, 
+      buyers,
+      distinctValues,
+      onSaved: load 
+    });
+  };
 
+  return (
+    <div className="approvals-container">
       <div className="tabs">
-        <button className={`tab ${activeTab === 'pending' ? 'active' : ''}`} onClick={() => setActiveTab('pending')}>Pending Requests</button>
-        <button className={`tab ${activeTab === 'history' ? 'active' : ''}`} onClick={() => setActiveTab('history')}>Approval History</button>
+        <button className={`tab ${activeTab === 'pending' ? 'active' : ''}`} onClick={() => setActiveTab('pending')}>
+          Pending Approvals ({requests.filter(r => r.status === 'PENDING').length})
+        </button>
+        <button className={`tab ${activeTab === 'history' ? 'active' : ''}`} onClick={() => setActiveTab('history')}>
+          Recent History
+        </button>
       </div>
 
       <div className="card">
         {loading ? (
           <div className="loading"><div className="spinner"></div></div>
-        ) : requests.length === 0 ? (
+        ) : filteredRequests.length === 0 ? (
           <div className="empty-state">
-            <CheckCircle size={48} />
-            <h3>No {activeTab} requests</h3>
-            <p>Everything looks clear!</p>
+            <Clock size={40} className="text-muted" />
+            <p>No {activeTab} requests found</p>
           </div>
         ) : (
           <div className="table-wrapper">
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Date</th>
-                  <th>Type</th>
-                  <th>Requested By</th>
-                  {activeTab === 'history' && <th>Status</th>}
-                  <th className="text-right">Action</th>
+                  <SortHeader label="Date" field="created_at" />
+                  <SortHeader label="Requester" field="requester_name" />
+                  <SortHeader label="Module" field="type" />
+                  <th>Details</th>
+                  <SortHeader label="Status" field="status" />
+                  <th>Action</th>
                 </tr>
               </thead>
               <tbody>
-                {requests.map(req => (
+                {filteredRequests.map(req => (
                   <tr key={req.id}>
-                    <td className="text-muted" style={{ fontSize: 12 }}>{new Date(req.created_at).toLocaleString()}</td>
+                    <td className="text-muted" style={{ fontSize: 13 }}>{new Date(req.created_at).toLocaleString()}</td>
+                    <td style={{ fontWeight: 600 }}>{req.requester_name}</td>
                     <td>
-                      <span className="badge badge-info">{req.type.replace(/_/g, ' ')}</span>
+                      <span className="badge badge-info">
+                        {req.type === 'CREATE_ITEM' || req.type === 'UPDATE_ITEM' ? 'Inventory' :
+                         req.type === 'STOCK_MOVEMENT' ? 'Stock' :
+                         req.type === 'CREATE_CHALLAN' ? 'Challan' :
+                         req.type === 'CREATE_GATE_PASS' ? 'Gate Pass' : req.type}
+                      </span>
+                    </td>
+                    <td style={{ fontSize: 13 }}>
+                      {req.type === 'CREATE_ITEM' && `New Item: ${req.data.name}`}
+                      {req.type === 'UPDATE_ITEM' && `Update Item: ${req.data.data?.name || req.data.name}`}
+                      {req.type === 'STOCK_MOVEMENT' && `Stock ${req.data.type}: ${req.data.quantity} ${req.data.itemName || 'units'}`}
+                      {req.type === 'CREATE_CHALLAN' && `New Challan: ${req.data.receiverName}`}
+                      {req.type === 'CREATE_GATE_PASS' && `New Gate Pass (${req.data.challanIds?.length || 0} Challans)`}
                     </td>
                     <td>
-                      <div className="flex items-center gap-2">
-                        <div className="topbar-user-avatar" style={{ width: 24, height: 24, fontSize: 10 }}>{req.requester_name?.charAt(0)}</div>
-                        <span>{req.requester_name}</span>
-                      </div>
+                      <span className={`badge badge-${req.status === 'PENDING' ? 'warning' : req.status === 'APPROVED' ? 'success' : 'danger'}`}>
+                        {req.status}
+                      </span>
                     </td>
-                    {activeTab === 'history' && (
-                      <td>
-                        <span className={`badge badge-${req.status === 'APPROVED' ? 'success' : 'danger'}`}>
-                          {req.status}
-                        </span>
-                      </td>
-                    )}
-                    <td className="text-right">
-                      <button className="btn btn-sm btn-outline" onClick={() => setSelectedRequest(req)}>
+                    <td>
+                      <button className="btn btn-ghost btn-sm" onClick={() => handleReview(req)}>
                         {activeTab === 'history' ? 'View Details' : 'Review Details'}
                       </button>
                     </td>
@@ -256,75 +300,6 @@ export default function ApprovalsPage() {
           </div>
         )}
       </div>
-
-      {selectedRequest && (
-        <div className="modal-overlay" onClick={() => setSelectedRequest(null)}>
-          <div className="modal" style={{ maxWidth: 650 }} onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <div className="modal-title flex items-center gap-2">
-                <Clock size={18} className="text-warning" />
-                {selectedRequest.status === 'PENDING' ? 'Review Request' : 'Request Details'}: {selectedRequest.type.replace(/_/g, ' ')}
-              </div>
-              <button className="btn btn-ghost btn-sm" onClick={() => setSelectedRequest(null)}>&times;</button>
-            </div>
-            <div className="modal-body">
-              <div style={{ marginBottom: 24 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-                  <div className="topbar-user-avatar">{selectedRequest.requester_name?.charAt(0)}</div>
-                  <div>
-                    <div style={{ fontSize: 14, fontWeight: 600 }}>{selectedRequest.requester_name}</div>
-                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Requested {new Date(selectedRequest.created_at).toLocaleString()}</div>
-                  </div>
-                  {selectedRequest.status !== 'PENDING' && (
-                    <div style={{ marginLeft: 'auto' }}>
-                      <span className={`badge badge-${selectedRequest.status === 'APPROVED' ? 'success' : 'danger'}`} style={{ fontSize: 14, padding: '6px 16px' }}>
-                        {selectedRequest.status}
-                      </span>
-                    </div>
-                  )}
-                </div>
-
-                {renderDataDetail(selectedRequest.data, selectedRequest.type)}
-
-                {selectedRequest.status !== 'PENDING' && selectedRequest.notes && (
-                  <div className="approval-section" style={{ marginTop: 20, borderLeft: `4px solid var(--${selectedRequest.status === 'APPROVED' ? 'success' : 'danger'})` }}>
-                    <div className="approval-section-title">Admin Response Notes</div>
-                    <p style={{ fontSize: 13, whiteSpace: 'pre-wrap' }}>{selectedRequest.notes}</p>
-                  </div>
-                )}
-              </div>
-
-              {selectedRequest.status === 'PENDING' && (
-                <div className="approval-notes-box">
-                  <div className="form-group">
-                    <label className="form-label">Decision Notes</label>
-                    <textarea 
-                      className="form-textarea" 
-                      rows={3} 
-                      placeholder="Enter reason for approval or rejection (optional)..." 
-                      value={notes}
-                      onChange={e => setNotes(e.target.value)}
-                    />
-                  </div>
-                </div>
-              )}
-            </div>
-            <div className="modal-footer">
-              <button className="btn btn-outline" onClick={() => setSelectedRequest(null)}>{selectedRequest.status === 'PENDING' ? 'Later' : 'Close'}</button>
-              {selectedRequest.status === 'PENDING' && isAdmin && (
-                <>
-                  <button className="btn btn-danger" onClick={handleReject}>
-                    <XCircle size={16} /> Reject Request
-                  </button>
-                  <button className="btn btn-primary" onClick={handleApprove}>
-                    <CheckCircle size={16} /> Approve & Execute
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

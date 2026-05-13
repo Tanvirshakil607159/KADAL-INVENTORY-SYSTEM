@@ -1,11 +1,21 @@
 import { create } from 'zustand';
 
+const savedUser = localStorage.getItem('kadal_user');
+const initialUser = savedUser ? JSON.parse(savedUser) : null;
+
 const useStore = create((set, get) => ({
   // Auth
-  user: null,
-  isLoggedIn: false,
-  setUser: (user) => set({ user, isLoggedIn: !!user }),
-  logout: () => set({ user: null, isLoggedIn: false }),
+  user: initialUser,
+  isLoggedIn: !!initialUser,
+  setUser: (user) => {
+    if (user) localStorage.setItem('kadal_user', JSON.stringify(user));
+    else localStorage.removeItem('kadal_user');
+    set({ user, isLoggedIn: !!user });
+  },
+  logout: () => {
+    localStorage.removeItem('kadal_user');
+    set({ user: null, isLoggedIn: false });
+  },
 
   // Navigation
   currentPage: 'dashboard',
@@ -40,9 +50,11 @@ const useStore = create((set, get) => ({
   categories: [],
   suppliers: [],
   units: [],
+  roles: [],
   setCategories: (categories) => set({ categories }),
   setSuppliers: (suppliers) => set({ suppliers }),
   setUnits: (units) => set({ units }),
+  setRoles: (roles) => set({ roles }),
 
   // Notification dots for sidebar
   notificationDots: {},
@@ -53,6 +65,39 @@ const useStore = create((set, get) => ({
     const dots = { ...state.notificationDots };
     delete dots[moduleId];
     return { notificationDots: dots };
+  }),
+
+  // Global Modals
+  modal: null, // { type: string, data: any, isMinimized: boolean }
+  openModal: (type, data = {}) => set({ modal: { type, data, isMinimized: false } }),
+  closeModal: () => set({ modal: null }),
+  setModalMinimized: (isMinimized) => set((state) => ({
+    modal: state.modal ? { ...state.modal, isMinimized } : null
+  })),
+
+  // Challan Creation State (Persistent across modules)
+  challanForm: { receiverId: '', receiverName: '', receiverContact: '', receiverAddress: '', notes: '' },
+  challanItems: [],
+  setChallanForm: (form) => set({ challanForm: form }),
+  setChallanItems: (items) => set({ challanItems: items }),
+  clearChallan: () => set({ challanForm: { receiverId: '', receiverName: '', receiverContact: '', receiverAddress: '', notes: '' }, challanItems: [] }),
+
+  // Issue Module State
+  issueForm: { 
+    issueType: 'FACTORY', recipientId: '', recipientName: '', 
+    issueDate: new Date().toISOString().split('T')[0], expectedReturnDate: '', 
+    remarks: '', attachmentPath: '' 
+  },
+  issueItems: [],
+  setIssueForm: (form) => set({ issueForm: form }),
+  setIssueItems: (items) => set({ issueItems: items }),
+  clearIssue: () => set({ 
+    issueForm: { 
+      issueType: 'FACTORY', recipientId: '', recipientName: '', 
+      issueDate: new Date().toISOString().split('T')[0], expectedReturnDate: '', 
+      remarks: '', attachmentPath: '' 
+    }, 
+    issueItems: [] 
   }),
 }));
 

@@ -1,6 +1,6 @@
 {
   "name": "kadal-inventory",
-  "version": "1.0.8",
+  "version": "1.1.31",
   "description": "KADAL - Inventory Management System for KA Design Accessories LTD",
   "main": "src/main/index.js",
   "author": "KA Design Accessories LTD",
@@ -11,11 +11,12 @@
     "dev:renderer": "vite",
     "dev:main": "cross-env NODE_ENV=development electron .",
     "build": "vite build",
-    "dist": "npm run build && electron-builder",
-    "release": "npm run build && electron-builder --publish always"
+    "dist": "npm run build && electron-builder && node scripts/copy-installer.js",
+    "release": "npm run build && electron-builder --publish always && node scripts/copy-installer.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.105.4",
+    "app-builder-bin": "^5.0.0-alpha.10",
     "bcryptjs": "^2.4.3",
     "call-bind": "^1.0.9",
     "call-bind-apply-helpers": "^1.0.2",
@@ -63,7 +64,6 @@
       "target": [
         "nsis"
       ],
-
       "publish": [
         {
           "provider": "github",

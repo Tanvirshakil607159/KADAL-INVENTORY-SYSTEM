@@ -12,7 +12,12 @@ const ReportService = {
   
   async lowStockReport(filters = {}) { return await ItemsRepo.getLowStockItems(filters); },
   
-  async challanHistory(filters = {}) { return await ChallansRepo.getDetailedHistory(filters); },
+  async challanHistory(filters = {}) { 
+    return await ChallansRepo.getDetailedHistory(filters); 
+  },
+  async detailedChallanHistory(filters = {}) {
+    return await this.challanHistory(filters);
+  },
 
   
   async dailySummary(date) {

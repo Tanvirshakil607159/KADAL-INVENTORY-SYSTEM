@@ -21,9 +21,10 @@ const HEADER_MAP = {
   styleName: ['style', 'style name', 'style_name', 'style no', 'style no.'],
   purchaseNo: ['purchase no', 'purchase_no', 'po', 'po no', 'po number', 'purchase order', 'purchase no.'],
   openingStock: ['stock', 'opening stock', 'opening_stock', 'qty', 'quantity', 'current stock', 'balance'],
-  minStockLevel: ['min stock', 'min_stock', 'min level', 'minimum', 'min_stock_level', 'reorder'],
+  minStockLevel: ['min stock', 'min_stock', 'min level', 'minimum', 'min_stock_level', 'reorder', 'min stock level'],
   unitPrice: ['unit price', 'unit_price', 'price', 'cost', 'rate', 'value'],
   orderNumber: ['order number', 'order_number', 'order no', 'order no.'],
+  orderQuantity: ['order quantity', 'order qty', 'order_quantity', 'order_qty', 'booking qty', 'booking_qty'],
   notes: ['notes', 'note', 'remark', 'remarks', 'comment', 'comments'],
 };
 
@@ -118,8 +119,10 @@ const ImportService = {
       const styleName = getValue('styleName');
       const purchaseNo = getValue('purchaseNo');
       const orderNumber = getValue('orderNumber');
+      const size = getValue('size');
+      const color = getValue('color');
 
-      const key = `${name.toLowerCase()}|${category.toLowerCase()}|${styleName.toLowerCase()}|${purchaseNo.toLowerCase()}|${orderNumber.toLowerCase()}`;
+      const key = `${name.toLowerCase()}|${category.toLowerCase()}|${styleName.toLowerCase()}|${purchaseNo.toLowerCase()}|${orderNumber.toLowerCase()}|${size.toLowerCase()}|${color.toLowerCase()}`;
 
       const openingStock = parseInt(getValue('openingStock'), 10) || 0;
 
@@ -131,14 +134,15 @@ const ImportService = {
         rowsMap.set(key, {
           name,
           category,
-          size: getValue('size'),
-          color: getValue('color'),
+          size,
+          color,
           unit: getValue('unit') || 'pcs',
           supplier: getValue('supplier'),
           buyerName: getValue('buyerName'),
           styleName,
           purchaseNo,
           orderNumber,
+          orderQuantity: parseInt(getValue('orderQuantity'), 10) || 0,
           unitPrice: parseFloat(getValue('unitPrice')) || 0,
           openingStock,
           minStockLevel: parseInt(getValue('minStockLevel'), 10) || 0,
@@ -210,6 +214,7 @@ const ImportService = {
           styleName: row.styleName || null,
           purchaseNo: row.purchaseNo || null,
           orderNumber: row.orderNumber || null,
+          orderQuantity: row.orderQuantity || 0,
           unitPrice: row.unitPrice || 0,
         });
 
@@ -296,6 +301,7 @@ const ImportService = {
       { header: 'Style Name', key: 'styleName', width: 15 },
       { header: 'Purchase No', key: 'purchaseNo', width: 15 },
       { header: 'Order Number', key: 'orderNumber', width: 15 },
+      { header: 'Order Quantity', key: 'orderQuantity', width: 15 },
       { header: 'Unit Price', key: 'unitPrice', width: 15 },
       { header: 'Opening Stock', key: 'openingStock', width: 15 },
       { header: 'Min Stock Level', key: 'minStockLevel', width: 15 },
@@ -313,6 +319,7 @@ const ImportService = {
       styleName: 'SUMMER-26',
       purchaseNo: 'PO-98765',
       orderNumber: 'ORD-54321',
+      orderQuantity: 1000,
       unitPrice: 5.50,
       openingStock: 500,
       minStockLevel: 100,

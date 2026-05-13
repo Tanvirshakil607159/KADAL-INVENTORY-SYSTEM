@@ -11,10 +11,26 @@ const InventoryService = {
   async search(query) { return await ItemsRepo.search(query); },
 
   async create(data) {
-    if (AuthService.getCurrentUser()?.roleName !== 'Admin') {
+    if (await ItemsRepo.checkCodeExists(data.itemCode)) {
+      throw new Error(`Item code "${data.itemCode}" already exists`);
+    }
+    const user = AuthService.getCurrentUser();
+    const isAdmin = user?.roleName === 'Admin' || user?.roleName === 'Super Admin';
+    if (!isAdmin) {
       const requireApproval = SettingsRepo.get('require_inventory_approval') === 'true';
       if (requireApproval) {
         const ApprovalService = require('./approval-service');
+        // Enrich data for better approval UI
+        if (data.categoryId) {
+          const CategoriesRepo = require('../database/repositories/categories');
+          const cat = await CategoriesRepo.getById(data.categoryId);
+          if (cat) data.categoryName = cat.name;
+        }
+        if (data.supplierId) {
+          const SuppliersRepo = require('../database/repositories/suppliers');
+          const supp = await SuppliersRepo.getById(data.supplierId);
+          if (supp) data.supplierName = supp.name;
+        }
         return await ApprovalService.createRequest('CREATE_ITEM', data);
       }
     }
@@ -22,8 +38,21 @@ const InventoryService = {
   },
 
   async _executeCreate(data) {
-    if (!data.itemCode || !data.name) throw new Error('Item code and name are required');
-    if (await ItemsRepo.checkCodeExists(data.itemCode)) throw new Error(`Item code "${data.itemCode}" already exists`);
+    if (!data.name) throw new Error('Item name is required');
+    
+    // Check if the code already exists (common in approval race conditions)
+    // We use a loop to be 100% sure we get a unique code
+    let attempts = 0;
+    while (data.itemCode && await ItemsRepo.checkCodeExists(data.itemCode) && attempts < 10) {
+      const oldCode = data.itemCode;
+      data.itemCode = await ItemsRepo.getNextCode();
+      console.warn(`[InventoryService] Item code collision: "${oldCode}" already exists. Using new code: "${data.itemCode}"`);
+      attempts++;
+    }
+    
+    if (!data.itemCode) {
+      data.itemCode = await ItemsRepo.getNextCode();
+    }
 
     const id = await ItemsRepo.create(data);
     if (data.openingStock && data.openingStock > 0) {
@@ -38,11 +67,27 @@ const InventoryService = {
   },
 
   async update(id, data) {
-    if (AuthService.getCurrentUser()?.roleName !== 'Admin') {
+    const user = AuthService.getCurrentUser();
+    const isAdmin = user?.roleName === 'Admin' || user?.roleName === 'Super Admin';
+    if (!isAdmin) {
       const requireApproval = SettingsRepo.get('require_inventory_approval') === 'true';
       if (requireApproval) {
         const ApprovalService = require('./approval-service');
-        return await ApprovalService.createRequest('UPDATE_ITEM', { id, data });
+        const existing = await ItemsRepo.getById(id);
+        
+        // Enrich data for better approval UI
+        if (data.categoryId) {
+          const CategoriesRepo = require('../database/repositories/categories');
+          const cat = await CategoriesRepo.getById(data.categoryId);
+          if (cat) data.categoryName = cat.name;
+        }
+        if (data.supplierId) {
+          const SuppliersRepo = require('../database/repositories/suppliers');
+          const supp = await SuppliersRepo.getById(data.supplierId);
+          if (supp) data.supplierName = supp.name;
+        }
+        
+        return await ApprovalService.createRequest('UPDATE_ITEM', { id, data, oldData: existing });
       }
     }
     return await this._executeUpdate(id, data);

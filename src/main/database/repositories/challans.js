@@ -114,11 +114,10 @@ const ChallansRepo = {
     if (isCloudEnabled()) {
       const supabase = getSupabase();
       let query = supabase.from('challan_items').select(`
-        id, quantity, unit, notes,
+        id, quantity, unit, notes, challan_id,
         challans!inner(challan_number, challan_date, receiver_name, status, created_at, users!challans_created_by_fkey(full_name)),
         items!inner(*)
       `).order('challan_date', { foreignTable: 'challans', ascending: false }).limit(1000);
-
 
       if (filters.status) query = query.eq('challans.status', filters.status);
       if (filters.dateFrom) query = query.gte('challans.challan_date', filters.dateFrom);
@@ -137,6 +136,7 @@ const ChallansRepo = {
         const total_shipped = await this.getTotalDelivered(item.id);
         return {
           id: row.id,
+          challan_id: row.challan_id,
           challan_number: challan.challan_number,
           challan_date: challan.challan_date,
           receiver_name: challan.receiver_name,
@@ -150,7 +150,6 @@ const ChallansRepo = {
           size: item.size,
           color: item.color,
           order_quantity: item.order_quantity,
-
           shipped_quantity: row.quantity,
           unit: row.unit,
           total_shipped,
@@ -173,7 +172,6 @@ const ChallansRepo = {
     }
     
     if (filters.excludeUsedInGatePass) {
-       // We'll handle this in a simpler way: just get the IDs and exclude them
        const GatePassRepo = require('./gate-passes');
        const usedIds = await GatePassRepo.getUsedChallanIds();
        if (usedIds.length > 0) {
@@ -181,16 +179,13 @@ const ChallansRepo = {
        }
     }
 
-
-
     const w = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
     const sql = `
       SELECT 
-        ci.id as id, ci.quantity as shipped_quantity, ci.unit as unit,
+        ci.id as id, ci.challan_id, ci.quantity as shipped_quantity, ci.unit as unit,
         c.challan_number as challan_number, c.challan_date as challan_date, c.receiver_name as receiver_name, c.status as status,
         u.full_name as created_by_name,
         i.name as item_name, i.style_name as style_name, i.order_number as order_number, i.purchase_no as purchase_no, i.order_quantity as order_quantity, i.size as size, i.color as color, i.buyer_name as buyer_name,
-
         (SELECT COALESCE(SUM(ci2.quantity), 0) FROM challan_items ci2 JOIN challans c2 ON ci2.challan_id = c2.id WHERE ci2.item_id = i.id AND c2.status = 'ACTIVE') as total_shipped
       FROM challan_items ci
       JOIN challans c ON ci.challan_id = c.id
@@ -339,27 +334,56 @@ const ChallansRepo = {
     const dateStr = today.getFullYear().toString() + (today.getMonth()+1).toString().padStart(2,'0') + today.getDate().toString().padStart(2,'0');
     const pattern = `${prefix}-${dateStr}-%`;
     
+    let maxSeq = 0;
     if (isCloudEnabled()) {
       const { data, error } = await getSupabase()
         .from('challans')
         .select('challan_number')
-        .ilike('challan_number', pattern)
-        .order('challan_number', { ascending: false })
-        .limit(1);
+        .ilike('challan_number', pattern);
       
       if (error) throw error;
-      let maxSeq = 0;
-      if (data && data.length > 0) {
-        const parts = data[0].challan_number.split('-');
-        maxSeq = parseInt(parts[parts.length-1], 10);
-      }
-      return `${prefix}-${dateStr}-${(maxSeq + 1).toString().padStart(4, '0')}`;
+      (data || []).forEach(r => {
+        const parts = r.challan_number.split('-');
+        const seq = parseInt(parts[2], 10);
+        if (!isNaN(seq) && seq > maxSeq) maxSeq = seq;
+      });
+    } else {
+      const rows = dbPrepare(`SELECT challan_number FROM challans WHERE challan_number LIKE ?`).all(pattern);
+      rows.forEach(r => {
+        const parts = r.challan_number.split('-');
+        const seq = parseInt(parts[2], 10);
+        if (!isNaN(seq) && seq > maxSeq) maxSeq = seq;
+      });
     }
 
-    const last = dbPrepare(`SELECT challan_number FROM challans WHERE challan_number LIKE ? ORDER BY challan_number DESC LIMIT 1`).get(pattern);
-    let seq = 1;
-    if (last) { const parts = last.challan_number.split('-'); seq = parseInt(parts[parts.length-1], 10) + 1; }
-    return `${prefix}-${dateStr}-${seq.toString().padStart(4, '0')}`;
+    let nextSeq = maxSeq + 1;
+    let finalNumber = `${prefix}-${dateStr}-${nextSeq.toString().padStart(4, '0')}`;
+
+    // Safety loop: ensure this number and its -REJ variant don't exist
+    let isUnique = false;
+    while (!isUnique) {
+      finalNumber = `${prefix}-${dateStr}-${nextSeq.toString().padStart(4, '0')}`;
+      let exists = false;
+      if (isCloudEnabled()) {
+        const { data } = await getSupabase()
+          .from('challans')
+          .select('id')
+          .or(`challan_number.eq.${finalNumber},challan_number.eq.${finalNumber}-REJ`)
+          .limit(1);
+        if (data && data.length > 0) exists = true;
+      } else {
+        const row = dbPrepare(`SELECT id FROM challans WHERE challan_number = ? OR challan_number = ?`).get(finalNumber, `${finalNumber}-REJ`);
+        if (row) exists = true;
+      }
+
+      if (!exists) {
+        isUnique = true;
+      } else {
+        nextSeq++;
+      }
+    }
+
+    return finalNumber;
   },
 
   async getTodayCount() {
@@ -397,6 +421,15 @@ const ChallansRepo = {
     const dbField = validFields[field];
     if (!dbField) return [];
 
+    const SettingsRepo = require('./settings');
+    const settings = await SettingsRepo.getAll();
+    let blacklistData = settings.suggestion_blacklist || {};
+    if (typeof blacklistData === 'string') {
+      try { blacklistData = JSON.parse(blacklistData); } catch (e) { blacklistData = {}; }
+    }
+    const blacklist = (blacklistData && blacklistData[field]) || [];
+
+    let rawResults = [];
     if (isCloudEnabled()) {
       const { data, error } = await getSupabase()
         .from('challans')
@@ -404,14 +437,16 @@ const ChallansRepo = {
         .ilike(dbField, `%${query}%`)
         .not(dbField, 'is', null)
         .neq(dbField, '')
-        .limit(20);
+        .limit(30);
       if (error) throw error;
-      return [...new Set(data.map(r => r[dbField]))].sort();
+      rawResults = [...new Set(data.map(r => r[dbField]))];
+    } else {
+      const s = `%${query}%`;
+      const results = dbPrepare(`SELECT DISTINCT ${dbField} as value FROM challans WHERE ${dbField} LIKE ? AND ${dbField} IS NOT NULL AND TRIM(${dbField}) != '' ORDER BY ${dbField} ASC LIMIT 30`).all(s);
+      rawResults = results.map(r => r.value);
     }
     
-    const s = `%${query}%`;
-    const results = dbPrepare(`SELECT DISTINCT ${dbField} as value FROM challans WHERE ${dbField} LIKE ? AND ${dbField} IS NOT NULL AND TRIM(${dbField}) != '' ORDER BY ${dbField} ASC LIMIT 20`).all(s);
-    return results.map(r => r.value);
+    return rawResults.filter(val => !blacklist.includes(val)).sort().slice(0, 15);
   },
 
   async getTotalDelivered(itemId) {
@@ -431,6 +466,27 @@ const ChallansRepo = {
       WHERE ci.item_id = ? AND c.status = 'ACTIVE'
     `).get(itemId);
     return r ? r.total : 0;
+  },
+
+  async clearChallanHistory() {
+    if (isCloudEnabled()) {
+      const supabase = getSupabase();
+      await supabase.from('gate_passes').delete().neq('id', 0);
+      await supabase.from('challan_items').delete().neq('id', 0);
+      await supabase.from('challans').delete().neq('id', 0);
+      // We also need to clear stock transactions related to challans to keep history consistent
+      await supabase.from('stock_transactions').delete().not('challan_id', 'is', null);
+      return true;
+    }
+
+    const db = require('../connection').getDb();
+    db.run('DELETE FROM gate_passes');
+    db.run('DELETE FROM challan_items');
+    db.run('DELETE FROM challans');
+    db.run('DELETE FROM stock_transactions WHERE challan_id IS NOT NULL');
+    db.run("DELETE FROM sqlite_sequence WHERE name IN ('challans', 'challan_items', 'gate_passes')");
+    require('../connection').saveDatabase();
+    return true;
   },
 
   async clearAllData() {
@@ -461,6 +517,24 @@ const ChallansRepo = {
     db.run('DELETE FROM categories');
     db.run('DELETE FROM audit_logs');
     db.run("DELETE FROM sqlite_sequence WHERE name IN ('challans', 'challan_items', 'items', 'gate_passes', 'stock_transactions', 'approvals')");
+    require('../connection').saveDatabase();
+    return true;
+  },
+
+  async delete(id) {
+    if (isCloudEnabled()) {
+      const supabase = getSupabase();
+      await supabase.from('stock_transactions').delete().eq('challan_id', id);
+      await supabase.from('challan_items').delete().eq('challan_id', id);
+      const { error } = await supabase.from('challans').delete().eq('id', id);
+      if (error) throw error;
+      return true;
+    }
+
+    const db = require('../connection').getDb();
+    db.run('DELETE FROM stock_transactions WHERE challan_id = ?', [id]);
+    db.run('DELETE FROM challan_items WHERE challan_id = ?', [id]);
+    db.run('DELETE FROM challans WHERE id = ?', [id]);
     require('../connection').saveDatabase();
     return true;
   }

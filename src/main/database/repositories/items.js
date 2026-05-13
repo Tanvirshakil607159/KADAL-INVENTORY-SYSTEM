@@ -85,8 +85,9 @@ const ItemsRepo = {
   },
 
   async create(data) {
+    const finalCode = data.itemCode || await this.getNextCode();
+    
     if (isCloudEnabled()) {
-      const finalCode = await this.getNextCode();
       const { data: inserted, error } = await getSupabase()
         .from('items')
         .insert([{
@@ -114,7 +115,7 @@ const ItemsRepo = {
       if (error) throw error;
       return inserted.id;
     }
-    const finalCode = this.getNextCode();
+
     return dbPrepare(`INSERT INTO items (item_code, name, category_id, size, color, unit, supplier_id, opening_stock, current_stock, min_stock_level, notes, buyer_name, style_name, purchase_no, order_number, order_quantity, unit_price, currency) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
       finalCode, data.name, data.categoryId||null, data.size||null, data.color||null, data.unit||'pcs', data.supplierId||null, data.openingStock||0, data.openingStock||0, data.minStockLevel||0, data.notes||null, data.buyerName||null, data.styleName||null, data.purchaseNo||null, data.orderNumber||null, data.orderQuantity||0, data.unitPrice||0, data.currency||'BDT'
     ).lastInsertRowid;
@@ -267,10 +268,38 @@ const ItemsRepo = {
       if (excludeId) query = query.neq('id', excludeId);
       const { data, error } = await query;
       if (error) throw error;
-      return data.length > 0 ? data[0] : null;
+      if (data.length > 0) return data[0];
+
+      // Also check pending approvals
+      const { data: pending, error: pErr } = await getSupabase()
+        .from('approvals')
+        .select('data')
+        .eq('type', 'CREATE_ITEM')
+        .eq('status', 'PENDING');
+      
+      if (pErr) throw pErr;
+      const found = pending.find(a => {
+        const d = typeof a.data === 'string' ? JSON.parse(a.data) : a.data;
+        return d.itemCode === code;
+      });
+      return found ? { id: 'pending' } : null;
     }
-    if (excludeId) return dbPrepare('SELECT id FROM items WHERE item_code = ? AND id != ?').get(code, excludeId);
-    return dbPrepare('SELECT id FROM items WHERE item_code = ?').get(code);
+
+    if (excludeId) {
+      const existing = dbPrepare('SELECT id FROM items WHERE item_code = ? AND id != ?').get(code, excludeId);
+      if (existing) return existing;
+    } else {
+      const existing = dbPrepare('SELECT id FROM items WHERE item_code = ?').get(code);
+      if (existing) return existing;
+    }
+
+    // Check pending approvals locally
+    const pending = dbPrepare("SELECT data FROM approvals WHERE type = 'CREATE_ITEM' AND status = 'PENDING'").all();
+    const found = pending.find(a => {
+      const d = typeof a.data === 'string' ? JSON.parse(a.data) : a.data;
+      return d.itemCode === code;
+    });
+    return found ? { id: 'pending' } : null;
   },
 
   async getDistinctValues() {
@@ -304,32 +333,56 @@ const ItemsRepo = {
   },
 
   async getNextCode() {
+    let allCodes = [];
+
     if (isCloudEnabled()) {
       const { data, error } = await getSupabase()
         .from('items')
         .select('item_code')
         .like('item_code', 'KADAL-%')
         .order('item_code', { ascending: false })
-        .limit(1);
+        .limit(2000); // Increased limit to be safer
       if (error) throw error;
+      allCodes = (data || []).map(i => i.item_code);
+
+      // Also fetch pending approvals to ensure they are skipped
+      const { data: pending, error: pErr } = await getSupabase()
+        .from('approvals')
+        .select('data')
+        .eq('type', 'CREATE_ITEM')
+        .eq('status', 'PENDING');
       
-      let seq = 1;
-      if (data && data.length > 0) {
-        const lastCode = data[0].item_code;
-        const parts = lastCode.split('-');
-        const num = parseInt(parts[parts.length - 1], 10);
-        if (!isNaN(num)) seq = num + 1;
+      if (!pErr && pending) {
+        pending.forEach(a => {
+          const d = typeof a.data === 'string' ? JSON.parse(a.data) : a.data;
+          if (d.itemCode) allCodes.push(d.itemCode);
+        });
       }
-      return `KADAL-${seq.toString().padStart(4, '0')}`;
+    } else {
+      const all = dbPrepare("SELECT item_code FROM items WHERE item_code LIKE 'KADAL-%'").all();
+      allCodes = all.map(item => item.item_code);
+
+      // Check pending approvals locally
+      const pending = dbPrepare("SELECT data FROM approvals WHERE type = 'CREATE_ITEM' AND status = 'PENDING'").all();
+      pending.forEach(a => {
+        const d = typeof a.data === 'string' ? JSON.parse(a.data) : a.data;
+        if (d.itemCode) allCodes.push(d.itemCode);
+      });
     }
-    const last = dbPrepare("SELECT item_code FROM items WHERE item_code LIKE 'KADAL-%' ORDER BY item_code DESC LIMIT 1").get();
-    let seq = 1;
-    if (last && last.item_code) {
-      const parts = last.item_code.split('-');
-      const num = parseInt(parts[parts.length - 1], 10);
-      if (!isNaN(num)) seq = num + 1;
-    }
-    return `KADAL-${seq.toString().padStart(4, '0')}`;
+
+    let maxSeq = 0;
+    allCodes.forEach(code => {
+      const parts = code.split('-');
+      for (let i = parts.length - 1; i >= 0; i--) {
+        const num = parseInt(parts[i], 10);
+        if (!isNaN(num) && /^\d+$/.test(parts[i])) {
+          if (num > maxSeq) maxSeq = num;
+          break;
+        }
+      }
+    });
+
+    return `KADAL-${(maxSeq + 1).toString().padStart(4, '0')}`;
   },
 };
 

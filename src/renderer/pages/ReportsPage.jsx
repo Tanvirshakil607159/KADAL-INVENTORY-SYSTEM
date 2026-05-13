@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import useStore from '../store/useStore';
-import { Download, FileSpreadsheet, FileText, Eye, ArrowLeft } from 'lucide-react';
+import { Download, FileSpreadsheet, FileText, Eye, ArrowLeft, XCircle, Trash2, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 
 const TABS = [
   { id: 'stock', label: 'Current Stock' },
@@ -11,7 +11,7 @@ const TABS = [
 
 
 export default function ReportsPage() {
-  const { addToast } = useStore();
+  const { addToast, showConfirm, user } = useStore();
   const [activeTab, setActiveTab] = useState('stock');
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -22,10 +22,58 @@ export default function ReportsPage() {
   const [orderNumber, setOrderNumber] = useState('');
   const [purchaseNo, setPurchaseNo] = useState('');
   const [buyerName, setBuyerName] = useState('');
+  const [status, setStatus] = useState('');
   const [distinctValues, setDistinctValues] = useState({ styles: [], orders: [], purchases: [], buyers: [] });
   const [detailItem, setDetailItem] = useState(null);
   const [detailData, setDetailData] = useState([]);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
+
+  const handleSort = (key) => {
+    setSortConfig(prev => ({
+      key,
+      direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc'
+    }));
+  };
+
+  const sortedData = [...data].sort((a, b) => {
+    if (!sortConfig.key) return 0;
+    let valA = a[sortConfig.key];
+    let valB = b[sortConfig.key];
+    
+    // Numeric fields
+    const numericFields = [
+      'current_stock', 'order_quantity', 'min_stock_level', 'unit_price', 
+      'total_in', 'total_out', 'shipped_quantity', 'total_shipped', 'balance'
+    ];
+    
+    if (numericFields.includes(sortConfig.key)) {
+      valA = Number(valA) || 0;
+      valB = Number(valB) || 0;
+    } else {
+      valA = (valA || '').toString().toLowerCase();
+      valB = (valB || '').toString().toLowerCase();
+    }
+
+    if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
+    if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
+    return 0;
+  });
+
+  const SortHeader = ({ label, field, className = "" }) => (
+    <th 
+      className={`sortable ${className}`} 
+      onClick={() => handleSort(field)}
+    >
+      <div className="flex items-center justify-between">
+        {label}
+        <span className={`sort-icon-container ${sortConfig.key === field ? 'active' : ''}`}>
+          {sortConfig.key !== field ? <ArrowUpDown size={12} /> : 
+           sortConfig.direction === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />}
+        </span>
+      </div>
+    </th>
+  );
 
   useEffect(() => {
     const fetchDV = async () => {
@@ -41,7 +89,7 @@ export default function ReportsPage() {
     setLoading(true);
     try {
       let res;
-      const filters = { dateFrom, dateTo, search, styleName, orderNumber, purchaseNo, buyerName };
+      const filters = { dateFrom, dateTo, search, styleName, orderNumber, purchaseNo, buyerName, status: status || undefined };
       switch (activeTab) {
         case 'stock': res = await window.kadal.reports.stockReport(filters); break;
         case 'movement': res = await window.kadal.reports.movementReport(filters); break;
@@ -104,6 +152,40 @@ export default function ReportsPage() {
     setDetailLoading(false);
   };
 
+  const handleCancelReport = async (row) => {
+    const reason = prompt('Reason for cancellation:');
+    if (!reason) return;
+    const confirmed = await showConfirm({ 
+      title: 'Cancel Challan', 
+      message: `Cancel challan ${row.challan_number}? Stock will be reversed.`, 
+      type: 'warning', 
+      confirmText: 'Yes, Cancel' 
+    });
+    if (!confirmed) return;
+    const res = await window.kadal.challans.cancel(row.challan_id, reason);
+    if (res.success) { 
+      addToast('success', 'Challan cancelled and stock reversed'); 
+      loadReport(); 
+    }
+    else addToast('error', res.error);
+  };
+
+  const handleDeleteReport = async (row) => {
+    const confirmed = await showConfirm({ 
+      title: 'Delete Challan', 
+      message: `Permanently DELETE challan ${row.challan_number}? This action cannot be undone and will NOT reverse stock. Use only for data cleanup.`, 
+      type: 'danger', 
+      confirmText: 'Yes, Delete Permanently' 
+    });
+    if (!confirmed) return;
+    const res = await window.kadal.challans.delete(row.challan_id);
+    if (res.success) { 
+      addToast('success', 'Challan deleted successfully'); 
+      loadReport(); 
+    }
+    else addToast('error', res.error);
+  };
+
   const renderTable = () => {
     if (loading) return <div className="loading"><div className="spinner"></div></div>;
     if (data.length === 0) return <div className="empty-state"><h3>No data</h3><p>No records found for this report</p></div>;
@@ -114,18 +196,18 @@ export default function ReportsPage() {
           <table className="data-table">
             <thead>
               <tr>
-                <th>Item / Code</th>
-                <th>Style / Purchase / Order</th>
-                <th>Size / Color</th>
-                <th>Buyer</th>
-                <th style={{textAlign:'right'}}>Unit Price</th>
-                <th style={{textAlign:'right'}}>Stock</th>
-                <th style={{textAlign:'right'}}>Total Value</th>
-                <th>Unit</th>
-                <th style={{textAlign:'right'}}>Min Level</th>
+                <SortHeader label="Item / Code" field="name" />
+                <SortHeader label="Style / Purchase / Order" field="style_name" />
+                <SortHeader label="Size / Color" field="size" />
+                <SortHeader label="Buyer" field="buyer_name" />
+                <SortHeader label="Unit Price" field="unit_price" className="text-right" />
+                <SortHeader label="Stock" field="current_stock" className="text-right" />
+                <th className="text-right">Total Value</th>
+                <SortHeader label="Unit" field="unit" />
+                <SortHeader label="Min Level" field="min_stock_level" className="text-right" />
               </tr>
             </thead>
-            <tbody>{data.map(r => (
+            <tbody>{sortedData.map(r => (
               <tr key={r.id}>
                 <td>
                   <div style={{fontWeight:600}}>{r.name}</div>
@@ -151,18 +233,18 @@ export default function ReportsPage() {
           <table className="data-table">
             <thead>
               <tr>
-                <th>Item / Code</th>
-                <th>Style / Purchase / Order</th>
-                <th>Size / Color</th>
-                <th>Buyer</th>
-                <th style={{textAlign:'right'}}>Total IN</th>
-                <th style={{textAlign:'right'}}>Total OUT</th>
-                <th style={{textAlign:'right'}}>Current Stock</th>
-                <th>Unit</th>
+                <SortHeader label="Item / Code" field="item_name" />
+                <SortHeader label="Style / Purchase / Order" field="style_name" />
+                <SortHeader label="Size / Color" field="size" />
+                <SortHeader label="Buyer" field="buyer_name" />
+                <SortHeader label="Total IN" field="total_in" className="text-right" />
+                <SortHeader label="Total OUT" field="total_out" className="text-right" />
+                <SortHeader label="Current Stock" field="current_stock" className="text-right" />
+                <SortHeader label="Unit" field="unit" />
                 <th>Action</th>
               </tr>
             </thead>
-            <tbody>{data.map((r,i) => (
+            <tbody>{sortedData.map((r,i) => (
               <tr key={i}>
                 <td>
                   <div style={{fontWeight:600}}>{r.item_name}</div>
@@ -174,8 +256,8 @@ export default function ReportsPage() {
                 </td>
                 <td>{[r.size, r.color].filter(Boolean).join(' / ') || '-'}</td>
                 <td>{r.buyer_name || '-'}</td>
-                <td className="text-right text-mono text-success">{r.total_in}</td>
-                <td className="text-right text-mono text-warning">{r.total_out}</td>
+                <td className="text-right text-mono text-success">{r.total_in ?? 0}</td>
+                <td className="text-right text-mono text-warning">{r.total_out ?? 0}</td>
                 <td className="text-right text-mono fw-bold">{r.current_stock}</td>
                 <td>{r.unit}</td>
                 <td><button className="btn btn-outline btn-sm" onClick={() => showDetails(r)}><Eye size={13} /> Details</button></td>
@@ -186,8 +268,18 @@ export default function ReportsPage() {
       case 'lowStock':
         return (
           <table className="data-table">
-            <thead><tr><th>Code</th><th>Item</th><th>Buyer</th><th>Category</th><th style={{textAlign:'right'}}>Current</th><th style={{textAlign:'right'}}>Min Level</th><th style={{textAlign:'right'}}>Deficit</th></tr></thead>
-            <tbody>{data.map(r => (
+            <thead>
+              <tr>
+                <SortHeader label="Code" field="item_code" />
+                <SortHeader label="Item" field="name" />
+                <SortHeader label="Buyer" field="buyer_name" />
+                <SortHeader label="Category" field="category_name" />
+                <SortHeader label="Current" field="current_stock" className="text-right" />
+                <SortHeader label="Min Level" field="min_stock_level" className="text-right" />
+                <th style={{textAlign:'right'}}>Deficit</th>
+              </tr>
+            </thead>
+            <tbody>{sortedData.map(r => (
               <tr key={r.id}>
                 <td className="text-mono" style={{fontSize:12}}>{r.item_code}</td><td style={{fontWeight:600}}>{r.name}</td>
                 <td>{r.buyer_name || '-'}</td>
@@ -204,21 +296,21 @@ export default function ReportsPage() {
           <table className="data-table">
             <thead>
               <tr>
-                <th>Challan No</th>
-                <th>Date</th>
-                <th>Receiver</th>
-                <th>Buyer</th>
-                <th>Item Details</th>
-                <th>Style / Order / Purchase</th>
-                <th style={{textAlign:'right'}}>Order Qty</th>
-
-                <th style={{textAlign:'right'}}>Shipped</th>
-                <th style={{textAlign:'right'}}>Total Out</th>
-                <th style={{textAlign:'right'}}>Balance</th>
-                <th>Status</th>
+                <SortHeader label="Challan No" field="challan_number" />
+                <SortHeader label="Date" field="challan_date" />
+                <SortHeader label="Receiver" field="receiver_name" />
+                <SortHeader label="Buyer" field="buyer_name" />
+                <SortHeader label="Item Details" field="item_name" />
+                <SortHeader label="Style / Order / Purchase" field="style_name" />
+                <SortHeader label="Order Qty" field="order_quantity" className="text-right" />
+                <SortHeader label="Shipped" field="shipped_quantity" className="text-right" />
+                <SortHeader label="Total Out" field="total_shipped" className="text-right" />
+                <SortHeader label="Balance" field="balance" className="text-right" />
+                <SortHeader label="Status" field="status" />
+                <th>Actions</th>
               </tr>
             </thead>
-            <tbody>{data.map((r, i) => (
+            <tbody>{sortedData.map((r, i) => (
               <tr key={i}>
                 <td className="text-mono" style={{fontSize:12,color:'var(--accent)'}}>{r.challan_number}</td>
                 <td style={{fontSize:11}}>{new Date(r.challan_date).toLocaleDateString('en-GB')}</td>
@@ -237,7 +329,29 @@ export default function ReportsPage() {
                 <td className="text-right text-mono fw-bold text-success">{r.shipped_quantity}</td>
                 <td className="text-right text-mono text-warning">{r.total_shipped}</td>
                 <td className="text-right text-mono fw-bold" style={{color: r.balance > 0 ? 'var(--danger)' : 'var(--success)'}}>{r.balance}</td>
-                <td><span className={`badge badge-${r.status==='ACTIVE'?'success':'danger'}`}>{r.status}</span></td>
+                <td><span className={`badge badge-${r.status==='ACTIVE'?'success':'danger'}`}>{r.status === 'ACTIVE' ? 'Active' : 'Inactive'}</span></td>
+                <td>
+                  <div style={{display:'flex', gap:4}}>
+                    <button className="btn btn-ghost btn-icon btn-sm" title="Download PDF" onClick={async () => {
+                      const res = await window.kadal.challans.exportPdf(r.challan_id);
+                      if (res?.success) addToast('success', 'PDF exported');
+                    }}><FileText size={14} /></button>
+                    <button className="btn btn-ghost btn-icon btn-sm" title="Download Excel" onClick={async () => {
+                      const res = await window.kadal.challans.exportExcel(r.challan_id);
+                      if (res?.success) addToast('success', 'Excel exported');
+                    }}><FileSpreadsheet size={14} /></button>
+                    {r.status === 'ACTIVE' && (
+                      <button className="btn btn-ghost btn-icon btn-sm" title="Cancel Challan" onClick={() => handleCancelReport(r)}>
+                        <XCircle size={14} color="var(--danger)" />
+                      </button>
+                    )}
+                    {(user?.roleName === 'Super Admin' || user?.role_name === 'Super Admin') && (
+                      <button className="btn btn-ghost btn-icon btn-sm" title="Delete Permanently" onClick={() => handleDeleteReport(r)}>
+                        <Trash2 size={14} color="var(--danger)" />
+                      </button>
+                    )}
+                  </div>
+                </td>
               </tr>
             ))}</tbody>
           </table>
@@ -341,6 +455,13 @@ export default function ReportsPage() {
               <option value="">All Purchase No</option>
               {distinctValues.purchases.map((v,i) => <option key={i} value={v}>{v}</option>)}
             </select>
+            {activeTab === 'challan' && (
+              <select className="form-select" value={status} onChange={e => setStatus(e.target.value)} style={{width:120,padding:'8px 12px',fontSize:13}}>
+                <option value="">All Status</option>
+                <option value="ACTIVE">Active</option>
+                <option value="CANCELLED">Inactive</option>
+              </select>
+            )}
           </div>
 
           {(activeTab === 'movement' || activeTab === 'challan') && (

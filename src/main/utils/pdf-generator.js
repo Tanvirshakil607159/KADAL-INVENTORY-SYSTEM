@@ -294,48 +294,6 @@ const PdfGenerator = {
           }
         },
 
-        // Item Summary (Optional: Show total items across all challans)
-        { text: 'Consolidated Items Summary', style: 'sectionTitle', margin: [0, 25, 0, 10] },
-        {
-          table: {
-            headerRows: 1,
-            widths: [25, '*', 70, 70, 60],
-            body: [
-              [
-                { text: '#', style: 'tableHeader' }, 
-                { text: 'Item Description (Size/Color)', style: 'tableHeader' }, 
-                { text: 'Order No', style: 'tableHeader' }, 
-                { text: 'Style', style: 'tableHeader' }, 
-                { text: 'Total Qty', style: 'tableHeader', alignment: 'right' }
-              ],
-              ...(() => {
-                const combined = {};
-                (gp.challans || []).filter(Boolean).forEach(c => {
-                  (c.items || []).forEach(i => {
-                    const key = `${i.item_id}_${i.order_number}_${i.style_name}`;
-                    if (!combined[key]) combined[key] = { ...i };
-                    else combined[key].quantity += i.quantity;
-                  });
-                });
-                return Object.values(combined).map((item, idx) => [
-                  { text: idx + 1, style: 'tableCell' },
-                  { text: `${item.item_name} ${[item.size, item.color].filter(Boolean).join(' / ') ? '('+[item.size, item.color].filter(Boolean).join(' / ')+')' : ''}`, style: 'tableCell' },
-                  { text: item.order_number || '-', style: 'tableCell' },
-                  { text: item.style_name || '-', style: 'tableCell' },
-                  { text: item.quantity.toString(), style: 'tableCell', alignment: 'right', bold: true }
-                ]);
-              })()
-            ]
-          },
-          layout: {
-            hLineWidth: () => 0.5,
-            vLineWidth: () => 0.5,
-            hLineColor: () => '#ddd',
-            vLineColor: () => '#ddd',
-            fillColor: (rowIndex) => rowIndex === 0 ? '#6366f1' : null,
-          }
-        },
-
         // Footer / Signatures
         { text: '', margin: [0, 60, 0, 0] },
         {
@@ -436,6 +394,137 @@ const PdfGenerator = {
     };
 
     return this._generateAndSave(docDefinition, title.replace(/\s+/g, '-').toLowerCase());
+  },
+
+  async generateIssuePdf(issue, settings = {}) {
+    const companyName = settings.company_name || 'KA Design Accessories LTD';
+    const companyAddress = settings.company_address || '';
+    const companyPhone = settings.company_phone || '';
+
+    const docDefinition = {
+      pageSize: 'A4',
+      pageMargins: [40, 40, 40, 60],
+      background: (currentPage, pageSize) => {
+        const logo = getLogoBase64();
+        if (!logo) return null;
+        return {
+          image: logo,
+          width: 400,
+          opacity: 0.05,
+          absolutePosition: { x: (pageSize.width - 400) / 2, y: (pageSize.height - 400) / 2 }
+        };
+      },
+      content: [
+        // Header
+        {
+          columns: [
+            {
+              width: '*',
+              stack: [
+                settings.company_logo ? { image: settings.company_logo, fit: [350, 180], margin: [0, 0, 0, 5] } : { text: companyName, style: 'companyName' },
+                companyAddress ? { text: companyAddress, style: 'companyInfo', bold: true } : {},
+                companyPhone ? { text: `Phone: ${companyPhone}`, style: 'companyInfo', bold: true } : {},
+              ],
+            },
+            {
+              width: 'auto',
+              stack: [
+                { text: 'ISSUE PAPER', style: 'challanTitle' },
+                { text: `No: ${issue.issue_id}`, style: 'challanNumber' },
+                { text: `Date: ${new Date(issue.issue_date).toLocaleDateString('en-GB')}`, style: 'challanDate' },
+                { text: `Type: ${issue.issue_type}`, style: 'value', bold: true, color: '#6366f1' },
+              ],
+              alignment: 'right',
+            },
+          ],
+        },
+        { canvas: [{ type: 'line', x1: 0, y1: 5, x2: 515, y2: 5, lineWidth: 1.5, lineColor: '#6366f1' }] },
+
+        // Recipient Info
+        { text: '', margin: [0, 15, 0, 0] },
+        {
+          table: {
+            widths: ['auto', '*'],
+            body: [
+              [{ text: 'Issued To:', style: 'label' }, { text: issue.recipient_name, style: 'value', bold: true }],
+              [{ text: 'Expected Return:', style: 'label' }, { text: issue.expected_return_date ? new Date(issue.expected_return_date).toLocaleDateString('en-GB') : '-', style: 'value' }],
+              [{ text: 'Status:', style: 'label' }, { text: issue.status, style: 'value', color: issue.status === 'RETURNED' ? '#10b981' : '#f59e0b' }],
+            ],
+          },
+          layout: 'noBorders',
+        },
+
+        // Items Table
+        { text: '', margin: [0, 15, 0, 0] },
+        (() => {
+          const headers = [
+            { text: '#', style: 'tableHeader' },
+            { text: 'Item', style: 'tableHeader' },
+            { text: 'Style / Order / Purchase', style: 'tableHeader' },
+            { text: 'Issued Qty', style: 'tableHeader', alignment: 'right' },
+            { text: 'Unit', style: 'tableHeader' },
+            { text: 'Returned', style: 'tableHeader', alignment: 'right' },
+          ];
+          const widths = [25, '*', 120, 70, 40, 70];
+
+          const rows = (issue.items || []).map((item, idx) => {
+            const spo = [item.style_no, item.order_number, item.purchase_no].filter(Boolean).join(' / ') || '-';
+            return [
+              { text: idx + 1, style: 'tableCell' },
+              { text: item.item_name || '-', style: 'tableCell' },
+              { text: spo, style: 'tableCell', fontSize: 8 },
+              { text: item.quantity.toString(), style: 'tableCell', alignment: 'right', bold: true },
+              { text: item.unit || '-', style: 'tableCell' },
+              { text: (item.returned_quantity || 0).toString(), style: 'tableCell', alignment: 'right' },
+            ];
+          });
+
+          return {
+            table: { headerRows: 1, widths, body: [headers, ...rows] },
+            layout: {
+              hLineWidth: () => 0.5, vLineWidth: () => 0.5,
+              hLineColor: () => '#ddd', vLineColor: () => '#ddd',
+              fillColor: (rowIndex) => rowIndex === 0 ? '#6366f1' : null,
+            },
+          };
+        })(),
+
+        // Remarks
+        issue.remarks ? { text: '', margin: [0, 15, 0, 0] } : {},
+        issue.remarks ? { text: 'Remarks:', style: 'label' } : {},
+        issue.remarks ? { text: issue.remarks, style: 'notes' } : {},
+
+        // Signatures
+        { text: '', margin: [0, 50, 0, 0] },
+        {
+          columns: [
+            { width: '*', stack: [{ canvas: [{ type: 'line', x1: 0, y1: 0, x2: 120, y2: 0, lineWidth: 1 }] }, { text: 'Prepared By', margin: [0, 5, 0, 0], fontSize: 9 }] },
+            { width: '*', stack: [{ canvas: [{ type: 'line', x1: 0, y1: 0, x2: 120, y2: 0, lineWidth: 1 }] }, { text: 'Receiver Signature', margin: [0, 5, 0, 0], fontSize: 9 }] },
+            { width: '*', stack: [{ canvas: [{ type: 'line', x1: 0, y1: 0, x2: 120, y2: 0, lineWidth: 1 }] }, { text: 'Authorized By', margin: [0, 5, 0, 0], fontSize: 9 }], alignment: 'right' },
+          ],
+        },
+      ],
+      styles: {
+        companyName: { fontSize: 18, bold: true, color: '#1a1a2e' },
+        companyInfo: { fontSize: 9, color: '#666', margin: [0, 2, 0, 0] },
+        challanTitle: { fontSize: 20, bold: true, color: '#6366f1' },
+        challanNumber: { fontSize: 11, margin: [0, 4, 0, 0], color: '#333', bold: true },
+        challanDate: { fontSize: 10, color: '#666', margin: [0, 2, 0, 0] },
+        label: { fontSize: 9, color: '#666', margin: [0, 2, 0, 0] },
+        value: { fontSize: 10, color: '#333' },
+        tableHeader: { fontSize: 9, bold: true, color: '#fff', margin: [4, 6, 4, 6] },
+        tableCell: { fontSize: 8, margin: [4, 5, 4, 5], color: '#333' },
+        notes: { fontSize: 9, color: '#555', italics: true, margin: [0, 4, 0, 0] },
+      },
+      footer: (currentPage, pageCount) => ({
+        columns: [
+          { text: `Generated by KADAL Inventory System`, fontSize: 7, color: '#999', margin: [40, 0, 0, 0] },
+          { text: `Page ${currentPage} of ${pageCount}`, fontSize: 7, color: '#999', alignment: 'right', margin: [0, 0, 40, 0] },
+        ],
+      }),
+    };
+
+    return this._generateAndSave(docDefinition, `issue-${issue.issue_id}`);
   },
 
   async _generateAndSave(docDefinition, filename) {

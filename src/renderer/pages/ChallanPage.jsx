@@ -1,98 +1,116 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import useStore from '../store/useStore';
-import { Plus, Trash2, Search, Eye, FileText } from 'lucide-react';
+import { Plus, Search, Trash2, FileText, ArrowLeft, Package, Clock, X } from 'lucide-react';
 
 export default function ChallanPage() {
-  const { addToast, setPage } = useStore();
-  const [challanNumber, setChallanNumber] = useState('');
-  const [form, setForm] = useState({ receiverName: '', receiverContact: '', receiverAddress: '', notes: '' });
-  const [challanItems, setChallanItems] = useState([]);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState([]);
+  const { 
+    addToast, setPage, openModal, 
+    challanForm, setChallanForm, 
+    challanItems, setChallanItems, 
+    clearChallan, user
+  } = useStore();
+  
+  const [items, setItems] = useState([]);
+  const [distinctValues, setDistinctValues] = useState({ styles: [], orders: [], purchases: [] });
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [preview, setPreview] = useState(false);
-  const [suggestions, setSuggestions] = useState({ receiverName: [], receiverContact: [], receiverAddress: [] });
   const [settings, setSettings] = useState({});
-  const [allItems, setAllItems] = useState([]);
-  const [showBrowser, setShowBrowser] = useState(false);
-  const [itemFilters, setItemFilters] = useState({ search: '', style: '', order: '', purchase: '' });
-  const [distinctValues, setDistinctValues] = useState({ styles: [], orders: [], purchases: [] });
+  const [recipients, setRecipients] = useState([]);
+  const [lockedItemIds, setLockedItemIds] = useState(new Set());
+  const [challanNumber, setChallanNumber] = useState('...');
+  const [addressSuggestions, setAddressSuggestions] = useState([]);
+  const [contactSuggestions, setContactSuggestions] = useState([]);
 
-  const fetchSuggestions = async (field, value) => {
+  const loadData = useCallback(async () => {
+    setLoading(true);
     try {
-      const res = await window.kadal.challans.getFieldSuggestions(field, value || '');
-      if (res.success) {
-        setSuggestions(prev => ({ ...prev, [field]: res.data }));
+      // Parallelize all fetches for maximum speed while maintaining individual resilience
+      const [
+        itemsRes, dvRes, settingsRes, numberRes, recipientsRes, approvalsRes, addrRes, contRes
+      ] = await Promise.all([
+        window.kadal.items.getAll().catch(e => ({ success: false, error: e })),
+        window.kadal.items.getDistinctValues().catch(e => ({ success: false, error: e })),
+        window.kadal.settings.getAll().catch(e => ({ success: false, error: e })),
+        window.kadal.challans.getNextNumber().catch(e => ({ success: false, error: e })),
+        window.kadal.recipients.getAll().catch(e => ({ success: false, error: e })),
+        window.kadal.approvals.getAll({ status: 'PENDING' }).catch(e => ({ success: false, error: e })),
+        window.kadal.challans.getFieldSuggestions('receiverAddress').catch(e => ({ success: false, error: e })),
+        window.kadal.challans.getFieldSuggestions('receiverContact').catch(e => ({ success: false, error: e }))
+      ]);
+
+      if (itemsRes?.success) setItems(itemsRes.data || []);
+      if (dvRes?.success) setDistinctValues(dvRes.data || { styles: [], orders: [], purchases: [] });
+      if (settingsRes?.success) setSettings(settingsRes.data || {});
+      if (numberRes?.success) setChallanNumber(numberRes.data || '...');
+      if (recipientsRes?.success) setRecipients(recipientsRes.data || []);
+      if (addrRes?.success) setAddressSuggestions(addrRes.data || []);
+      if (contRes?.success) setContactSuggestions(contRes.data || []);
+
+      if (approvalsRes?.success && Array.isArray(approvalsRes.data)) {
+        const locked = new Set();
+        approvalsRes.data.filter(r => r.type === 'CREATE_CHALLAN').forEach(r => {
+          r.data?.items?.forEach(it => {
+            if (it.itemId) locked.add(it.itemId);
+          });
+        });
+        setLockedItemIds(locked);
       }
-    } catch (e) {
-      console.error('Failed to fetch suggestions', e);
+    } catch (e) { 
+      addToast('error', 'Failed to load some page data'); 
+      console.error("General loadData error:", e);
     }
-  };
+    setLoading(false);
+  }, [addToast]);
 
-  useEffect(() => {
-    window.kadal.settings.getAll().then(res => { if (res.success) setSettings(res.data); });
-    window.kadal.challans.getNextNumber().then(res => { if (res.success) setChallanNumber(res.data); });
-    window.kadal.items.getAll().then(res => { if (res.success) setAllItems(res.data); });
-    window.kadal.items.getDistinctValues().then(res => { if (res.success) setDistinctValues(res.data); });
-  }, []);
-
-  const filteredItems = allItems.filter(i => {
-    const s = itemFilters.search.toLowerCase();
-    const matchesSearch = !s || i.name.toLowerCase().includes(s) || i.item_code.toLowerCase().includes(s);
-    const matchesStyle = !itemFilters.style || i.style_name === itemFilters.style;
-    const matchesOrder = !itemFilters.order || i.order_number === itemFilters.order;
-    const matchesPurchase = !itemFilters.purchase || i.purchase_no === itemFilters.purchase;
-    const notSelected = !challanItems.find(ci => ci.itemId === i.id);
-    return matchesSearch && matchesStyle && matchesOrder && matchesPurchase && notSelected;
-  });
-
-  const addItem = async (item) => {
-    let totalDelivered = 0;
-    try {
-      const res = await window.kadal.challans.getTotalDelivered(item.id);
-      if (res.success) totalDelivered = res.data;
-    } catch (e) {}
-
-    setChallanItems(prev => [...prev, {
-      itemId: item.id, itemName: item.name, itemCode: item.item_code,
-      size: item.size, color: item.color, unit: item.unit, available: item.current_stock,
-      buyerName: item.buyer_name || '', styleName: item.style_name || '', purchaseNo: item.purchase_no || '',
-      orderNumber: item.order_number || '', orderQuantity: item.order_quantity || 0,
-      totalDelivered: totalDelivered,
-      quantity: 1, notes: '',
-    }]);
-    setSearchQuery('');
-    setSearchResults([]);
-  };
+  useEffect(() => { loadData(); }, [loadData]);
 
   const updateItemQty = (idx, qty) => {
-    setChallanItems(prev => prev.map((it, i) => i === idx ? { ...it, quantity: Number(qty) } : it));
+    const newItems = (challanItems || []).map((it, i) => i === idx ? { ...it, quantity: Number(qty) } : it);
+    setChallanItems(newItems);
   };
 
   const removeItem = (idx) => {
-    setChallanItems(prev => prev.filter((_, i) => i !== idx));
+    setChallanItems((challanItems || []).filter((_, i) => i !== idx));
   };
 
   const handleSave = async () => {
-    if (!form.receiverName.trim()) { addToast('error', 'Receiver name is required'); return; }
-    if (challanItems.length === 0) { addToast('error', 'Add at least one item'); return; }
+    if (!challanForm?.receiverName?.trim()) { addToast('error', 'Receiver name is required'); return; }
+    if (!challanItems || challanItems.length === 0) { addToast('error', 'Add at least one item'); return; }
     for (const item of challanItems) {
       if (item.quantity <= 0) { addToast('error', `Invalid quantity for ${item.itemName}`); return; }
+      if (item.quantity > item.available) { 
+        addToast('error', `Insufficient stock for "${item.itemName}". Available: ${item.available}`); 
+        return; 
+      }
     }
     setSaving(true);
     try {
       const res = await window.kadal.challans.create({
-        ...form,
-        items: challanItems.map(i => ({ itemId: i.itemId, name: i.itemName, quantity: i.quantity, unit: i.unit, notes: i.notes })),
+        ...challanForm,
+        items: challanItems.map(i => ({ 
+          itemId: i.itemId, 
+          name: i.itemName, 
+          itemCode: i.itemCode,
+          size: i.size,
+          color: i.color,
+          styleName: i.styleName,
+          orderNumber: i.orderNumber,
+          buyerName: i.buyerName,
+          quantity: i.quantity, 
+          unit: i.unit, 
+          notes: i.notes 
+        })),
       });
       if (res.success && res.data?.success) {
         if (res.data.pendingApproval) {
           addToast('success', 'Request submitted for Admin approval');
+          clearChallan();
           setPage('dashboard');
         } else {
           addToast('success', `Challan ${res.data.challanNumber} created!`);
-          // Ask to export PDF
           try { await window.kadal.challans.exportPdf(res.data.id); } catch (e) {}
+          clearChallan();
           setPage('challan-history');
         }
       } else { addToast('error', res.data?.error || res.error || 'Failed'); }
@@ -100,7 +118,20 @@ export default function ChallanPage() {
     setSaving(false);
   };
 
-  const set = (key, val) => setForm(f => ({ ...f, [key]: val }));
+  const deleteSuggestion = async (field, value) => {
+    const res = await window.kadal.challans.deleteSuggestion(field, value);
+    if (res.success) {
+      if (field === 'receiverAddress') setAddressSuggestions(prev => prev.filter(v => v !== value));
+      if (field === 'receiverContact') setContactSuggestions(prev => prev.filter(v => v !== value));
+      addToast('success', 'Suggestion removed');
+    } else {
+      addToast('error', res.error || 'Failed to remove suggestion');
+    }
+  };
+
+  const set = (key, val) => setChallanForm({ ...challanForm, [key]: val });
+
+  if (loading) return <div className="loading"><div className="spinner"></div></div>;
 
   if (preview) {
     return (
@@ -109,14 +140,14 @@ export default function ChallanPage() {
         <div className="challan-preview">
           <div className="challan-preview-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div>
-              {settings.company_logo ? (
+              {settings?.company_logo ? (
                 <img src={settings.company_logo} alt="Company Logo" style={{ maxHeight: 180, maxWidth: 350, objectFit: 'contain', marginBottom: 8 }} />
               ) : (
-                <h2 style={{ fontSize: 20, fontWeight: 800 }}>{settings.company_name || 'KA Design Accessories LTD'}</h2>
+                <h2 style={{ fontSize: 20, fontWeight: 800 }}>{settings?.company_name || 'KA Design Accessories LTD'}</h2>
               )}
-              {settings.company_address && <p style={{ fontSize: 12, fontWeight: 'bold' }}>{settings.company_address}</p>}
-              {settings.company_phone && <p style={{ fontSize: 12, fontWeight: 'bold' }}>Phone: {settings.company_phone}</p>}
-              {settings.company_email && <p style={{ fontSize: 12, fontWeight: 'bold' }}>Email: {settings.company_email}</p>}
+              {settings?.company_address && <p style={{ fontSize: 12, fontWeight: 'bold' }}>{settings.company_address}</p>}
+              {settings?.company_phone && <p style={{ fontSize: 12, fontWeight: 'bold' }}>Phone: {settings.company_phone}</p>}
+              {settings?.company_email && <p style={{ fontSize: 12, fontWeight: 'bold' }}>Email: {settings.company_email}</p>}
             </div>
             <div style={{ textAlign: 'right' }}>
               <h3 style={{ color: '#6366f1', fontSize: 16 }}>DELIVERY CHALLAN</h3>
@@ -125,9 +156,9 @@ export default function ChallanPage() {
             </div>
           </div>
           <div style={{ marginBottom: 16 }}>
-            <p><strong>To:</strong> {form.receiverName}</p>
-            {form.receiverContact && <p>Contact: {form.receiverContact}</p>}
-            {form.receiverAddress && <p>Address: {form.receiverAddress}</p>}
+            <p><strong>To:</strong> {challanForm?.receiverName}</p>
+            {challanForm?.receiverContact && <p>Contact: {challanForm.receiverContact}</p>}
+            {challanForm?.receiverAddress && <p>Address: {challanForm.receiverAddress}</p>}
           </div>
           <table>
             <thead>
@@ -145,15 +176,15 @@ export default function ChallanPage() {
               </tr>
             </thead>
             <tbody>
-              {challanItems.map((item, idx) => {
+              {(challanItems || []).map((item, idx) => {
                 const totalAfter = (item.totalDelivered || 0) + item.quantity;
                 const balance = item.orderQuantity ? (item.orderQuantity - totalAfter) : null;
                 return (
                   <tr key={idx}>
                     <td>{idx + 1}</td>
-                    <td>{item.itemName}</td>
-                    <td>{item.itemCode}</td>
-                    <td>{[item.size, item.color].filter(Boolean).join(' / ') || '-'}</td>
+                    <td style={{ fontWeight: 600 }}>{item.itemName}</td>
+                    <td className="text-mono" style={{ fontSize: 11 }}>{item.itemCode}</td>
+                    <td>{item.size} / {item.color}</td>
                     <td>{item.buyerName || '-'}</td>
                     <td>{item.orderNumber || '-'}</td>
                     <td style={{ textAlign: 'right' }}>{item.orderQuantity || '-'}</td>
@@ -165,157 +196,202 @@ export default function ChallanPage() {
                   </tr>
                 );
               })}
-              <tr style={{ fontWeight: 700, background: '#f0f0ff' }}>
-                <td colSpan={7}>Total</td>
-                <td style={{ textAlign: 'right' }}>{challanItems.reduce((s, i) => s + i.quantity, 0)}</td>
-                <td colSpan={2}></td>
-              </tr>
             </tbody>
           </table>
-          {form.notes && <p style={{ marginTop: 16, fontStyle: 'italic', color: '#666' }}>Notes: {form.notes}</p>}
+          <div style={{ marginTop: 24, display: 'flex', justifyContent: 'space-between' }}>
+            <div style={{ width: '45%' }}>
+              <p style={{ fontSize: 12, marginBottom: 40 }}><strong>Notes:</strong> {challanForm?.notes || 'None'}</p>
+              <div style={{ borderTop: '1px solid #000', textAlign: 'center', paddingTop: 4, fontSize: 12 }}>Receiver's Signature</div>
+            </div>
+            <div style={{ width: '40%', marginTop: 52 }}>
+              <div style={{ borderTop: '1px solid #000', textAlign: 'center', paddingTop: 4, fontSize: 12 }}>Authorized Signature</div>
+            </div>
+          </div>
         </div>
-        <div style={{ display: 'flex', justifyContent: 'center', gap: 12, marginTop: 20 }}>
-          <button className="btn btn-outline" onClick={() => setPreview(false)}>Edit</button>
-          <button className="btn btn-primary btn-lg" onClick={handleSave} disabled={saving}>{saving ? 'Saving...' : 'Save & Generate PDF'}</button>
+        <div style={{ marginTop: 20, display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
+          <button className="btn btn-outline" onClick={() => setPreview(false)}>Edit More</button>
+          <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
+            {saving ? 'Processing...' : 'Confirm & Create Challan'}
+          </button>
         </div>
       </div>
     );
   }
 
   return (
-    <div>
-      <div className="card mb-4">
-        <div className="card-header"><h3 className="card-title">Challan: {challanNumber}</h3></div>
-        <div className="form-row-3">
-          <div className="form-group">
-            <label className="form-label">Receiver Name *</label>
-            <input className="form-input" list="receiverName-list" value={form.receiverName} onChange={e => { set('receiverName', e.target.value); fetchSuggestions('receiverName', e.target.value); }} onFocus={() => fetchSuggestions('receiverName', form.receiverName)} placeholder="Company / Person name" autoComplete="off" />
-            <datalist id="receiverName-list">{suggestions.receiverName.map((s, i) => <option key={i} value={s} />)}</datalist>
-          </div>
-          <div className="form-group">
-            <label className="form-label">Contact</label>
-            <input className="form-input" list="receiverContact-list" value={form.receiverContact} onChange={e => { set('receiverContact', e.target.value); fetchSuggestions('receiverContact', e.target.value); }} onFocus={() => fetchSuggestions('receiverContact', form.receiverContact)} placeholder="Phone / Email" autoComplete="off" />
-            <datalist id="receiverContact-list">{suggestions.receiverContact.map((s, i) => <option key={i} value={s} />)}</datalist>
-          </div>
-          <div className="form-group">
-            <label className="form-label">Address</label>
-            <input className="form-input" list="receiverAddress-list" value={form.receiverAddress} onChange={e => { set('receiverAddress', e.target.value); fetchSuggestions('receiverAddress', e.target.value); }} onFocus={() => fetchSuggestions('receiverAddress', form.receiverAddress)} placeholder="Delivery address" autoComplete="off" />
-            <datalist id="receiverAddress-list">{suggestions.receiverAddress.map((s, i) => <option key={i} value={s} />)}</datalist>
-          </div>
-        </div>
-        <div className="form-group"><label className="form-label">Notes</label><textarea className="form-textarea" value={form.notes} onChange={e => set('notes', e.target.value)} rows={2} placeholder="Any special instructions..." /></div>
-      </div>
-
-      <div className="card mb-4">
+    <div className="challan-create-container">
+      <div className="card challan-card">
         <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h3 className="card-title">Challan Items</h3>
-          <button className="btn btn-primary btn-sm" onClick={() => setShowBrowser(true)}>
-            <Plus size={14} /> Add Items
-          </button>
+          <h3 className="card-title">New Delivery Challan</h3>
+          <div className="text-muted text-mono" style={{ fontSize: 13 }}>Next No: {challanNumber}</div>
         </div>
 
-        {showBrowser && (
-          <div className="modal-overlay">
-            <div className="modal modal-lg">
-              <div className="modal-header">
-                <h3 className="modal-title">Select Items from Inventory</h3>
-                <button className="btn btn-ghost btn-icon btn-sm" onClick={() => setShowBrowser(false)}><Plus size={20} style={{ transform: 'rotate(45deg)' }} /></button>
-              </div>
-              <div className="modal-body">
-                <div className="toolbar mb-4" style={{ flexWrap: 'wrap', gap: 10 }}>
-                  <input className="form-input" placeholder="Search name/code..." value={itemFilters.search} onChange={e => setItemFilters({ ...itemFilters, search: e.target.value })} style={{ width: 180 }} />
-                  <select className="form-select" value={itemFilters.style} onChange={e => setItemFilters({ ...itemFilters, style: e.target.value })} style={{ width: 140 }}>
-                    <option value="">All Styles</option>
-                    {distinctValues.styles.map((v, i) => <option key={i} value={v}>{v}</option>)}
-                  </select>
-                  <select className="form-select" value={itemFilters.order} onChange={e => setItemFilters({ ...itemFilters, order: e.target.value })} style={{ width: 140 }}>
-                    <option value="">All Orders</option>
-                    {distinctValues.orders.map((v, i) => <option key={i} value={v}>{v}</option>)}
-                  </select>
-                  <select className="form-select" value={itemFilters.purchase} onChange={e => setItemFilters({ ...itemFilters, purchase: e.target.value })} style={{ width: 140 }}>
-                    <option value="">All Purchase No</option>
-                    {distinctValues.purchases.map((v, i) => <option key={i} value={v}>{v}</option>)}
-                  </select>
-                </div>
-
-                <div className="table-wrapper" style={{ maxHeight: 400 }}>
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th>Item Description</th>
-                        <th>Style</th>
-                        <th>Order No</th>
-                        <th style={{ textAlign: 'right' }}>Stock</th>
-                        <th>Action</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredItems.map(item => (
-                        <tr key={item.id}>
-                          <td>
-                            <div style={{ fontWeight: 600 }}>{item.name}</div>
-                            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{item.item_code} | {item.size} {item.color}</div>
-                          </td>
-                          <td>{item.style_name || '-'}</td>
-                          <td>{item.order_number || '-'}</td>
-                          <td className="text-right text-mono">{item.current_stock} {item.unit}</td>
-                          <td>
-                            <button className="btn btn-outline btn-sm" onClick={() => addItem(item)}>
-                              <Plus size={14} /> Add
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                      {filteredItems.length === 0 && (
-                        <tr><td colSpan={5} className="text-center text-muted" style={{ padding: 40 }}>No matching items found</td></tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-              <div className="modal-footer">
-                <button className="btn btn-primary" onClick={() => setShowBrowser(false)}>Done</button>
-              </div>
-            </div>
+        <div className="form-row">
+          <div className="form-group" style={{ flex: 1.5 }}>
+            <label className="form-label">Select Receiver (Factory/Employee) *</label>
+            <select 
+              className="form-input" 
+              value={challanForm?.receiverId || ''} 
+              onChange={e => {
+                const recId = Number(e.target.value);
+                const rec = (recipients || []).find(r => r.id === recId);
+                if (rec) {
+                  setChallanForm({
+                    ...challanForm,
+                    receiverId: rec.id,
+                    receiverName: rec.name,
+                    receiverContact: rec.contact_info || '',
+                    receiverAddress: rec.address || ''
+                  });
+                } else {
+                  setChallanForm({ ...challanForm, receiverId: '', receiverName: '' });
+                }
+              }}
+            >
+              <option value="">Select Managed Recipient...</option>
+              {(recipients || []).map(r => <option key={r.id} value={r.id}>{r.name} ({r.type})</option>)}
+            </select>
           </div>
-        )}
+          <SuggestionInput 
+            label="Contact Person / Phone"
+            value={challanForm?.receiverContact}
+            onChange={v => set('receiverContact', v)}
+            suggestions={contactSuggestions}
+            field="receiverContact"
+            placeholder="Auto-filled if available"
+            onDelete={deleteSuggestion}
+          />
+        </div>
 
-        {challanItems.length > 0 && (
+        <SuggestionInput 
+          label="Delivery Address"
+          value={challanForm?.receiverAddress}
+          onChange={v => set('receiverAddress', v)}
+          suggestions={addressSuggestions}
+          field="receiverAddress"
+          placeholder="Full address"
+          disabled={user?.permissions?.challan !== 'rw'}
+          onDelete={deleteSuggestion}
+        />
+
+        <div className="challan-items-section">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <h4 style={{ fontSize: 14, fontWeight: 600 }}>Items to Deliver</h4>
+            {user?.permissions?.challan === 'rw' && (
+              <button className="btn btn-outline btn-sm" onClick={() => openModal('CHALLAN_BROWSER', { items, distinctValues, lockedItemIds })}>
+                <Search size={14} /> Browse Inventory
+              </button>
+            )}
+          </div>
+
           <div className="table-wrapper">
             <table className="data-table">
-              <thead><tr><th>Item</th><th>Order No</th><th>Order Qty</th><th>Delivered</th><th>Balance</th><th>Quantity</th><th>Unit</th><th></th></tr></thead>
+              <thead><tr><th>Item</th><th>Order No</th><th>Order Qty</th><th>Delivered</th><th>Stock</th><th>Balance</th><th>Quantity</th><th>Unit</th>{user?.permissions?.challan === 'rw' && <th></th>}</tr></thead>
               <tbody>
-                {challanItems.map((item, idx) => {
+                {(challanItems || []).map((item, idx) => {
                   const totalAfter = (item.totalDelivered || 0) + item.quantity;
                   const balance = item.orderQuantity ? (item.orderQuantity - totalAfter) : null;
                   return (
                     <tr key={idx}>
-                      <td style={{ fontWeight: 600 }}>
-                        {item.itemName}
-                        <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{item.itemCode} | {item.size} {item.color}</div>
+                      <td>
+                        <div style={{ fontWeight: 600 }}>{item.itemName}</div>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{item.itemCode} | {item.size} {item.color}</div>
                       </td>
                       <td style={{ fontSize: 12 }}>{item.orderNumber || '-'}</td>
                       <td className="text-mono">{item.orderQuantity || '-'}</td>
                       <td className="text-mono">{totalAfter}</td>
+                      <td className="text-mono fw-bold" style={{ color: (item.available || 0) <= 5 ? 'var(--danger)' : 'var(--success)' }}>{item.available || 0}</td>
                       <td className="text-mono" style={{ fontWeight: 700, color: balance < 0 ? 'var(--danger)' : 'var(--primary)' }}>
                         {balance !== null ? balance : '-'}
                       </td>
-                      <td><input className="form-input" type="number" min="1" max={item.available} value={item.quantity} onChange={e => updateItemQty(idx, e.target.value)} style={{ width: 80, padding: '6px 10px' }} /></td>
+                      <td>
+                        <input className="form-input text-center" type="number" min="1" value={item.quantity} onChange={e => updateItemQty(idx, e.target.value)} style={{ width: 70, padding: '4px 8px' }} />
+                      </td>
                       <td className="text-muted">{item.unit}</td>
-                      <td><button className="btn btn-ghost btn-icon btn-sm" onClick={() => removeItem(idx)}><Trash2 size={15} color="var(--danger)" /></button></td>
+                      <td>
+                        <button className="btn btn-ghost btn-icon btn-sm" onClick={() => removeItem(idx)}><Trash2 size={14} color="var(--danger)" /></button>
+                      </td>
                     </tr>
                   );
                 })}
+                {(!challanItems || challanItems.length === 0) && (
+                  <tr><td colSpan={9} className="text-center text-muted" style={{ padding: 24 }}>No items added yet. Browse inventory to add.</td></tr>
+                )}
               </tbody>
             </table>
           </div>
-        )}
-      </div>
+        </div>
 
-      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-        <button className="btn btn-outline" onClick={() => setPreview(true)} disabled={challanItems.length === 0}><Eye size={16} /> Preview</button>
-        <button className="btn btn-primary" onClick={handleSave} disabled={saving || challanItems.length === 0}><FileText size={16} /> {saving ? 'Saving...' : 'Save Challan'}</button>
+        <div className="form-group mt-4">
+          <label className="form-label">Notes</label>
+          <textarea className="form-textarea" value={challanForm?.notes || ''} onChange={e => set('notes', e.target.value)} rows={2} placeholder="Optional notes..."></textarea>
+        </div>
+
+        <div className="modal-footer" style={{ padding: '16px 0 0 0', borderTop: '1px solid var(--border)' }}>
+          <button className="btn btn-outline" onClick={() => clearChallan()}>Clear Form</button>
+          <div style={{ flex: 1 }}></div>
+          <button className="btn btn-outline" onClick={() => setPreview(true)} disabled={!challanItems || challanItems.length === 0}>Preview Challan</button>
+          <button className="btn btn-primary" onClick={handleSave} disabled={saving || !challanItems || challanItems.length === 0}>
+            {saving ? 'Saving...' : 'Create Challan'}
+          </button>
+        </div>
       </div>
     </div>
   );
 }
+
+const SuggestionInput = ({ label, value, onChange, suggestions, field, placeholder, disabled, onDelete }) => {
+  const [show, setShow] = useState(false);
+  const [filtered, setFiltered] = useState([]);
+
+  useEffect(() => {
+    if (!value) setFiltered(suggestions);
+    else setFiltered(suggestions.filter(s => s.toLowerCase().includes(value.toLowerCase())));
+  }, [value, suggestions]);
+
+  return (
+    <div className="form-group" style={{ position: 'relative', flex: 1 }}>
+      <label className="form-label">{label}</label>
+      <input 
+        className="form-input" 
+        value={value || ''} 
+        onChange={e => {
+          onChange(e.target.value);
+          setShow(true);
+        }} 
+        onFocus={() => setShow(true)}
+        onBlur={() => setShow(false)}
+        placeholder={placeholder}
+        disabled={disabled}
+        autoComplete="off"
+      />
+      {show && filtered?.length > 0 && (
+        <div className="custom-suggestions" onMouseDown={e => e.preventDefault()}>
+          {filtered.map((s, i) => (
+            <div 
+              key={i} 
+              className="suggestion-item" 
+              onClick={() => {
+                onChange(s);
+                setShow(false);
+              }}
+            >
+              <span>{s}</span>
+              <button 
+                className="btn-delete-suggestion" 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDelete(field, s);
+                }}
+                type="button"
+                title="Remove suggestion"
+              >
+                <X size={12} style={{ pointerEvents: 'none' }} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};

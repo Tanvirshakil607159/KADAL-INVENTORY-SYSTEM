@@ -30,11 +30,12 @@ const GatePassService = {
     return await this._executeCreate(data);
   },
 
-  async _executeCreate(data) {
+  async _executeCreate(data, options = {}) {
     const user = await AuthService.getCurrentUser();
 
     // Validate: each challan can only be gate-passed once
-    const usedIds = await GatePassRepo.getUsedChallanIds();
+    // When called from approval flow, exclude the approval's own challan IDs
+    const usedIds = await GatePassRepo.getUsedChallanIds(options.excludeApprovalId || null);
     const duplicates = (data.challanIds || []).filter(id => usedIds.includes(Number(id)));
     if (duplicates.length > 0) {
       throw new Error(`Challan(s) already included in a Gate Pass: IDs ${duplicates.join(', ')}`);

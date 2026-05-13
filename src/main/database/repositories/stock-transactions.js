@@ -84,7 +84,7 @@ const StockTransactionsRepo = {
       const supabase = getSupabase();
       
       // Fetch items first
-      let itemsQuery = supabase.from('items').select('*').eq('is_active', true);
+      let itemsQuery = supabase.from('items').select('*').eq('is_active', true).order('name').limit(5000);
       if (filters.search) {
         itemsQuery = itemsQuery.or(`name.ilike.%${filters.search}%,item_code.ilike.%${filters.search}%,style_name.ilike.%${filters.search}%,order_number.ilike.%${filters.search}%,purchase_no.ilike.%${filters.search}%`);
       }
@@ -93,11 +93,11 @@ const StockTransactionsRepo = {
       if (filters.purchaseNo) itemsQuery = itemsQuery.eq('purchase_no', filters.purchaseNo);
       if (filters.buyerName) itemsQuery = itemsQuery.eq('buyer_name', filters.buyerName);
 
-      const { data: items, error: itemsError } = await itemsQuery.order('name');
+      const { data: items, error: itemsError } = await itemsQuery;
       if (itemsError) throw itemsError;
 
       // Fetch transactions for these items within date range
-      let txQuery = supabase.from('stock_transactions').select('item_id, type, quantity');
+      let txQuery = supabase.from('stock_transactions').select('item_id, type, quantity').limit(10000);
       if (filters.dateFrom) txQuery = txQuery.gte('created_at', filters.dateFrom);
       if (filters.dateTo) txQuery = txQuery.lte('created_at', filters.dateTo + 'T23:59:59.999Z');
 
@@ -105,9 +105,10 @@ const StockTransactionsRepo = {
       if (txError) throw txError;
 
       return items.map(i => {
-        const itemTxs = txs.filter(t => t.item_id === i.id);
-        const total_in = itemTxs.filter(t => t.type === 'IN').reduce((sum, t) => sum + t.quantity, 0);
-        const total_out = itemTxs.filter(t => t.type === 'OUT').reduce((sum, t) => sum + t.quantity, 0);
+        // Use loose equality or Number conversion for safety with IDs from Supabase
+        const itemTxs = (txs || []).filter(t => Number(t.item_id) === Number(i.id));
+        const total_in = itemTxs.filter(t => t.type === 'IN').reduce((sum, t) => sum + (t.quantity || 0), 0);
+        const total_out = itemTxs.filter(t => t.type === 'OUT').reduce((sum, t) => sum + (t.quantity || 0), 0);
         return {
           ...i,
           item_name: i.name,

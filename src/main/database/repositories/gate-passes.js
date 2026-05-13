@@ -62,7 +62,7 @@ const GatePassRepo = {
     `).run(gatePassNumber, JSON.stringify(challanIds), polyBags||0, cartons||0, plasticBags||0, createdBy).lastInsertRowid;
   },
 
-  async getUsedChallanIds() {
+  async getUsedChallanIds(excludeApprovalId = null) {
     const used = new Set();
     
     if (isCloudEnabled()) {
@@ -70,48 +70,53 @@ const GatePassRepo = {
       // 1. Get from confirmed gate passes (not rejected)
       const { data: gpData } = await supabase.from('gate_passes').select('gate_pass_number, challan_ids');
       (gpData || []).forEach(row => {
-        if (!row.gate_pass_number.endsWith('-REJ')) {
+        if (row.gate_pass_number && !row.gate_pass_number.endsWith('-REJ')) {
           try {
-            const ids = JSON.parse(row.challan_ids);
-            if (Array.isArray(ids)) ids.forEach(id => used.add(Number(id)));
+            const ids = typeof row.challan_ids === 'string' ? JSON.parse(row.challan_ids) : row.challan_ids;
+            if (Array.isArray(ids)) {
+              ids.forEach(id => used.add(Number(id)));
+            }
           } catch (e) {}
         }
       });
       
-      // 2. Get from pending approval requests
-      const { data: appData } = await supabase.from('approvals').select('data').eq('type', 'CREATE_GATE_PASS').eq('status', 'PENDING');
+      // 2. Get from pending approval requests (skip the one being approved)
+      const { data: appData } = await supabase.from('approvals').select('id, data').eq('type', 'CREATE_GATE_PASS').eq('status', 'PENDING');
       (appData || []).forEach(row => {
+        if (excludeApprovalId && row.id == excludeApprovalId) return; // skip self
+        try {
+          const data = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
+          if (data.challanIds && Array.isArray(data.challanIds)) {
+            data.challanIds.forEach(id => used.add(Number(id)));
+          }
+        } catch (e) {}
+      });
+    } else {
+      // 1. Get from confirmed gate passes (not rejected)
+      const rows = dbPrepare(`SELECT challan_ids, gate_pass_number FROM gate_passes WHERE gate_pass_number NOT LIKE '%-REJ'`).all();
+      for (const row of rows) {
+        try {
+          const ids = JSON.parse(row.challan_ids);
+          if (Array.isArray(ids)) ids.forEach(id => used.add(Number(id)));
+        } catch (e) {}
+      }
+
+      // 2. Get from pending approval requests (skip the one being approved)
+      const pendingRows = dbPrepare(`SELECT id, data FROM approvals WHERE type = 'CREATE_GATE_PASS' AND status = 'PENDING'`).all();
+      for (const row of pendingRows) {
+        if (excludeApprovalId && row.id == excludeApprovalId) continue; // skip self
         try {
           const data = JSON.parse(row.data);
           if (data.challanIds && Array.isArray(data.challanIds)) {
             data.challanIds.forEach(id => used.add(Number(id)));
           }
         } catch (e) {}
-      });
-      return [...used];
+      }
     }
 
-    // 1. Get from confirmed gate passes (not rejected)
-    const rows = dbPrepare(`SELECT challan_ids FROM gate_passes WHERE gate_pass_number NOT LIKE '%-REJ'`).all();
-    for (const row of rows) {
-      try {
-        const ids = JSON.parse(row.challan_ids);
-        if (Array.isArray(ids)) ids.forEach(id => used.add(Number(id)));
-      } catch (e) {}
-    }
-
-    // 2. Get from pending approval requests
-    const pendingRows = dbPrepare(`SELECT data FROM approvals WHERE type = 'CREATE_GATE_PASS' AND status = 'PENDING'`).all();
-    for (const row of pendingRows) {
-      try {
-        const data = JSON.parse(row.data);
-        if (data.challanIds && Array.isArray(data.challanIds)) {
-          data.challanIds.forEach(id => used.add(Number(id)));
-        }
-      } catch (e) {}
-    }
-
-    return [...used];
+    const result = [...used];
+    if (result.length > 0) console.log('[GatePass] Currently blocked Challan IDs:', result);
+    return result;
   },
 
   async getNextNumber(prefix = 'GP') {
@@ -147,6 +152,27 @@ const GatePassRepo = {
     });
     
     return `${prefix}-${dateStr}-${(maxSeq + 1).toString().padStart(4, '0')}`;
+  },
+  async delete(id) {
+    if (isCloudEnabled()) {
+      const { error } = await getSupabase().from('gate_passes').delete().eq('id', id);
+      if (error) throw error;
+      return true;
+    }
+    dbPrepare('DELETE FROM gate_passes WHERE id = ?').run(id);
+    return true;
+  },
+
+  async clearGatePassHistory() {
+    if (isCloudEnabled()) {
+      const supabase = getSupabase();
+      await supabase.from('gate_passes').delete().neq('id', 0);
+      await supabase.from('approvals').delete().eq('type', 'CREATE_GATE_PASS');
+    }
+    const { dbRun } = require('../connection');
+    dbRun('DELETE FROM gate_passes');
+    dbRun("DELETE FROM approvals WHERE type = 'CREATE_GATE_PASS'");
+    return true;
   }
 };
 
