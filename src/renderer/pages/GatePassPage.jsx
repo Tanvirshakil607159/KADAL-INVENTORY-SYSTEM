@@ -64,9 +64,10 @@ export default function GatePassPage() {
 
   const addChallan = (challan) => {
     setSelectedChallans([...selectedChallans, challan]);
-    setChallanQuery('');
-    setChallanResults([]);
+    // Filter out the added challan from current results to keep dropdown useful
+    setChallanResults(prev => prev.filter(c => c.id !== challan.id));
   };
+
 
   const removeChallan = (id) => {
     setSelectedChallans(selectedChallans.filter(c => c.id !== id));
@@ -137,13 +138,31 @@ export default function GatePassPage() {
               {challanResults.length > 0 && (
                 <div className="autocomplete-dropdown">
                   {challanResults.map(c => (
-                    <div key={c.id} className="autocomplete-item" onClick={() => addChallan(c)}>
-                      <div style={{ fontWeight: 600 }}>{c.challan_number}</div>
-                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{c.receiver_name} | {new Date(c.challan_date).toLocaleDateString()}</div>
+                    <div 
+                      key={c.id} 
+                      className="autocomplete-item" 
+                      onClick={() => addChallan(c)}
+                      style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px' }}
+                    >
+                      <div>
+                        <div style={{ fontWeight: 600 }}>{c.challan_number}</div>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{c.receiver_name} | {new Date(c.challan_date).toLocaleDateString()}</div>
+                      </div>
+                      <button 
+                        className="btn btn-primary btn-sm" 
+                        style={{ padding: '4px 10px', height: 'auto', fontSize: 11 }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          addChallan(c);
+                        }}
+                      >
+                        Add +
+                      </button>
                     </div>
                   ))}
                 </div>
               )}
+
             </div>
 
             <div className="mt-4">

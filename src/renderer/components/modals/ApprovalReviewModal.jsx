@@ -3,7 +3,7 @@ import useStore from '../../store/useStore';
 import { Clock, CheckCircle, XCircle, Edit2, Download, FileText } from 'lucide-react';
 
 export default function ApprovalReviewModal({ data, onSaved }) {
-  const { addToast, closeModal, openModal, setModalMinimized, modal, user } = useStore();
+  const { addToast, closeModal, openModal, setModalMinimized, modal, user, showConfirm } = useStore();
   const { selectedRequest, renderDataDetail } = data;
   const isMinimized = modal?.isMinimized;
   const isAdmin = user?.roleName === 'Super Admin' || user?.roleName === 'Admin';
@@ -11,6 +11,35 @@ export default function ApprovalReviewModal({ data, onSaved }) {
   const [notes, setNotes] = useState('');
 
   const handleApprove = async () => {
+    // Duplicate check for Challan requests
+    if (selectedRequest.type === 'CREATE_CHALLAN') {
+      const items = selectedRequest.data?.items || [];
+      const seenItems = new Set();
+      let hasDuplicate = false;
+      for (const it of items) {
+        const namePart = String(it.name || '').trim().toLowerCase();
+        const sizePart = String(it.size || '').trim().toLowerCase();
+        const key = `${namePart}|${sizePart}`;
+        if (seenItems.has(key)) {
+          hasDuplicate = true;
+          break;
+        }
+        seenItems.add(key);
+      }
+
+
+      if (hasDuplicate) {
+        const confirmed = await showConfirm({
+          title: 'Duplicate Items Detected',
+          message: 'It seems items are duplicate please check before submit/approved. Do you want to proceed?',
+          confirmText: 'Checked',
+          cancelText: 'Cancel',
+          type: 'warning'
+        });
+        if (!confirmed) return;
+      }
+    }
+
     try {
       const res = await window.kadal.approvals.approve(selectedRequest.id, notes);
       if (res.success) {

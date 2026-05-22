@@ -16,10 +16,28 @@ const TABS = [
 ];
 
 export default function SettingsPage() {
-  const [activeTab, setActiveTab] = useState('company');
+  const { user } = useStore();
+  const canManageSettings = user?.permissions?.settings === 'rw' || user?.roleName === 'Super Admin';
+  
+  const availableTabs = canManageSettings 
+    ? TABS 
+    : TABS.filter(t => t.id === 'system');
+
+  const [activeTab, setActiveTab] = useState(canManageSettings ? 'company' : 'system');
+
   return (
     <div>
-      <div className="tabs">{TABS.map(t => <button key={t.id} className={`tab ${activeTab===t.id?'active':''}`} onClick={()=>setActiveTab(t.id)}>{t.label}</button>)}</div>
+      <div className="tabs">
+        {availableTabs.map(t => (
+          <button 
+            key={t.id} 
+            className={`tab ${activeTab === t.id ? 'active' : ''}`} 
+            onClick={() => setActiveTab(t.id)}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
       {activeTab === 'company' && <CompanySettings />}
       {activeTab === 'users' && <UserSettings />}
       {activeTab === 'categories' && <CategorySettings />}
@@ -95,6 +113,19 @@ function CompanySettings() {
         <div className="form-group"><label className="form-label">Challan Prefix</label><input className="form-input" value={settings.challan_prefix||''} onChange={e=>set('challan_prefix',e.target.value)} disabled={!canEdit} /></div>
         <div className="form-group"><label className="form-label">Low Stock Threshold</label><input className="form-input" type="number" value={settings.low_stock_threshold||''} onChange={e=>set('low_stock_threshold',e.target.value)} disabled={!canEdit} /></div>
       </div>
+      <div className="form-group">
+        <label className="form-label">Public Web URL</label>
+        <input className="form-input" value={settings.public_web_url||''} onChange={e=>set('public_web_url',e.target.value)} placeholder="https://kadal-inventory.web.app" disabled={!canEdit} />
+        <div className="text-muted" style={{ fontSize: 11, marginTop: 4 }}>This URL is used to generate the barcode/QR code on Delivery Challan PDFs. E.g., <code>https://my-app.com</code>. If configured, scanning the barcode will open the challan details.</div>
+      </div>
+      <div className="form-group">
+        <label className="form-label">Challan Barcode Format</label>
+        <select className="form-input" value={settings.barcode_format||'QR'} onChange={e=>set('barcode_format',e.target.value)} disabled={!canEdit}>
+          <option value="CODE128">Barcode (1D - CODE128)</option>
+          <option value="QR">QR Code (2D)</option>
+        </select>
+        <div className="text-muted" style={{ fontSize: 11, marginTop: 4 }}>Select the barcode format printed on Delivery Challan PDFs. QR Code is highly recommended if the Public Web URL is configured (as it remains scannable at small sizes).</div>
+      </div>
       <div style={{ borderTop: '1px solid var(--border)', paddingTop: 16, marginTop: 8 }}>
         <h4 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Approval Module Settings</h4>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -109,6 +140,19 @@ function CompanySettings() {
           <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontSize: 13 }}>
             <input type="checkbox" checked={settings.require_gate_pass_approval === 'true'} onChange={e => set('require_gate_pass_approval', e.target.checked ? 'true' : 'false')} disabled={!canEdit} />
             Require Admin Approval for all Gate Passes (Non-Admins)
+          </label>
+        </div>
+      </div>
+      <div style={{ borderTop: '1px solid var(--border)', paddingTop: 16, marginTop: 16 }}>
+        <h4 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Access Control Override Settings</h4>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontSize: 13 }}>
+            <input type="checkbox" checked={settings.allow_challan_to_issue === 'true'} onChange={e => set('allow_challan_to_issue', e.target.checked ? 'true' : 'false')} disabled={!canEdit} />
+            Allow Challan Role Users to access/use Issue Module
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontSize: 13 }}>
+            <input type="checkbox" checked={settings.allow_inventory_to_produce === 'true'} onChange={e => set('allow_inventory_to_produce', e.target.checked ? 'true' : 'false')} disabled={!canEdit} />
+            Allow Inventory Role Users to access/use Production Module
           </label>
         </div>
       </div>
@@ -308,6 +352,20 @@ function SupplierSettings() {
     else addToast('error', res.data?.error||res.error);
   };
 
+  const handleEdit = (s) => {
+    openModal('SUPPLIER_FORM', {
+      editingSupplier: s,
+      initialForm: {
+        name: s.name,
+        contactPerson: s.contact_person,
+        phone: s.phone,
+        email: s.email,
+        address: s.address
+      },
+      onSaved: load
+    });
+  };
+
   return (
     <div>
       <div className="toolbar"><div className="toolbar-left"></div>{canEdit && <button className="btn btn-primary btn-sm" onClick={()=>openModal('SUPPLIER_FORM', { initialForm: {name:'',contactPerson:'',phone:'',email:'',address:''}, onSaved: load })}><Plus size={14}/> Add Supplier</button>}</div>
@@ -316,7 +374,10 @@ function SupplierSettings() {
           <thead><tr><th>Name</th><th>Contact</th><th>Phone</th><th>Email</th>{canEdit && <th>Actions</th>}</tr></thead>
           <tbody>{suppliers.map(s=>(
             <tr key={s.id}><td style={{fontWeight:600}}>{s.name}</td><td>{s.contact_person||'-'}</td><td>{s.phone||'-'}</td><td>{s.email||'-'}</td>
-            {canEdit && <td><button className="btn btn-ghost btn-icon btn-sm" onClick={()=>del(s.id)}><Trash2 size={14} color="var(--danger)"/></button></td>}</tr>
+            {canEdit && <td>
+              <button className="btn btn-ghost btn-icon btn-sm" onClick={()=>handleEdit(s)} title="Edit"><Edit2 size={14}/></button>
+              <button className="btn btn-ghost btn-icon btn-sm" onClick={()=>del(s.id)} title="Delete"><Trash2 size={14} color="var(--danger)"/></button>
+            </td>}</tr>
           ))}</tbody>
         </table>
       </div>
@@ -440,8 +501,8 @@ function ImportData() {
     setGoogleUrl('');
   };
 
-  const PREVIEW_COLS = ['name', 'category', 'size', 'color', 'unit', 'supplier', 'buyerName', 'styleName', 'purchaseNo', 'orderNumber', 'openingStock', 'minStockLevel', 'notes'];
-  const COL_LABELS = { name: 'Item Name', category: 'Category', size: 'Size', color: 'Color', unit: 'Unit', supplier: 'Supplier', buyerName: 'Buyer', styleName: 'Style', purchaseNo: 'Purchase No', orderNumber: 'Order Number', openingStock: 'Stock', minStockLevel: 'Min Level', notes: 'Notes' };
+  const PREVIEW_COLS = ['name', 'category', 'size', 'color', 'unit', 'supplier', 'buyerName', 'styleName', 'purchaseNo', 'orderNumber', 'unitPrice', 'currency', 'openingStock', 'minStockLevel', 'notes'];
+  const COL_LABELS = { name: 'Item Name', category: 'Category', size: 'Size', color: 'Color', unit: 'Unit', supplier: 'Supplier', buyerName: 'Buyer', styleName: 'Style', purchaseNo: 'Purchase No', orderNumber: 'Order Number', unitPrice: 'Price', currency: 'Currency', openingStock: 'Stock', minStockLevel: 'Min Level', notes: 'Notes' };
 
   // Step 1: Source selection
   if (step === 'source') {
@@ -503,6 +564,8 @@ function ImportData() {
             <div><strong>Style:</strong> <span className="text-muted">Style, Style Name, Style No</span></div>
             <div><strong>Purchase No:</strong> <span className="text-muted">Purchase No, PO, PO No</span></div>
             <div><strong>Order Number:</strong> <span className="text-muted">Order Number, Order No, Order #</span></div>
+            <div><strong>Price:</strong> <span className="text-muted">Unit Price, Rate, Cost, Price</span></div>
+            <div><strong>Currency:</strong> <span className="text-muted">Currency, Money, Cr</span></div>
             <div><strong>Stock:</strong> <span className="text-muted">Stock, Qty, Quantity, Balance</span></div>
             <div><strong>Min Level:</strong> <span className="text-muted">Min Stock, Minimum, Reorder</span></div>
             <div><strong>Notes:</strong> <span className="text-muted">Notes, Remark, Comments</span></div>

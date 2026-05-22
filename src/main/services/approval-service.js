@@ -4,10 +4,14 @@ const AuthService = require('./auth-service');
 const ApprovalService = {
   async createRequest(type, data) {
     const user = await AuthService.getCurrentUser();
+    if (!user || !user.id) {
+      throw new Error('Session expired or user not found. Please log in again.');
+    }
+
     const id = await ApprovalsRepo.create({
       type,
       data,
-      requestedBy: user?.id
+      requestedBy: user.id
     });
     return { success: true, pendingApproval: true, requestId: id };
   },

@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import useStore from '../store/useStore';
-import { Plus, Search, Trash2, FileText, ArrowLeft, Package, Clock, X } from 'lucide-react';
+import { Plus, Search, Trash2, FileText, ArrowLeft, Package, Clock, X, AlertCircle } from 'lucide-react';
 
 export default function ChallanPage() {
   const { 
     addToast, setPage, openModal, 
     challanForm, setChallanForm, 
     challanItems, setChallanItems, 
-    clearChallan, user
+    clearChallan, user, showConfirm
   } = useStore();
   
   const [items, setItems] = useState([]);
@@ -84,6 +84,34 @@ export default function ChallanPage() {
         return; 
       }
     }
+
+    // Duplicate check: Same name and same size
+    const seenItems = new Set();
+    let hasDuplicate = false;
+    for (const item of (challanItems || [])) {
+      const namePart = String(item.itemName || '').trim().toLowerCase();
+      const sizePart = String(item.size || '').trim().toLowerCase();
+      const key = `${namePart}|${sizePart}`;
+      if (seenItems.has(key)) {
+        hasDuplicate = true;
+        break;
+      }
+      seenItems.add(key);
+    }
+
+
+    if (hasDuplicate) {
+      const confirmed = await showConfirm({
+        title: 'Duplicate Items Detected',
+        message: 'It seems items are duplicate please check before submit/approved. Do you want to proceed?',
+        confirmText: 'Checked',
+        cancelText: 'Cancel',
+        type: 'warning'
+      });
+      if (!confirmed) return;
+    }
+
+
     setSaving(true);
     try {
       const res = await window.kadal.challans.create({
@@ -134,9 +162,24 @@ export default function ChallanPage() {
   if (loading) return <div className="loading"><div className="spinner"></div></div>;
 
   if (preview) {
+    const seenItems = new Set();
+    let hasDuplicate = false;
+    (challanItems || []).forEach(it => {
+      const namePart = String(it.itemName || '').trim().toLowerCase();
+      const sizePart = String(it.size || '').trim().toLowerCase();
+      const key = `${namePart}|${sizePart}`;
+      if (seenItems.has(key)) hasDuplicate = true;
+      seenItems.add(key);
+    });
+
     return (
       <div>
         <button className="btn btn-outline mb-4" onClick={() => setPreview(false)}>← Back to Edit</button>
+        {hasDuplicate && (
+          <div style={{ marginBottom: 16, padding: 12, background: 'rgba(245,158,11,0.1)', border: '1px solid var(--warning)', borderRadius: 'var(--radius-sm)', color: 'var(--warning)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 10 }}>
+            <AlertCircle size={18} /> It seems items are duplicate please check before submit/approved
+          </div>
+        )}
         <div className="challan-preview">
           <div className="challan-preview-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div>
@@ -198,15 +241,24 @@ export default function ChallanPage() {
               })}
             </tbody>
           </table>
-          <div style={{ marginTop: 24, display: 'flex', justifyContent: 'space-between' }}>
-            <div style={{ width: '45%' }}>
-              <p style={{ fontSize: 12, marginBottom: 40 }}><strong>Notes:</strong> {challanForm?.notes || 'None'}</p>
-              <div style={{ borderTop: '1px solid #000', textAlign: 'center', paddingTop: 4, fontSize: 12 }}>Receiver's Signature</div>
+          <div style={{ marginBottom: 40, marginTop: 24 }}>
+            <p style={{ fontSize: 12 }}><strong>Notes:</strong> {challanForm?.notes || 'None'}</p>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+            <div style={{ width: '22%' }}>
+              <div style={{ borderTop: '1px solid #000', textAlign: 'center', paddingTop: 4, fontSize: 11 }}>Signature of the Recipient</div>
             </div>
-            <div style={{ width: '40%', marginTop: 52 }}>
-              <div style={{ borderTop: '1px solid #000', textAlign: 'center', paddingTop: 4, fontSize: 12 }}>Authorized Signature</div>
+            <div style={{ width: '22%' }}>
+              <div style={{ borderTop: '1px solid #000', textAlign: 'center', paddingTop: 4, fontSize: 11 }}>Store Incharge</div>
+            </div>
+            <div style={{ width: '22%' }}>
+              <div style={{ borderTop: '1px solid #000', textAlign: 'center', paddingTop: 4, fontSize: 11 }}>Prepared By</div>
+            </div>
+            <div style={{ width: '22%' }}>
+              <div style={{ borderTop: '1px solid #000', textAlign: 'center', paddingTop: 4, fontSize: 11 }}>Authorized Signature</div>
             </div>
           </div>
+
         </div>
         <div style={{ marginTop: 20, display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
           <button className="btn btn-outline" onClick={() => setPreview(false)}>Edit More</button>
@@ -343,55 +395,77 @@ export default function ChallanPage() {
 const SuggestionInput = ({ label, value, onChange, suggestions, field, placeholder, disabled, onDelete }) => {
   const [show, setShow] = useState(false);
   const [filtered, setFiltered] = useState([]);
+  const [isFocused, setIsFocused] = useState(false);
+
+  const isFilled = (val) => {
+    if (val === null || val === undefined) return false;
+    if (typeof val === 'string') return val.trim().length > 0;
+    if (typeof val === 'number') return val >= 0;
+    return !!val;
+  };
 
   useEffect(() => {
-    if (!value) setFiltered(suggestions);
-    else setFiltered(suggestions.filter(s => s.toLowerCase().includes(value.toLowerCase())));
-  }, [value, suggestions]);
+    if (!value || (isFocused && suggestions.includes(value))) {
+      setFiltered(suggestions);
+    } else {
+      setFiltered(suggestions.filter(s => s.toLowerCase().includes(value.toLowerCase())));
+    }
+  }, [value, suggestions, isFocused]);
 
   return (
     <div className="form-group" style={{ position: 'relative', flex: 1 }}>
       <label className="form-label">{label}</label>
-      <input 
-        className="form-input" 
-        value={value || ''} 
-        onChange={e => {
-          onChange(e.target.value);
-          setShow(true);
-        }} 
-        onFocus={() => setShow(true)}
-        onBlur={() => setShow(false)}
-        placeholder={placeholder}
-        disabled={disabled}
-        autoComplete="off"
-      />
-      {show && filtered?.length > 0 && (
-        <div className="custom-suggestions" onMouseDown={e => e.preventDefault()}>
-          {filtered.map((s, i) => (
-            <div 
-              key={i} 
-              className="suggestion-item" 
-              onClick={() => {
-                onChange(s);
-                setShow(false);
-              }}
-            >
-              <span>{s}</span>
-              <button 
-                className="btn-delete-suggestion" 
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDelete(field, s);
+      <div style={{ position: 'relative' }}>
+        <input 
+          className={`form-input ${isFilled(value) ? 'filled' : ''}`} 
+          value={value || ''} 
+          onChange={e => {
+            onChange(e.target.value);
+            setShow(true);
+          }} 
+          onFocus={() => {
+            setShow(true);
+            setIsFocused(true);
+          }}
+          onBlur={() => {
+            // Delay to allow onClick to fire
+            setTimeout(() => {
+              setShow(false);
+              setIsFocused(false);
+            }, 200);
+          }}
+          placeholder={placeholder}
+          disabled={disabled}
+          autoComplete="off"
+        />
+        {show && filtered?.length > 0 && (
+          <div className="custom-suggestions" onMouseDown={e => e.preventDefault()}>
+            {filtered.map((s, i) => (
+              <div 
+                key={i} 
+                className={`suggestion-item ${s === value ? 'active' : ''}`} 
+                onClick={() => {
+                  onChange(s);
+                  setShow(false);
                 }}
-                type="button"
-                title="Remove suggestion"
               >
-                <X size={12} style={{ pointerEvents: 'none' }} />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
+                <span>{s}</span>
+                <button 
+                  className="btn-delete-suggestion" 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDelete(field, s);
+                  }}
+                  type="button"
+                  title="Remove suggestion"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 };

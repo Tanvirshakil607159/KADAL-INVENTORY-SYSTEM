@@ -22,8 +22,24 @@ const ItemsRepo = {
         query = query.lte('current_stock', 'min_stock_level');
       }
 
-      const { data, error } = await query.order('name', { ascending: true });
-      if (error) throw error;
+      async function fetchAll(queryBuilder) {
+        let allData = [];
+        let page = 0;
+        const pageSize = 1000;
+        while (true) {
+          const from = page * pageSize;
+          const to = from + pageSize - 1;
+          const { data, error } = await queryBuilder.range(from, to);
+          if (error) throw error;
+          if (!data || data.length === 0) break;
+          allData = allData.concat(data);
+          if (data.length < pageSize) break;
+          page++;
+        }
+        return allData;
+      }
+
+      const data = await fetchAll(query.order('name', { ascending: true }));
       
       // Map Supabase relation format to match local format
       return data.map(i => ({
@@ -108,7 +124,8 @@ const ItemsRepo = {
           order_number: data.orderNumber || null,
           order_quantity: data.orderQuantity || 0,
           unit_price: data.unitPrice || 0,
-          currency: data.currency || 'BDT'
+          currency: data.currency || 'BDT',
+          source_type: data.sourceType || 'SOURCE'
         }])
         .select()
         .single();
@@ -116,8 +133,8 @@ const ItemsRepo = {
       return inserted.id;
     }
 
-    return dbPrepare(`INSERT INTO items (item_code, name, category_id, size, color, unit, supplier_id, opening_stock, current_stock, min_stock_level, notes, buyer_name, style_name, purchase_no, order_number, order_quantity, unit_price, currency) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-      finalCode, data.name, data.categoryId||null, data.size||null, data.color||null, data.unit||'pcs', data.supplierId||null, data.openingStock||0, data.openingStock||0, data.minStockLevel||0, data.notes||null, data.buyerName||null, data.styleName||null, data.purchaseNo||null, data.orderNumber||null, data.orderQuantity||0, data.unitPrice||0, data.currency||'BDT'
+    return dbPrepare(`INSERT INTO items (item_code, name, category_id, size, color, unit, supplier_id, opening_stock, current_stock, min_stock_level, notes, buyer_name, style_name, purchase_no, order_number, order_quantity, unit_price, currency, source_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      finalCode, data.name, data.categoryId||null, data.size||null, data.color||null, data.unit||'pcs', data.supplierId||null, data.openingStock||0, data.openingStock||0, data.minStockLevel||0, data.notes||null, data.buyerName||null, data.styleName||null, data.purchaseNo||null, data.orderNumber||null, data.orderQuantity||0, data.unitPrice||0, data.currency||'BDT', data.sourceType||'SOURCE'
     ).lastInsertRowid;
   },
 
@@ -141,14 +158,15 @@ const ItemsRepo = {
           order_quantity: data.orderQuantity || 0,
           unit_price: data.unitPrice || 0,
           currency: data.currency || 'BDT',
+          source_type: data.sourceType || 'SOURCE',
           updated_at: new Date().toISOString()
         })
         .eq('id', id);
       if (error) throw error;
       return true;
     }
-    return dbPrepare(`UPDATE items SET name=?, category_id=?, size=?, color=?, unit=?, supplier_id=?, min_stock_level=?, notes=?, buyer_name=?, style_name=?, purchase_no=?, order_number=?, order_quantity=?, unit_price=?, currency=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(
-      data.name, data.categoryId||null, data.size||null, data.color||null, data.unit||'pcs', data.supplierId||null, data.minStockLevel||0, data.notes||null, data.buyerName||null, data.styleName||null, data.purchaseNo||null, data.orderNumber||null, data.orderQuantity||0, data.unitPrice||0, data.currency||'BDT', id
+    return dbPrepare(`UPDATE items SET name=?, category_id=?, size=?, color=?, unit=?, supplier_id=?, min_stock_level=?, notes=?, buyer_name=?, style_name=?, purchase_no=?, order_number=?, order_quantity=?, unit_price=?, currency=?, source_type=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(
+      data.name, data.categoryId||null, data.size||null, data.color||null, data.unit||'pcs', data.supplierId||null, data.minStockLevel||0, data.notes||null, data.buyerName||null, data.styleName||null, data.purchaseNo||null, data.orderNumber||null, data.orderQuantity||0, data.unitPrice||0, data.currency||'BDT', data.sourceType||'SOURCE', id
     );
   },
 
@@ -163,6 +181,24 @@ const ItemsRepo = {
     }
     return dbPrepare(`UPDATE items SET current_stock = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(newStock, id);
   },
+
+  async adjustStock(id, delta) {
+    if (isCloudEnabled()) {
+      const supabase = getSupabase();
+      // Supabase rpc for atomic increment/decrement is preferred, but for now we'll use a direct update with a formula if supported or just the standard way
+      // Actually, Supabase doesn't support easy formulas in .update() without RPC.
+      // So we'll fetch and update, but since we are in a service we'll trust the atomic nature of SQL for local and do our best for cloud.
+      const { data, error: fetchErr } = await supabase.from('items').select('current_stock').eq('id', id).single();
+      if (fetchErr) throw fetchErr;
+      const { error } = await supabase.from('items')
+        .update({ current_stock: data.current_stock + delta, updated_at: new Date().toISOString() })
+        .eq('id', id);
+      if (error) throw error;
+      return true;
+    }
+    return dbPrepare(`UPDATE items SET current_stock = current_stock + ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(delta, id);
+  },
+
 
   async delete(id) {
     if (isCloudEnabled()) {
@@ -204,12 +240,24 @@ const ItemsRepo = {
     if (isCloudEnabled()) {
       const { data, error } = await getSupabase()
         .from('items')
-        .select('current_stock, unit_price')
+        .select('current_stock, unit_price, currency')
         .eq('is_active', true);
       if (error) throw error;
-      return data.reduce((sum, item) => sum + ((item.current_stock || 0) * (item.unit_price || 0)), 0);
+      const res = { BDT: 0, USD: 0 };
+      data.forEach(i => {
+        const val = (i.current_stock || 0) * (i.unit_price || 0);
+        if (i.currency === 'USD') res.USD += val;
+        else res.BDT += val;
+      });
+      return res;
     }
-    return dbPrepare('SELECT COALESCE(SUM(current_stock * unit_price), 0) as total FROM items WHERE is_active = 1').get().total;
+    const rows = dbPrepare('SELECT currency, SUM(current_stock * unit_price) as total FROM items WHERE is_active = 1 GROUP BY currency').all();
+    const res = { BDT: 0, USD: 0 };
+    rows.forEach(r => {
+      if (r.currency === 'USD') res.USD = r.total;
+      else res.BDT += r.total;
+    });
+    return res;
   },
 
   async getLowStockCount() {
@@ -304,24 +352,38 @@ const ItemsRepo = {
 
   async getDistinctValues() {
     if (isCloudEnabled()) {
+      // Fetching only required columns to reduce bandwidth
       const { data, error } = await getSupabase()
         .from('items')
         .select('name, color, size, style_name, purchase_no, order_number, buyer_name')
         .eq('is_active', true);
+      
       if (error) throw error;
 
-      const getUnique = (field) => [...new Set(data.map(i => i[field]).filter(v => v && v !== ''))].sort();
+      // Efficient unique extraction
+      const res = { names: new Set(), colors: new Set(), sizes: new Set(), styles: new Set(), purchases: new Set(), orders: new Set(), buyers: new Set() };
       
+      data.forEach(i => {
+        if (i.name) res.names.add(i.name);
+        if (i.color) res.colors.add(i.color);
+        if (i.size) res.sizes.add(i.size);
+        if (i.style_name) res.styles.add(i.style_name);
+        if (i.purchase_no) res.purchases.add(i.purchase_no);
+        if (i.order_number) res.orders.add(i.order_number);
+        if (i.buyer_name) res.buyers.add(i.buyer_name);
+      });
+
       return {
-        names: getUnique('name'),
-        colors: getUnique('color'),
-        sizes: getUnique('size'),
-        styles: getUnique('style_name'),
-        purchases: getUnique('purchase_no'),
-        orders: getUnique('order_number'),
-        buyers: getUnique('buyer_name'),
+        names: [...res.names].sort(),
+        colors: [...res.colors].sort(),
+        sizes: [...res.sizes].sort(),
+        styles: [...res.styles].sort(),
+        purchases: [...res.purchases].sort(),
+        orders: [...res.orders].sort(),
+        buyers: [...res.buyers].sort(),
       };
     }
+
     const names = dbPrepare("SELECT DISTINCT name FROM items WHERE is_active = 1 AND name IS NOT NULL ORDER BY name").all().map(r => r.name);
     const colors = dbPrepare("SELECT DISTINCT color FROM items WHERE is_active = 1 AND color IS NOT NULL AND color != '' ORDER BY color").all().map(r => r.color);
     const sizes = dbPrepare("SELECT DISTINCT size FROM items WHERE is_active = 1 AND size IS NOT NULL AND size != '' ORDER BY size").all().map(r => r.size);

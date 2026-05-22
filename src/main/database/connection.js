@@ -265,10 +265,10 @@ function dbExec(sql) {
 }
 
 function dbTransaction(fn) {
-  return (...args) => {
+  return async (...args) => {
     db.run('BEGIN TRANSACTION');
     try {
-      const result = fn(...args);
+      const result = await fn(...args);
       db.run('COMMIT');
       saveDatabase();
       return result;

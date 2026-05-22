@@ -86,18 +86,11 @@ const ChallansRepo = {
     if (filters.dateTo && filters.dateTo.trim()) { where.push("c.challan_date <= ?"); params.push(filters.dateTo + 'T23:59:59.999Z'); }
     
     if (filters.excludeUsedInGatePass) {
-      where.push(`c.id NOT IN (
-        SELECT id FROM (
-          SELECT CAST(json_each.value AS INTEGER) as id 
-          FROM gate_passes, json_each(gate_passes.challan_ids)
-          WHERE gate_pass_number NOT LIKE '%-REJ'
-          UNION
-          SELECT CAST(json_extract(data, '$.challanIds[0]') AS INTEGER) -- This is simplified, real logic below
-          FROM approvals WHERE type = 'CREATE_GATE_PASS' AND status = 'PENDING'
-        )
-      )`);
-      // Since SQLite json_each might be complex, I'll use the in-memory approach for simplicity if possible, 
-      // but let's stick to the repo call for consistency.
+      const GatePassRepo = require('./gate-passes');
+      const usedIds = await GatePassRepo.getUsedChallanIds();
+      if (usedIds.length > 0) {
+        where.push(`c.id NOT IN (${usedIds.join(',')})`);
+      }
     }
 
     const w = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
@@ -130,10 +123,26 @@ const ChallansRepo = {
       const { data, error } = await query;
       if (error) throw error;
 
-      return await Promise.all(data.map(async row => {
+      // Optimize: Fetch all totals in one go instead of a loop
+      const itemIds = [...new Set(data.map(r => r.items.id))];
+      const { data: allTotals, error: totalErr } = await supabase
+        .from('challan_items')
+        .select('item_id, quantity, challans!inner(status)')
+        .in('item_id', itemIds)
+        .eq('challans.status', 'ACTIVE');
+
+      if (totalErr) throw totalErr;
+
+      // Map totals by itemId
+      const totalMap = {};
+      (allTotals || []).forEach(t => {
+        totalMap[t.item_id] = (totalMap[t.item_id] || 0) + t.quantity;
+      });
+
+      return data.map(row => {
         const item = row.items;
         const challan = row.challans;
-        const total_shipped = await this.getTotalDelivered(item.id);
+        const total_shipped = totalMap[item.id] || 0;
         return {
           id: row.id,
           challan_id: row.challan_id,
@@ -155,8 +164,9 @@ const ChallansRepo = {
           total_shipped,
           balance: (item.order_quantity || 0) - total_shipped
         };
-      }));
+      });
     }
+
 
     let where = []; let params = [];
     if (filters.status) { where.push('c.status = ?'); params.push(filters.status); }
@@ -202,6 +212,78 @@ const ChallansRepo = {
   },
 
 
+  async getByNumber(number) {
+    if (isCloudEnabled()) {
+      const supabase = getSupabase();
+      const { data: challan, error } = await supabase.from('challans').select(`
+        *,
+        created_by_user:users!challans_created_by_fkey (full_name),
+        cancelled_by_user:users!challans_cancelled_by_fkey (full_name)
+      `).eq('challan_number', number).maybeSingle();
+      
+      if (error) throw error;
+
+      if (challan) {
+        challan.created_by_name = challan.created_by_user?.full_name;
+        challan.cancelled_by_name = challan.cancelled_by_user?.full_name;
+        
+        const { data: itemsData, error: itemsError } = await supabase.from('challan_items').select(`
+          *,
+          items (*)
+        `).eq('challan_id', challan.id);
+        
+        if (itemsError) throw itemsError;
+
+        // Optimize: Batch fetch shipped totals
+        const itemIds = (itemsData || []).map(ci => ci.item_id);
+        const { data: allShipped } = await supabase.from('challan_items')
+          .select('item_id, quantity, challans!inner(status)')
+          .in('item_id', itemIds)
+          .eq('challans.status', 'ACTIVE');
+        
+        const totalMap = {};
+        (allShipped || []).forEach(s => {
+          totalMap[s.item_id] = (totalMap[s.item_id] || 0) + s.quantity;
+        });
+
+        challan.items = (itemsData || []).map(ci => {
+          const item = ci.items || {};
+          const total_shipped = totalMap[ci.item_id] || 0;
+
+          return {
+            ...ci,
+            item_name: item.name,
+            item_code: item.item_code,
+            size: item.size,
+            color: item.color,
+            buyer_name: item.buyer_name,
+            style_name: item.style_name,
+            purchase_no: item.purchase_no,
+            order_quantity: item.order_quantity,
+            current_stock: item.current_stock,
+            order_number: item.order_number,
+            total_shipped
+          };
+        });
+      }
+
+      return challan;
+    }
+
+    const challan = dbPrepare(`SELECT c.*, u.full_name as created_by_name, u2.full_name as cancelled_by_name FROM challans c LEFT JOIN users u ON c.created_by = u.id LEFT JOIN users u2 ON c.cancelled_by = u2.id WHERE c.challan_number = ?`).get(number);
+    if (challan) {
+      challan.items = dbPrepare(`
+        SELECT ci.*, i.name as item_name, i.item_code, i.size, i.color, i.buyer_name, i.style_name, i.purchase_no, i.order_quantity, i.current_stock, i.order_number,
+        (SELECT COALESCE(SUM(ci2.quantity), 0) FROM challan_items ci2 JOIN challans c2 ON ci2.challan_id = c2.id WHERE ci2.item_id = ci.item_id AND c2.status = 'ACTIVE') as total_shipped
+        FROM challan_items ci 
+        JOIN items i ON ci.item_id = i.id 
+        WHERE ci.challan_id = ? 
+        ORDER BY ci.id
+      `).all(challan.id);
+    }
+    return challan;
+  },
+
   async getById(id) {
     if (isCloudEnabled()) {
       const supabase = getSupabase();
@@ -224,16 +306,21 @@ const ChallansRepo = {
         
         if (itemsError) throw itemsError;
 
-        challan.items = await Promise.all((itemsData || []).map(async ci => {
+        // Optimize: Batch fetch shipped totals
+        const itemIds = (itemsData || []).map(ci => ci.item_id);
+        const { data: allShipped } = await supabase.from('challan_items')
+          .select('item_id, quantity, challans!inner(status)')
+          .in('item_id', itemIds)
+          .eq('challans.status', 'ACTIVE');
+        
+        const totalMap = {};
+        (allShipped || []).forEach(s => {
+          totalMap[s.item_id] = (totalMap[s.item_id] || 0) + s.quantity;
+        });
+
+        challan.items = (itemsData || []).map(ci => {
           const item = ci.items || {};
-          
-          // Calculate total shipped for this item across all active challans
-          const { data: shippedData } = await supabase.from('challan_items')
-            .select('quantity, challans!inner(status)')
-            .eq('item_id', ci.item_id)
-            .eq('challans.status', 'ACTIVE');
-            
-          const total_shipped = (shippedData || []).reduce((sum, d) => sum + d.quantity, 0);
+          const total_shipped = totalMap[ci.item_id] || 0;
 
           return {
             ...ci,
@@ -249,8 +336,9 @@ const ChallansRepo = {
             order_number: item.order_number,
             total_shipped
           };
-        }));
+        });
       }
+
       return challan;
     }
 
@@ -414,6 +502,29 @@ const ChallansRepo = {
       }));
     }
     return dbPrepare(`SELECT c.*, u.full_name as created_by_name, (SELECT COUNT(*) FROM challan_items ci WHERE ci.challan_id = c.id) as item_count FROM challans c LEFT JOIN users u ON c.created_by = u.id ORDER BY c.created_at DESC LIMIT ?`).all(limit);
+  },
+
+  async getWaitingForGatePassCount() {
+    const GatePassRepo = require('./gate-passes');
+    const ApprovalsRepo = require('./approvals');
+    
+    // 1. Get all active challans that have NO gate pass (confirmed or pending)
+    const allActive = await this.getAll({ status: 'ACTIVE' });
+    const usedIds = await GatePassRepo.getUsedChallanIds();
+    const activeUnpassedCount = allActive.filter(c => !usedIds.includes(c.id)).length;
+
+    // 2. Count pending challan approvals (each request represents 1 future challan)
+    const allPending = await ApprovalsRepo.getAll({ status: 'PENDING' });
+    const pendingChallanCount = allPending.filter(a => a.type === 'CREATE_CHALLAN').length;
+
+    // 3. Count challans trapped in pending gate pass approvals
+    let challansInPendingGatePass = 0;
+    allPending.filter(a => a.type === 'CREATE_GATE_PASS').forEach(a => {
+      const ids = a.data?.challanIds || [];
+      if (Array.isArray(ids)) challansInPendingGatePass += ids.length;
+    });
+
+    return activeUnpassedCount + pendingChallanCount + challansInPendingGatePass;
   },
 
   async getFieldSuggestions(field, query = '') {

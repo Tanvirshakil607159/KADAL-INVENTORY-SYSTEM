@@ -3,22 +3,53 @@ import { Download, CheckCircle, XCircle } from 'lucide-react';
 
 export default function UpdateProgress() {
   const [progress, setProgress] = useState(null);
-  const [status, setStatus] = useState('idle'); // idle | downloading | complete | error
+  const [status, setStatus] = useState('idle'); // idle | downloading | error
+  const [error, setError] = useState(null);
 
   useEffect(() => {
-    const cleanup = window.kadal.update.onDownloadProgress((data) => {
+    const unsubProgress = window.kadal.update.onDownloadProgress((data) => {
       setProgress(data);
       setStatus('downloading');
     });
 
-    // Reset UI when the update is fully downloaded
-    // We don't have a direct 'onDownloaded' in preload yet, 
-    // but the main process shows a dialog anyway.
+    const unsubAvailable = window.kadal.update.onUpdateAvailable(() => {
+      setStatus('downloading');
+    });
+
+    const unsubError = window.kadal.update.onUpdateError((err) => {
+      setError(err);
+      setStatus('error');
+      // Hide error after 10 seconds
+      setTimeout(() => {
+        setStatus('idle');
+        setError(null);
+      }, 10000);
+    });
     
-    return () => cleanup();
+    return () => {
+      unsubProgress();
+      unsubAvailable();
+      unsubError();
+    };
   }, []);
 
-  if (status === 'idle' || !progress) return null;
+  if (status === 'idle') return null;
+
+  if (status === 'error') {
+    return (
+      <div className="update-progress-bar" style={{ borderColor: 'var(--danger)' }}>
+        <div className="update-progress-content">
+          <div className="update-progress-title" style={{ color: 'var(--danger)' }}>
+            <XCircle size={16} />
+            <span>Update Error</span>
+          </div>
+          <div className="text-muted" style={{ fontSize: 11 }}>{error}</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!progress) return null;
 
   const percent = Math.round(progress.percent || 0);
   const mbTransferred = (progress.transferred / (1024 * 1024)).toFixed(1);

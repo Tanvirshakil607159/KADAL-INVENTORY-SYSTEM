@@ -8,6 +8,7 @@ import ApprovalReviewModal from './ApprovalReviewModal';
 import ChallanBrowserModal from './ChallanBrowserModal';
 import IssueBrowserModal from './IssueBrowserModal';
 import ProductionEntryModal from './ProductionEntryModal';
+import BarcodeModal from './BarcodeModal';
 
 export default function GlobalModalManager() {
   const { modal } = useStore();
@@ -31,6 +32,8 @@ export default function GlobalModalManager() {
       return <IssueBrowserModal data={modal.data} />;
     case 'PRODUCTION_ENTRY':
       return <ProductionEntryModal data={modal.data} onSaved={modal.data.onSaved} />;
+    case 'BARCODE':
+      return <BarcodeModal isOpen={true} onClose={() => useStore.getState().closeModal()} item={modal.data} />;
     default:
       return null;
   }

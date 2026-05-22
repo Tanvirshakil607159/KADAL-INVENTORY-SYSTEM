@@ -3,7 +3,8 @@ const { dbPrepare, saveDatabase, getSupabase, isCloudEnabled } = require('../con
 const GLOBAL_KEYS = [
   'company_name', 'company_logo', 'company_address', 'company_phone', 'company_email',
   'challan_prefix', 'low_stock_threshold', 
-  'require_challan_approval', 'require_inventory_approval', 'require_gate_pass_approval'
+  'require_challan_approval', 'require_inventory_approval', 'require_gate_pass_approval',
+  'allow_challan_to_issue', 'allow_inventory_to_produce', 'public_web_url', 'barcode_format'
 ];
 
 const SettingsRepo = {

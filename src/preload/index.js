@@ -79,6 +79,7 @@ contextBridge.exposeInMainWorld('kadal', {
   challans: {
     getAll: (filters) => ipcRenderer.invoke('challans:getAll', filters),
     getById: (id) => ipcRenderer.invoke('challans:getById', id),
+    getByNumber: (number) => ipcRenderer.invoke('challans:getByNumber', number),
     create: (data) => ipcRenderer.invoke('challans:create', data),
     cancel: (id, reason) => ipcRenderer.invoke('challans:cancel', id, reason),
     getNextNumber: () => ipcRenderer.invoke('challans:getNextNumber'),
@@ -155,6 +156,13 @@ contextBridge.exposeInMainWorld('kadal', {
     delete: (id) => ipcRenderer.invoke('recipients:delete', id),
   },
 
+  // Production
+  production: {
+    getAll: (filters) => ipcRenderer.invoke('production:getAll', filters),
+    create: (data) => ipcRenderer.invoke('production:create', data),
+    delete: (id) => ipcRenderer.invoke('production:delete', id),
+  },
+
   // Backup
   backup: {
     create: () => ipcRenderer.invoke('backup:create'),
@@ -199,10 +207,33 @@ contextBridge.exposeInMainWorld('kadal', {
       const subscription = (_event, progress) => callback(progress);
       ipcRenderer.on('update:downloadProgress', subscription);
       return () => ipcRenderer.removeListener('update:downloadProgress', subscription);
+    },
+    onUpdateAvailable: (callback) => {
+      const subscription = (_event, info) => callback(info);
+      ipcRenderer.on('update:available', subscription);
+      return () => ipcRenderer.removeListener('update:available', subscription);
+    },
+    onUpdateError: (callback) => {
+      const subscription = (_event, error) => callback(error);
+      ipcRenderer.on('update:error', subscription);
+      return () => ipcRenderer.removeListener('update:error', subscription);
     }
   },
   system: {
     clearData: () => ipcRenderer.invoke('system:clearData'),
+    getVersion: () => ipcRenderer.invoke('system:getVersion'),
+  },
+  
+  // Warehouses
+  warehouses: {
+    getAll: (includeInactive) => ipcRenderer.invoke('warehouses:getAll', includeInactive),
+    getById: (id) => ipcRenderer.invoke('warehouses:getById', id),
+    create: (data) => ipcRenderer.invoke('warehouses:create', data),
+    update: (id, data) => ipcRenderer.invoke('warehouses:update', id, data),
+    delete: (id) => ipcRenderer.invoke('warehouses:delete', id),
+    getStockByItem: (itemId) => ipcRenderer.invoke('warehouses:getStockByItem', itemId),
+    getStockByWarehouse: (warehouseId) => ipcRenderer.invoke('warehouses:getStockByWarehouse', warehouseId),
+    transferStock: (data) => ipcRenderer.invoke('warehouses:transferStock', data),
   },
 
 });

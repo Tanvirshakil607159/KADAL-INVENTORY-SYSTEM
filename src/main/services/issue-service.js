@@ -19,39 +19,87 @@ const IssueService = {
     if (!data.recipientId) throw new Error('Recipient is required');
     if (!data.items || data.items.length === 0) throw new Error('At least one item is required');
 
-    // Validate stock availability
+    // 1. Validate initial stock availability and prepare stock changes
+    const stockChanges = [];
     for (const item of data.items) {
       const dbItem = await ItemsRepo.getById(item.itemId);
       if (!dbItem) throw new Error(`Item not found: ${item.itemId}`);
-      if (dbItem.current_stock < item.quantity) {
-        throw new Error(`Insufficient stock for "${dbItem.name}". Available: ${dbItem.current_stock}, Requested: ${item.quantity}`);
+      
+      const stockBefore = dbItem.current_stock;
+      const stockAfter = stockBefore - item.quantity;
+      
+      if (stockAfter < 0) {
+        throw new Error(`Insufficient stock for "${dbItem.name}". Available: ${stockBefore}, Requested: ${item.quantity}`);
       }
+      
+      stockChanges.push({
+        item,
+        dbItem,
+        stockBefore,
+        stockAfter
+      });
+    }
+
+    // 2. Deduct stock BEFORE doing the slow issue creation to prevent concurrent race conditions
+    const completedDeductions = [];
+    try {
+      for (const change of stockChanges) {
+        // Fetch freshest stock right before updating to catch any concurrent updates
+        const freshItem = await ItemsRepo.getById(change.item.itemId);
+        if (freshItem.current_stock < change.item.quantity) {
+          throw new Error(`Insufficient stock for "${freshItem.name}". Available: ${freshItem.current_stock}, Requested: ${change.item.quantity}`);
+        }
+        
+        const freshStockBefore = freshItem.current_stock;
+        const freshStockAfter = freshStockBefore - change.item.quantity;
+        
+        await ItemsRepo.updateStock(change.item.itemId, freshStockAfter);
+        completedDeductions.push({
+          itemId: change.item.itemId,
+          quantity: change.item.quantity,
+          stockBefore: freshStockBefore,
+          stockAfter: freshStockAfter
+        });
+      }
+    } catch (err) {
+      // Rollback any stock that was already deducted in this loop
+      for (const deduction of completedDeductions) {
+        await ItemsRepo.updateStock(deduction.itemId, deduction.stockBefore);
+      }
+      throw err;
     }
 
     const user = AuthService.getCurrentUser();
     const issueId = await this.getNextId();
+    let id;
 
-    const id = await IssuesRepo.create({
-      issueId,
-      issueType: data.issueType || 'FACTORY',
-      recipientId: data.recipientId,
-      recipientName: data.recipientName,
-      issueDate: data.issueDate || new Date().toISOString(),
-      expectedReturnDate: data.expectedReturnDate,
-      remarks: data.remarks,
-      createdBy: user?.id,
-      items: data.items,
-    });
+    try {
+      id = await IssuesRepo.create({
+        issueId,
+        issueType: data.issueType || 'FACTORY',
+        recipientId: data.recipientId,
+        recipientName: data.recipientName,
+        issueDate: data.issueDate || new Date().toISOString(),
+        expectedReturnDate: data.expectedReturnDate,
+        remarks: data.remarks,
+        createdBy: user?.id,
+        items: data.items,
+        isReturnable: data.isReturnable,
+        producedItemId: data.producedItemId,
+      });
+    } catch (err) {
+      // Rollback all stock updates if issue creation fails
+      for (const deduction of completedDeductions) {
+        await ItemsRepo.updateStock(deduction.itemId, deduction.stockBefore);
+      }
+      throw err;
+    }
 
-    // Deduct stock for each item
-    for (const item of data.items) {
-      const dbItem = await ItemsRepo.getById(item.itemId);
-      const stockBefore = dbItem.current_stock;
-      const stockAfter = stockBefore - item.quantity;
-      await ItemsRepo.updateStock(item.itemId, stockAfter);
+    // 3. Create stock transactions
+    for (const deduction of completedDeductions) {
       await StockTransactionsRepo.create({
-        itemId: item.itemId, type: 'OUT', quantity: item.quantity,
-        stockBefore, stockAfter,
+        itemId: deduction.itemId, type: 'OUT', quantity: deduction.quantity,
+        stockBefore: deduction.stockBefore, stockAfter: deduction.stockAfter,
         reference: `Issue: ${issueId}`,
         notes: `Issued to ${data.recipientName} (${data.issueType})`,
         createdBy: user?.id,

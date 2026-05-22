@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-const savedUser = localStorage.getItem('kadal_user');
+const savedUser = sessionStorage.getItem('kadal_user');
 const initialUser = savedUser ? JSON.parse(savedUser) : null;
 
 const useStore = create((set, get) => ({
@@ -8,12 +8,12 @@ const useStore = create((set, get) => ({
   user: initialUser,
   isLoggedIn: !!initialUser,
   setUser: (user) => {
-    if (user) localStorage.setItem('kadal_user', JSON.stringify(user));
-    else localStorage.removeItem('kadal_user');
+    if (user) sessionStorage.setItem('kadal_user', JSON.stringify(user));
+    else sessionStorage.removeItem('kadal_user');
     set({ user, isLoggedIn: !!user });
   },
   logout: () => {
-    localStorage.removeItem('kadal_user');
+    sessionStorage.removeItem('kadal_user');
     set({ user: null, isLoggedIn: false });
   },
 
@@ -51,10 +51,12 @@ const useStore = create((set, get) => ({
   suppliers: [],
   units: [],
   roles: [],
+  warehouses: [],
   setCategories: (categories) => set({ categories }),
   setSuppliers: (suppliers) => set({ suppliers }),
   setUnits: (units) => set({ units }),
   setRoles: (roles) => set({ roles }),
+  setWarehouses: (warehouses) => set({ warehouses }),
 
   // Notification dots for sidebar
   notificationDots: {},

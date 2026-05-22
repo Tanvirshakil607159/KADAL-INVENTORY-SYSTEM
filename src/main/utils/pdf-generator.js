@@ -2,6 +2,42 @@ const PdfPrinter = require('pdfmake');
 const fs = require('fs');
 const path = require('path');
 const { app, shell } = require('electron');
+const JsBarcode = require('jsbarcode');
+const { DOMImplementation, XMLSerializer } = require('@xmldom/xmldom');
+
+async function generateBarcodeSvg(value, format = 'CODE128') {
+  if (format === 'QR') {
+    try {
+      const QRCode = require('qrcode');
+      const svg = await QRCode.toString(value, {
+        type: 'svg',
+        margin: 1
+      });
+      return svg;
+    } catch (err) {
+      console.error('[PdfGenerator] QR code generation failed:', err.message);
+      return null;
+    }
+  } else {
+    try {
+      const xmlDoc = new DOMImplementation().createDocument('http://www.w3.org/1999/xhtml', 'html', null);
+      const svgNode = xmlDoc.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      JsBarcode(svgNode, value, {
+        xmlDocument: xmlDoc,
+        format: 'CODE128',
+        displayValue: false,
+        height: 60,
+        width: 2.0,
+        margin: 10
+      });
+      return new XMLSerializer().serializeToString(svgNode);
+    } catch (err) {
+      console.error('[PdfGenerator] Barcode generation failed:', err.message);
+      return null;
+    }
+  }
+}
+
 
 // Font descriptors for pdfmake
 const fonts = {
@@ -52,6 +88,54 @@ const PdfGenerator = {
     const companyAddress = settings.company_address || '';
     const companyPhone = settings.company_phone || '';
 
+    // Generate Barcode SVG — always encode full verification URL for QR codes
+    const format = settings.barcode_format === 'CODE128' ? 'CODE128' : 'QR';
+    const baseUrl = (settings.public_web_url || 'https://kadal-inventory.web.app').trim().replace(/\/$/, '');
+    let verificationUrl = `${baseUrl}/challan/${challan.challan_number}`;
+    const u = settings.supabase_url || '';
+    const k = settings.supabase_key || '';
+    if (u && k) {
+      verificationUrl += `?u=${encodeURIComponent(u)}&k=${encodeURIComponent(k)}`;
+    }
+    console.log('[PdfGenerator] QR/Barcode format:', format, '| Verification URL:', verificationUrl.substring(0, 80) + '...');
+
+    const barcodeValue = format === 'QR' ? verificationUrl : challan.challan_number;
+    const barcodeSvg = await generateBarcodeSvg(barcodeValue, format);
+
+    const rightStack = [
+      { text: 'DELIVERY CHALLAN', style: 'challanTitle' },
+      { text: `No: ${challan.challan_number}`, style: 'challanNumber' },
+      { text: `Date: ${new Date(challan.challan_date).toLocaleDateString('en-GB')}`, style: 'challanDate' },
+      { text: `Status: ${challan.status}`, style: challan.status === 'CANCELLED' ? 'statusCancelled' : 'statusActive' },
+    ];
+
+    if (barcodeSvg) {
+      const isQR = format === 'QR';
+      const containerWidth = isQR ? 70 : 180;
+      const fitDimensions = isQR ? [70, 70] : [180, 45];
+      const marginVal = isQR ? [0, 6, 0, 0] : [0, 8, 0, 0];
+
+      rightStack.push({
+        table: {
+          widths: [containerWidth],
+          body: [
+            [{ svg: barcodeSvg, fit: fitDimensions, alignment: 'center', link: verificationUrl }],
+            [{ text: challan.challan_number, alignment: 'center', fontSize: 8, bold: true, color: '#6366f1', margin: [0, 2, 0, 0], link: verificationUrl }]
+          ]
+        },
+        layout: {
+          hLineWidth: () => 0,
+          vLineWidth: () => 0,
+          paddingLeft: () => 0,
+          paddingRight: () => 0,
+          paddingTop: () => 0,
+          paddingBottom: () => 0,
+        },
+        alignment: 'right',
+        margin: marginVal
+      });
+    }
+
     const docDefinition = {
       pageSize: 'A4',
       pageMargins: [40, 40, 40, 60],
@@ -81,12 +165,7 @@ const PdfGenerator = {
             },
             {
               width: 'auto',
-              stack: [
-                { text: 'DELIVERY CHALLAN', style: 'challanTitle' },
-                { text: `No: ${challan.challan_number}`, style: 'challanNumber' },
-                { text: `Date: ${new Date(challan.challan_date).toLocaleDateString('en-GB')}`, style: 'challanDate' },
-                { text: `Status: ${challan.status}`, style: challan.status === 'CANCELLED' ? 'statusCancelled' : 'statusActive' },
-              ],
+              stack: rightStack,
               alignment: 'right',
             },
           ],

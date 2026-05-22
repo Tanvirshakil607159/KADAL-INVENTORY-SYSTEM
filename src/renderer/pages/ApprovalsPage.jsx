@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import useStore from '../store/useStore';
-import { Clock, CheckCircle, XCircle, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { Clock, CheckCircle, XCircle, ArrowUpDown, ArrowUp, ArrowDown, AlertCircle } from 'lucide-react';
 
 export default function ApprovalsPage() {
   const { user, addToast, openModal, setCategories, setSuppliers, setUnits } = useStore();
@@ -155,8 +155,24 @@ export default function ApprovalsPage() {
         );
 
       case 'CREATE_CHALLAN':
+        const challanItems = safeData.items || [];
+        const seenItems = new Set();
+        let hasDuplicate = false;
+        challanItems.forEach(it => {
+          const namePart = String(it.name || '').trim().toLowerCase();
+          const sizePart = String(it.size || '').trim().toLowerCase();
+          const key = `${namePart}|${sizePart}`;
+          if (seenItems.has(key)) hasDuplicate = true;
+          seenItems.add(key);
+        });
+
         return (
           <div className="approval-details-rich">
+            {hasDuplicate && (
+              <div style={{ marginBottom: 16, padding: 12, background: 'rgba(245,158,11,0.1)', border: '1px solid var(--warning)', borderRadius: 'var(--radius-sm)', color: 'var(--warning)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 10 }}>
+                <AlertCircle size={18} /> It seems items are duplicate please check before submit/approved
+              </div>
+            )}
             <div className="approval-data-grid mb-3">
               {renderProperty('Receiver', safeData.receiverName)}
               {renderProperty('Contact', safeData.receiverContact)}

@@ -1,24 +1,28 @@
-const { getDb, getSupabase, isCloudEnabled, initDatabase } = require('./src/main/database/connection');
+const { createClient } = require('@supabase/supabase-js');
+const fs = require('fs');
+const path = require('path');
+const initSqlJs = require('sql.js');
 
-async function debug() {
-  await initDatabase();
-  console.log('--- DEBUG START ---');
-  console.log('Cloud Enabled:', isCloudEnabled());
+const dbPath = path.join('C:', 'Users', 'workh', 'AppData', 'Roaming', 'kadal-inventory', 'kadal.db');
 
-  if (isCloudEnabled()) {
-    const supabase = getSupabase();
-    const { data: gps } = await supabase.from('gate_passes').select('gate_pass_number, challan_ids');
-    console.log('Cloud Gate Passes:', gps);
-    const { data: apps } = await supabase.from('approvals').select('type, status, data').eq('type', 'CREATE_GATE_PASS');
-    console.log('Cloud Gate Pass Approvals:', apps);
-  } else {
-    const { dbPrepare } = require('./src/main/database/connection');
-    const gps = dbPrepare('SELECT gate_pass_number, challan_ids FROM gate_passes').all();
-    console.log('Local Gate Passes:', gps);
-    const apps = dbPrepare("SELECT type, status, data FROM approvals WHERE type = 'CREATE_GATE_PASS'").all();
-    console.log('Local Gate Pass Approvals:', apps);
-  }
-  console.log('--- DEBUG END ---');
+async function run() {
+  const SQL = await initSqlJs();
+  if (!fs.existsSync(dbPath)) return;
+  const fileBuffer = fs.readFileSync(dbPath);
+  const db = new SQL.Database(fileBuffer);
+
+  const urlRow = db.exec("SELECT value FROM settings WHERE key = 'supabase_url'");
+  const keyRow = db.exec("SELECT value FROM settings WHERE key = 'supabase_key'");
+  const url = urlRow[0].values[0][0];
+  const key = keyRow[0].values[0][0];
+  db.close();
+
+  const supabase = createClient(url, key);
+
+  console.log('\n--- TARGET ITEMS (578, 579) ---');
+  const { data, error } = await supabase.from('items').select('*').in('id', [578, 579]);
+  if (error) console.error(error.message);
+  else console.log(JSON.stringify(data, null, 2));
 }
 
-debug().catch(console.error);
+run().catch(console.error);

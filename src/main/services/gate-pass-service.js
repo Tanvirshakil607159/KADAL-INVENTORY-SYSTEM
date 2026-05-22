@@ -41,18 +41,33 @@ const GatePassService = {
       throw new Error(`Challan(s) already included in a Gate Pass: IDs ${duplicates.join(', ')}`);
     }
 
-    const gatePassNumber = await GatePassRepo.getNextNumber();
+    let gatePassId;
+    let gatePassNumber;
+    let attempts = 0;
     
-    const id = await GatePassRepo.create({
-      gatePassNumber,
-      challanIds: data.challanIds,
-      polyBags: data.polyBags,
-      cartons: data.cartons,
-      plasticBags: data.plasticBags,
-      createdBy: user?.id
-    });
+    while (attempts < 5) {
+      gatePassNumber = await GatePassRepo.getNextNumber();
+      try {
+        gatePassId = await GatePassRepo.create({
+          gatePassNumber,
+          challanIds: data.challanIds,
+          polyBags: data.polyBags,
+          cartons: data.cartons,
+          plasticBags: data.plasticBags,
+          createdBy: user?.id
+        });
+        break; // Success
+      } catch (err) {
+        if (err.message.includes('already exists') && attempts < 4) {
+          attempts++;
+          console.warn(`[GatePassService] Gate Pass number collision: "${gatePassNumber}" taken. Retrying (${attempts}/5)...`);
+          continue;
+        }
+        throw err;
+      }
+    }
 
-    return { success: true, id, gatePassNumber };
+    return { success: true, id: gatePassId, gatePassNumber };
   },
 
   async getNextNumber() {

@@ -28,12 +28,17 @@ export default function DashboardPage() {
         <div className="stat-card" style={{ '--stat-color': '#10b981' }}>
           <div className="stat-card-icon" style={{ background: 'var(--success-dim)', color: 'var(--success)' }}><BarChart3 size={20} /></div>
           <div className="stat-card-value text-mono">{Math.round(stats?.totalStock || 0).toLocaleString()}</div>
-          <div className="stat-card-label">Total Stock</div>
+          <div className="stat-card-label">Current Stock</div>
         </div>
         <div className="stat-card" style={{ '--stat-color': '#0ea5e9' }}>
           <div className="stat-card-icon" style={{ background: 'rgba(14,165,233,0.15)', color: '#0ea5e9' }}><CircleDollarSign size={20} /></div>
-          <div className="stat-card-value text-mono">{Number(stats?.totalValue || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</div>
-          <div className="stat-card-label">Total Value</div>
+          <div className="stat-card-value text-mono" style={{ fontSize: 22 }}>৳ {Number(stats?.totalValue?.BDT || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</div>
+          <div className="stat-card-label">Value (BDT)</div>
+        </div>
+        <div className="stat-card" style={{ '--stat-color': '#2dd4bf' }}>
+          <div className="stat-card-icon" style={{ background: 'rgba(45,212,191,0.15)', color: '#2dd4bf' }}><CircleDollarSign size={20} /></div>
+          <div className="stat-card-value text-mono" style={{ fontSize: 22 }}>$ {Number(stats?.totalValue?.USD || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</div>
+          <div className="stat-card-label">Value (USD)</div>
         </div>
         <div className="stat-card" style={{ '--stat-color': '#f59e0b' }}>
           <div className="stat-card-icon" style={{ background: 'var(--warning-dim)', color: 'var(--warning)' }}><AlertTriangle size={20} /></div>
@@ -44,6 +49,11 @@ export default function DashboardPage() {
           <div className="stat-card-icon" style={{ background: 'rgba(139,92,246,0.15)', color: '#8b5cf6' }}><FileText size={20} /></div>
           <div className="stat-card-value">{stats?.todayChallans || 0}</div>
           <div className="stat-card-label">Today's Challans</div>
+        </div>
+        <div className="stat-card" style={{ '--stat-color': '#6366f1' }}>
+          <div className="stat-card-icon" style={{ background: 'rgba(99,102,241,0.15)', color: '#6366f1' }}><Clock size={20} /></div>
+          <div className="stat-card-value">{stats?.waitingForGatePass || 0}</div>
+          <div className="stat-card-label">Waiting For Gatepass</div>
         </div>
         <div className="stat-card" style={{ '--stat-color': '#ec4899' }}>
           <div className="stat-card-icon" style={{ background: 'rgba(236,72,153,0.15)', color: '#ec4899' }}><RotateCcw size={20} /></div>

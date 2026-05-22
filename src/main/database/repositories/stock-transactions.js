@@ -22,7 +22,7 @@ const StockTransactionsRepo = {
       return inserted.id;
     }
     return dbPrepare(`INSERT INTO stock_transactions (item_id, type, quantity, stock_before, stock_after, challan_id, reference, notes, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-      data.itemId, data.type, data.quantity, data.stockBefore, data.stockAfter, data.challanId||null, data.reference||null, data.notes||null, data.createdBy||null
+      data.itemId, data.type, data.quantity, data.stockBefore, data.stockAfter, data.challanId || null, data.reference || null, data.notes || null, data.createdBy || null
     ).lastInsertRowid;
   },
 
@@ -35,7 +35,7 @@ const StockTransactionsRepo = {
           *,
           items (
             name, item_code, unit, unit_price, currency, 
-            style_name, purchase_no, order_number, size, color, buyer_name
+            style_name, purchase_no, order_number, order_quantity, size, color, buyer_name
           ),
           users (full_name),
           challans (challan_number)
@@ -78,13 +78,27 @@ const StockTransactionsRepo = {
 
   async getMovementSummary(filters = {}) {
     if (isCloudEnabled()) {
-      // Complex aggregations are best done via a custom RPC function in Supabase or manual filtering
-      // For now, let's fetch items and their transactions and calculate manually
-      // In a production app, you'd create a view or RPC for this.
       const supabase = getSupabase();
-      
+
+      async function fetchAll(queryBuilder) {
+        let allData = [];
+        let page = 0;
+        const pageSize = 1000;
+        while (true) {
+          const from = page * pageSize;
+          const to = from + pageSize - 1;
+          const { data, error } = await queryBuilder.range(from, to);
+          if (error) throw error;
+          if (!data || data.length === 0) break;
+          allData = allData.concat(data);
+          if (data.length < pageSize) break;
+          page++;
+        }
+        return allData;
+      }
+
       // Fetch items first
-      let itemsQuery = supabase.from('items').select('*').eq('is_active', true).order('name').limit(5000);
+      let itemsQuery = supabase.from('items').select('*').eq('is_active', true).order('name');
       if (filters.search) {
         itemsQuery = itemsQuery.or(`name.ilike.%${filters.search}%,item_code.ilike.%${filters.search}%,style_name.ilike.%${filters.search}%,order_number.ilike.%${filters.search}%,purchase_no.ilike.%${filters.search}%`);
       }
@@ -93,19 +107,16 @@ const StockTransactionsRepo = {
       if (filters.purchaseNo) itemsQuery = itemsQuery.eq('purchase_no', filters.purchaseNo);
       if (filters.buyerName) itemsQuery = itemsQuery.eq('buyer_name', filters.buyerName);
 
-      const { data: items, error: itemsError } = await itemsQuery;
-      if (itemsError) throw itemsError;
+      const items = await fetchAll(itemsQuery);
 
       // Fetch transactions for these items within date range
-      let txQuery = supabase.from('stock_transactions').select('item_id, type, quantity').limit(10000);
+      let txQuery = supabase.from('stock_transactions').select('item_id, type, quantity');
       if (filters.dateFrom) txQuery = txQuery.gte('created_at', filters.dateFrom);
       if (filters.dateTo) txQuery = txQuery.lte('created_at', filters.dateTo + 'T23:59:59.999Z');
 
-      const { data: txs, error: txError } = await txQuery;
-      if (txError) throw txError;
+      const txs = await fetchAll(txQuery);
 
       return items.map(i => {
-        // Use loose equality or Number conversion for safety with IDs from Supabase
         const itemTxs = (txs || []).filter(t => Number(t.item_id) === Number(i.id));
         const total_in = itemTxs.filter(t => t.type === 'IN').reduce((sum, t) => sum + (t.quantity || 0), 0);
         const total_out = itemTxs.filter(t => t.type === 'OUT').reduce((sum, t) => sum + (t.quantity || 0), 0);
@@ -123,16 +134,16 @@ const StockTransactionsRepo = {
     let whereConditions = 'i.is_active = 1';
     let joinParams = [];
     let whereParams = [];
-    
+
     if (dateFrom) { joinConditions += ' AND st.created_at >= ?'; joinParams.push(dateFrom); }
     if (dateTo) { joinConditions += ' AND st.created_at <= ?'; joinParams.push(dateTo + 'T23:59:59.999Z'); }
-    
+
     if (search) {
       whereConditions += ' AND (i.name LIKE ? OR i.item_code LIKE ? OR i.style_name LIKE ? OR i.order_number LIKE ? OR i.purchase_no LIKE ?)';
       const s = `%${search}%`;
       whereParams.push(s, s, s, s, s);
     }
-    
+
     if (styleName) { whereConditions += ' AND i.style_name = ?'; whereParams.push(styleName); }
     if (orderNumber) { whereConditions += ' AND i.order_number = ?'; whereParams.push(orderNumber); }
     if (purchaseNo) { whereConditions += ' AND i.purchase_no = ?'; whereParams.push(purchaseNo); }

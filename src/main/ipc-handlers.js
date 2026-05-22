@@ -1,4 +1,4 @@
-const { ipcMain } = require('electron');
+const { ipcMain, app } = require('electron');
 const AuthService = require('./services/auth-service');
 const InventoryService = require('./services/inventory-service');
 const ChallanService = require('./services/challan-service');
@@ -28,7 +28,9 @@ const IssueService = require('./services/issue-service');
 const ReturnService = require('./services/return-service');
 const RecipientsRepo = require('./database/repositories/recipients');
 const IssuesRepo = require('./database/repositories/issues');
-
+const ProductionRepo = require('./database/repositories/production');
+const WarehousesRepo = require('./database/repositories/warehouses');
+const WarehouseService = require('./services/warehouse-service');
 function wrapHandler(fn) {
   return async (event, ...args) => {
     try {
@@ -241,6 +243,10 @@ function registerIpcHandlers() {
 
   ipcMain.handle('challans:getById', wrapHandler((id) => {
     return ChallanService.getById(id);
+  }));
+
+  ipcMain.handle('challans:getByNumber', wrapHandler((number) => {
+    return ChallanService.getByNumber(number);
   }));
 
   ipcMain.handle('challans:create', wrapHandler((data) => {
@@ -459,7 +465,8 @@ function registerIpcHandlers() {
       todayChallans,
       recentChallans,
       lowStockItems,
-      issueStats
+      issueStats,
+      waitingForGatePass
     ] = await Promise.all([
       ItemsRepo.getCount(),
       ItemsRepo.getTotalStock(),
@@ -468,7 +475,8 @@ function registerIpcHandlers() {
       ChallansRepo.getTodayCount(),
       ChallansRepo.getRecent(8),
       ItemsRepo.getLowStockItems(),
-      IssueService.getIssueStats()
+      IssueService.getIssueStats(),
+      ChallansRepo.getWaitingForGatePassCount()
     ]);
 
     return {
@@ -479,6 +487,7 @@ function registerIpcHandlers() {
       todayChallans,
       recentChallans,
       lowStockItems,
+      waitingForGatePass,
       ...issueStats,
     };
   }));
@@ -509,6 +518,43 @@ function registerIpcHandlers() {
     return AuditLogsRepo.getAll(filters);
   }));
 
+  // ==================== WAREHOUSES ====================
+  ipcMain.handle('warehouses:getAll', wrapHandler((includeInactive) => {
+    return WarehousesRepo.getAll(includeInactive);
+  }));
+
+  ipcMain.handle('warehouses:getById', wrapHandler((id) => {
+    return WarehousesRepo.getById(id);
+  }));
+
+  ipcMain.handle('warehouses:create', wrapHandler(async (data) => {
+    const id = await WarehousesRepo.create(data);
+    return { id };
+  }));
+
+  ipcMain.handle('warehouses:update', wrapHandler(async (id, data) => {
+    await WarehousesRepo.update(id, data);
+    return { success: true };
+  }));
+
+  ipcMain.handle('warehouses:delete', wrapHandler(async (id) => {
+    await WarehousesRepo.delete(id);
+    return { success: true };
+  }));
+
+  ipcMain.handle('warehouses:getStockByItem', wrapHandler((itemId) => {
+    return WarehousesRepo.getStockByItem(itemId);
+  }));
+
+  ipcMain.handle('warehouses:getStockByWarehouse', wrapHandler((warehouseId) => {
+    return WarehousesRepo.getStockByWarehouse(warehouseId);
+  }));
+
+  ipcMain.handle('warehouses:transferStock', wrapHandler(async (data) => {
+    const user = await AuthService.getCurrentUser();
+    return WarehouseService.transferStock(data, user);
+  }));
+
   // ==================== AUTO UPDATE ====================
   ipcMain.handle('system:checkUpdate', wrapHandler(async () => {
 
@@ -524,6 +570,10 @@ function registerIpcHandlers() {
 
   ipcMain.handle('system:clearData', wrapHandler(() => {
     return ChallansRepo.clearAllData();
+  }));
+
+  ipcMain.handle('system:getVersion', wrapHandler(() => {
+    return app.getVersion();
   }));
 
   // ==================== RECIPIENTS ====================
@@ -575,6 +625,11 @@ function registerIpcHandlers() {
   ipcMain.handle('reports:factoryProductionReport', wrapHandler((filters) => IssueService.factoryProductionReport(filters)));
   ipcMain.handle('reports:employeeOutstandingReport', wrapHandler((filters) => IssueService.employeeOutstandingReport(filters)));
   ipcMain.handle('reports:issueReturnSummary', wrapHandler((filters) => IssueService.issueReturnSummary(filters)));
+
+  // ==================== PRODUCTION ====================
+  ipcMain.handle('production:getAll', wrapHandler((filters) => ProductionRepo.getAll(filters)));
+  ipcMain.handle('production:create', wrapHandler((data) => ProductionRepo.create(data)));
+  ipcMain.handle('production:delete', wrapHandler((id) => ProductionRepo.delete(id)));
 
   console.log('[IPC] All handlers registered');
 }
@@ -648,18 +703,43 @@ function getReportColumns(type) {
       ];
     case 'issueReport':
       return [
-        { key: 'issue_id', label: 'Issue ID', width: 65 },
-        { key: 'issue_date', label: 'Date', width: 55, format: (v) => v ? new Date(v).toLocaleDateString('en-GB') : '' },
-        { key: 'issue_type', label: 'Type', width: 45 },
-        { key: 'recipient_name', label: 'Recipient', width: 80 },
-        { key: 'item_name', label: 'Item', width: 80 },
-        { key: 'item_code', label: 'Code', width: 60 },
+        { key: 'issue_id', label: 'Issue ID', width: 55 },
+        { key: 'issue_date', label: 'Date', width: 50, format: (v) => v ? new Date(v).toLocaleDateString('en-GB') : '' },
+        { key: 'issue_type', label: 'Type', width: 40 },
+        { key: 'recipient_name', label: 'Recipient', width: 70 },
+        { key: 'item_name', label: 'Item Name', width: 80 },
+        { key: 'item_code', label: 'Code', width: 50 },
+        { key: 'style_name', label: 'Style', width: 60, format: (v) => v || '-' },
+        { key: 'purchase_no', label: 'Purchase No', width: 60, format: (v) => v || '-' },
+        { key: 'order_number', label: 'Order No', width: 60, format: (v) => v || '-' },
+        { key: 'size', label: 'Size', width: 40, format: (v) => v || '-' },
+        { key: 'color', label: 'Color', width: 40, format: (v) => v || '-' },
+        { key: 'buyer_name', label: 'Buyer', width: 65, format: (v) => v || '-' },
         { key: 'quantity', label: 'Issued', width: 45, align: 'right' },
-        { key: 'returned_quantity', label: 'Returned', width: 50, align: 'right' },
+        { key: 'returned_quantity', label: 'Returned', width: 40, align: 'right' },
         { key: 'damage_quantity', label: 'Damaged', width: 45, align: 'right' },
         { key: 'rejected_quantity', label: 'Rejected', width: 45, align: 'right' },
-        { key: 'outstanding', label: 'Outstanding', width: 55, align: 'right' },
-        { key: 'status', label: 'Status', width: 45 },
+        { key: 'outstanding', label: 'Outstanding', width: 45, align: 'right' },
+        { key: 'unit', label: 'Unit', width: 40, format: (v) => v || '-' },
+        { key: 'status', label: 'Status', width: 40 },
+      ];
+    case 'factoryProductionReport':
+      return [
+        { key: 'created_at', label: 'Batch Date', width: 50, format: (v) => v ? new Date(v).toLocaleDateString('en-GB') : '' },
+        { key: 'id', label: 'Production ID', width: 55, format: (v) => `PRD-${v}` },
+        { key: 'issue_id', label: 'Issue ID', width: 55 },
+        { key: 'recipient_name', label: 'Factory', width: 70 },
+        { key: 'product_name', label: 'Produced Item', width: 80 },
+        { key: 'product_code', label: 'Code', width: 50 },
+        { key: 'style_name', label: 'Style', width: 60, format: (v) => v || '-' },
+        { key: 'purchase_no', label: 'Purchase No', width: 60, format: (v) => v || '-' },
+        { key: 'order_number', label: 'Order No', width: 60, format: (v) => v || '-' },
+        { key: 'size', label: 'Size', width: 40, format: (v) => v || '-' },
+        { key: 'color', label: 'Color', width: 40, format: (v) => v || '-' },
+        { key: 'buyer_name', label: 'Buyer', width: 65, format: (v) => v || '-' },
+        { key: 'production_quantity', label: 'Produced Qty', width: 40, align: 'right' },
+        { key: 'wastage_quantity', label: 'Wastage Qty', width: 40, align: 'right', format: (v) => v || 0 },
+        { key: 'unit', label: 'Unit', width: 35, format: (v) => v || 'pcs' },
       ];
     case 'returnReport':
       return [
@@ -713,6 +793,7 @@ function getReportTitle(type) {
     case 'returnReport': return 'Return Report';
     case 'employeeOutstanding': return 'Employee Outstanding Report';
     case 'issueReturnSummary': return 'Issue vs Return Summary';
+    case 'factoryProductionReport': return 'Factory Production Report';
     default: return 'Report';
   }
 }

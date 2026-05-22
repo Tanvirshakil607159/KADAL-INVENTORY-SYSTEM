@@ -9,13 +9,11 @@ echo 2. Build the latest code
 echo 3. Upload to GitHub for all other users
 echo 4. Save the installer to the 'installers' folder
 echo.
-set /p confirm="Continue? (y/n): "
-if /i "%confirm%" neq "y" goto end
+echo [System] Forcing full release...
+set GH_RELEASE_TYPE=release
 
 node scripts/publish-update.js
 
 echo.
 echo ============================================================
 echo Process Finished.
-pause
-:end

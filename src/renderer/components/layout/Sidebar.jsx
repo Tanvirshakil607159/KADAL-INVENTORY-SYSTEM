@@ -1,14 +1,16 @@
 import React from 'react';
 import useStore from '../../store/useStore';
-import { LayoutDashboard, Package, FileText, History, BarChart3, Settings, HardDrive, LogOut, CheckCircle, Send } from 'lucide-react';
+import { LayoutDashboard, Package, FileText, History, BarChart3, Settings, HardDrive, LogOut, CheckCircle, Send, Factory } from 'lucide-react';
 
 const navItems = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'inventory', label: 'Inventory', icon: Package },
+  { id: 'warehouses', label: 'Warehouses', icon: Package }, // Or MapPin if preferred, Package used for simplicity
   { id: 'challan', label: 'Create Challan', icon: FileText },
   { id: 'approvals', label: 'Approvals', icon: CheckCircle },
   { id: 'gate-pass', label: 'Gate Pass', icon: FileText },
   { id: 'issue', label: 'Issue', icon: Send },
+  { id: 'production', label: 'Production', icon: Factory },
   { id: 'reports', label: 'Reports', icon: BarChart3 },
   { id: 'settings', label: 'Settings', icon: Settings },
   { id: 'backup', label: 'Backup & Restore', icon: HardDrive },
@@ -45,6 +47,18 @@ export default function Sidebar() {
     }
   };
 
+  const [version, setVersion] = React.useState('');
+  const [settings, setSettings] = React.useState({});
+  
+  React.useEffect(() => {
+    window.kadal.system.getVersion().then(res => {
+      if (res.success) setVersion(res.data);
+    });
+    window.kadal.settings.getAll().then(res => {
+      if (res.success) setSettings(res.data);
+    });
+  }, [currentPage]);
+
   return (
     <aside className="sidebar">
       <div className="sidebar-brand">
@@ -56,12 +70,25 @@ export default function Sidebar() {
           const Icon = item.icon;
           // Hide tabs based on roles
           if (user?.roleName === 'Inventory') {
-            if (!['dashboard', 'inventory', 'reports', 'approvals'].includes(item.id)) return null;
+            const allowed = ['dashboard', 'inventory', 'warehouses', 'reports', 'approvals', 'settings'];
+            if (settings.allow_inventory_to_produce === 'true') {
+              allowed.push('production');
+            }
+            if (!allowed.includes(item.id)) return null;
           }
           if (user?.roleName === 'Challan') {
-            if (!['dashboard', 'challan', 'gate-pass', 'reports', 'approvals'].includes(item.id)) return null;
+            const allowed = ['dashboard', 'challan', 'gate-pass', 'reports', 'approvals', 'settings'];
+            if (settings.allow_challan_to_issue === 'true') {
+              allowed.push('issue');
+            }
+            if (!allowed.includes(item.id)) return null;
           }
-          if ((item.id === 'settings' || item.id === 'backup') && user?.roleName === 'Operator') return null;
+          if (item.id === 'production' && !['Admin', 'Super Admin'].includes(user?.roleName)) {
+            if (!(user?.roleName === 'Inventory' && settings.allow_inventory_to_produce === 'true')) {
+              return null;
+            }
+          }
+          if (item.id === 'backup' && user?.roleName === 'Operator') return null;
           
           // Hide Backup/Restore if no maintenance permission
           if (item.id === 'backup') {
@@ -88,6 +115,7 @@ export default function Sidebar() {
         <div className="sidebar-nav-item" onClick={handleLogout} style={{ color: 'var(--danger)' }}>
           <LogOut /> Logout
         </div>
+        <div className="app-version">v{version}</div>
       </div>
     </aside>
   );

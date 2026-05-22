@@ -162,6 +162,73 @@ function runMigrations(db) {
     db.run("INSERT INTO _migrations (name) VALUES ('018-add-approval-links')");
     console.log('[DB] Migration 018-add-approval-links applied successfully');
   }
+
+  // NEW MIGRATION: 019-enhance-issues-for-production
+  const applied19 = db.exec("SELECT * FROM _migrations WHERE name = '019-enhance-issues-for-production'");
+  if (applied19.length === 0 || applied19[0].values.length === 0) {
+    console.log('[DB] Running migration: 019-enhance-issues-for-production');
+    applyNineteenthMigration(db);
+    db.run("INSERT INTO _migrations (name) VALUES ('019-enhance-issues-for-production')");
+    console.log('[DB] Migration 019-enhance-issues-for-production applied successfully');
+  }
+
+  // NEW MIGRATION: 020-add-produced-item-to-issues
+  const applied20 = db.exec("SELECT * FROM _migrations WHERE name = '020-add-produced-item-to-issues'");
+  if (applied20.length === 0 || applied20[0].values.length === 0) {
+    console.log('[DB] Running migration: 020-add-produced-item-to-issues');
+    applyTwentiethMigration(db);
+    db.run("INSERT INTO _migrations (name) VALUES ('020-add-produced-item-to-issues')");
+    console.log('[DB] Migration 020-add-produced-item-to-issues applied successfully');
+  }
+
+  // NEW MIGRATION: 021-add-source-type-to-items
+  const applied21 = db.exec("SELECT * FROM _migrations WHERE name = '021-add-source-type-to-items'");
+  if (applied21.length === 0 || applied21[0].values.length === 0) {
+    console.log('[DB] Running migration: 021-add-source-type-to-items');
+    applyTwentyFirstMigration(db);
+    db.run("INSERT INTO _migrations (name) VALUES ('021-add-source-type-to-items')");
+    console.log('[DB] Migration 021-add-source-type-to-items applied successfully');
+  }
+
+  // NEW MIGRATION: 022-add-access-control-settings
+  const applied22 = db.exec("SELECT * FROM _migrations WHERE name = '022-add-access-control-settings'");
+  if (applied22.length === 0 || applied22[0].values.length === 0) {
+    console.log('[DB] Running migration: 022-add-access-control-settings');
+    applyTwentySecondMigration(db);
+    db.run("INSERT INTO _migrations (name) VALUES ('022-add-access-control-settings')");
+    console.log('[DB] Migration 022-add-access-control-settings applied successfully');
+  }
+
+  // NEW MIGRATION: 023-add-warehouses-and-barcodes
+  const applied23 = db.exec("SELECT * FROM _migrations WHERE name = '023-add-warehouses-and-barcodes'");
+  if (applied23.length === 0 || applied23[0].values.length === 0) {
+    console.log('[DB] Running migration: 023-add-warehouses-and-barcodes');
+    applyTwentyThirdMigration(db);
+    db.run("INSERT INTO _migrations (name) VALUES ('023-add-warehouses-and-barcodes')");
+    console.log('[DB] Migration 023-add-warehouses-and-barcodes applied successfully');
+  }
+}
+
+function applyTwentyFirstMigration(db) {
+  try { db.run(`ALTER TABLE items ADD COLUMN source_type TEXT NOT NULL DEFAULT 'SOURCE'`); } catch (e) {}
+}
+
+function applyTwentySecondMigration(db) {
+  try {
+    db.run("INSERT OR IGNORE INTO settings (key, value, description) VALUES ('allow_challan_to_issue', 'false', 'Allow Challan users to use Issue module')");
+    db.run("INSERT OR IGNORE INTO settings (key, value, description) VALUES ('allow_inventory_to_produce', 'false', 'Allow Inventory users to use Production module')");
+  } catch (e) {}
+}
+
+function applyNineteenthMigration(db) {
+  try { db.run(`ALTER TABLE issues ADD COLUMN is_returnable INTEGER NOT NULL DEFAULT 1`); } catch (e) {}
+  try { db.run(`ALTER TABLE issues ADD COLUMN produced_item_id INTEGER REFERENCES items(id)`); } catch (e) {}
+  try { db.run(`ALTER TABLE factory_production ADD COLUMN product_item_id INTEGER REFERENCES items(id)`); } catch (e) {}
+  try { db.run(`ALTER TABLE factory_production ADD COLUMN consumed_items TEXT`); } catch (e) {}
+}
+
+function applyTwentiethMigration(db) {
+  try { db.run(`ALTER TABLE issues ADD COLUMN produced_item_id INTEGER REFERENCES items(id)`); } catch (e) {}
 }
 
 function applyEighthMigration(db) {
@@ -374,6 +441,8 @@ function applyInitialMigration(db) {
   db.run(`CREATE INDEX IF NOT EXISTS idx_items_supplier ON items(supplier_id)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_items_name ON items(name)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_items_code ON items(item_code)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_items_active ON items(is_active)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_items_stock_min ON items(current_stock, min_stock_level)`);
 
   db.run(`CREATE TABLE IF NOT EXISTS challans (
     id INTEGER PRIMARY KEY AUTOINCREMENT, challan_number TEXT NOT NULL UNIQUE,
@@ -404,6 +473,7 @@ function applyInitialMigration(db) {
     quantity REAL NOT NULL CHECK(quantity > 0), unit TEXT NOT NULL, notes TEXT
   )`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_challan_items_challan ON challan_items(challan_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_challan_items_item ON challan_items(item_id)`);
 
   db.run(`CREATE TABLE IF NOT EXISTS audit_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER REFERENCES users(id),
@@ -441,6 +511,7 @@ function applyInitialMigration(db) {
     ['auto_backup', 'true', 'Auto backup enabled'],
     ['backup_path', '', 'Backup directory'],
     ['theme', 'dark', 'UI theme'],
+    ['public_web_url', '', 'Public Web URL'],
   ];
   settings.forEach(([k, v, d]) => db.run("INSERT OR IGNORE INTO settings (key, value, description) VALUES (?, ?, ?)", [k, v, d]));
 }
@@ -488,6 +559,7 @@ function applySixteenthMigration(db) {
     purchase_no TEXT,
     notes TEXT
   )`);
+  db.run("CREATE INDEX IF NOT EXISTS idx_issue_items_item ON issue_items(item_id)");
 
   // 4. Returns Table
   db.run(`CREATE TABLE IF NOT EXISTS returns (
@@ -545,3 +617,63 @@ function applyEighteenthMigration(db) {
 }
 
 module.exports = { runMigrations };
+
+function applyTwentyThirdMigration(db) {
+  // Warehouses Table
+  db.run(`CREATE TABLE IF NOT EXISTS warehouses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    code TEXT NOT NULL UNIQUE,
+    address TEXT,
+    is_default INTEGER DEFAULT 0,
+    is_active INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  // Warehouse Stock Junction Table
+  db.run(`CREATE TABLE IF NOT EXISTS warehouse_stock (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    warehouse_id INTEGER NOT NULL REFERENCES warehouses(id) ON DELETE CASCADE,
+    item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+    quantity REAL NOT NULL DEFAULT 0,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(warehouse_id, item_id)
+  )`);
+
+  // Seed Default Warehouse
+  db.run("INSERT OR IGNORE INTO warehouses (name, code, address, is_default, is_active) VALUES ('Main Warehouse', 'WH-MAIN', 'Main Office', 1, 1)");
+
+  // Get default warehouse ID
+  const defaultWh = db.exec("SELECT id FROM warehouses WHERE is_default = 1");
+  const whId = (defaultWh.length > 0 && defaultWh[0].values.length > 0) ? defaultWh[0].values[0][0] : 1;
+
+  // Populate warehouse_stock for all existing items with their current_stock
+  const items = db.exec("SELECT id, current_stock FROM items");
+  if (items.length > 0) {
+    db.run("BEGIN TRANSACTION");
+    try {
+      items[0].values.forEach(row => {
+        const [itemId, currentStock] = row;
+        db.run("INSERT OR IGNORE INTO warehouse_stock (warehouse_id, item_id, quantity) VALUES (?, ?, ?)", [whId, itemId, currentStock]);
+      });
+      db.run("COMMIT");
+    } catch (e) {
+      db.run("ROLLBACK");
+      console.error('[DB] Failed to seed warehouse stock:', e);
+    }
+  }
+
+  // Add barcode column to items
+  try { db.run(`ALTER TABLE items ADD COLUMN barcode_data TEXT`); } catch (e) {}
+
+  // Add Settings
+  db.run("INSERT OR IGNORE INTO settings (key, value, description) VALUES ('barcode_format', 'QR', 'Format for generated barcodes (CODE128 or QR)')");
+  db.run("INSERT OR IGNORE INTO settings (key, value, description) VALUES ('default_warehouse_id', ?, 'Default warehouse for new stock')", [whId]);
+  
+  // Migrate existing barcode settings to QR
+  try {
+    db.run("UPDATE settings SET value = 'QR' WHERE key = 'barcode_format' AND value = 'CODE128'");
+  } catch (e) {
+    console.error('[DB] Failed to migrate barcode_format settings to QR:', e.message);
+  }
+}

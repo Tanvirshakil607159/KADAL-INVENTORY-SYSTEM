@@ -3,7 +3,7 @@ import useStore from '../../store/useStore';
 
 export default function SupplierFormModal({ data, onSaved }) {
   const { addToast, closeModal, setModalMinimized, modal } = useStore();
-  const { initialForm } = data;
+  const { initialForm, editingSupplier } = data;
   const isMinimized = modal?.isMinimized;
 
   const [form, setForm] = useState(initialForm);
@@ -18,9 +18,16 @@ export default function SupplierFormModal({ data, onSaved }) {
 
   const save = async () => {
     if (!form.name.trim()) { addToast('error','Name required'); return; }
-    const res = await window.kadal.suppliers.create(form);
+    
+    let res;
+    if (editingSupplier) {
+      res = await window.kadal.suppliers.update(editingSupplier.id, form);
+    } else {
+      res = await window.kadal.suppliers.create(form);
+    }
+
     if (res.success) {
-      addToast('success','Supplier added');
+      addToast('success', editingSupplier ? 'Supplier updated' : 'Supplier added');
       if (onSaved) onSaved();
       closeModal();
     } else addToast('error', res.error);
@@ -30,7 +37,7 @@ export default function SupplierFormModal({ data, onSaved }) {
     <div className={`modal-overlay ${isMinimized ? 'minimized-mode' : ''}`}>
       <div className={`modal ${isMinimized ? 'minimized' : ''}`} onClick={e=>e.stopPropagation()}>
         <div className="modal-header">
-          <h3 className="modal-title">Add Supplier</h3>
+          <h3 className="modal-title">{editingSupplier ? 'Edit Supplier' : 'Add Supplier'}</h3>
           <div className="modal-controls">
             <button className="btn-control btn-minimize" onClick={() => setModalMinimized(!isMinimized)} title={isMinimized ? 'Restore' : 'Minimize'}>{isMinimized ? '+' : '-'}</button>
             <button className="btn-control btn-close" onClick={closeModal}>✕</button>

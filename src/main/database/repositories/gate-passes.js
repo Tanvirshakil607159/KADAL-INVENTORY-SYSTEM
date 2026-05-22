@@ -43,6 +43,15 @@ const GatePassRepo = {
   },
 
   async create({ gatePassNumber, challanIds, polyBags, cartons, plasticBags, createdBy }) {
+    // Check for duplicate gate pass number
+    if (isCloudEnabled()) {
+      const { data: existing } = await getSupabase().from('gate_passes').select('id').eq('gate_pass_number', gatePassNumber).single();
+      if (existing) throw new Error(`Gate Pass number ${gatePassNumber} already exists`);
+    } else {
+      const existing = dbPrepare(`SELECT id FROM gate_passes WHERE gate_pass_number = ?`).get(gatePassNumber);
+      if (existing) throw new Error(`Gate Pass number ${gatePassNumber} already exists`);
+    }
+
     if (isCloudEnabled()) {
       const { data, error } = await getSupabase().from('gate_passes').insert([{
         gate_pass_number: gatePassNumber,
@@ -151,7 +160,34 @@ const GatePassRepo = {
       }
     });
     
-    return `${prefix}-${dateStr}-${(maxSeq + 1).toString().padStart(4, '0')}`;
+    let nextSeq = maxSeq + 1;
+    let finalNumber = `${prefix}-${dateStr}-${nextSeq.toString().padStart(4, '0')}`;
+
+    // Safety loop: ensure this number doesn't exist
+    let isUnique = false;
+    while (!isUnique) {
+      finalNumber = `${prefix}-${dateStr}-${nextSeq.toString().padStart(4, '0')}`;
+      let exists = false;
+      if (isCloudEnabled()) {
+        const { data } = await getSupabase()
+          .from('gate_passes')
+          .select('id')
+          .eq('gate_pass_number', finalNumber)
+          .limit(1);
+        if (data && data.length > 0) exists = true;
+      } else {
+        const row = dbPrepare(`SELECT id FROM gate_passes WHERE gate_pass_number = ?`).get(finalNumber);
+        if (row) exists = true;
+      }
+
+      if (!exists) {
+        isUnique = true;
+      } else {
+        nextSeq++;
+      }
+    }
+
+    return finalNumber;
   },
   async delete(id) {
     if (isCloudEnabled()) {

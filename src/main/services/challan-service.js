@@ -16,6 +16,7 @@ const ChallanService = {
     return challans;
   },
   async getById(id) { return await ChallansRepo.getById(id); },
+  async getByNumber(number) { return await ChallansRepo.getByNumber(number); },
 
   async getNextNumber() {
     const prefix = await SettingsRepo.get('challan_prefix') || 'KA';
@@ -63,33 +64,95 @@ const ChallanService = {
     if (!data.receiverName) throw new Error('Receiver name is required');
     if (!data.items || data.items.length === 0) throw new Error('At least one item is required');
 
-    // Validate stock
+    // 1. Validate initial stock availability and prepare stock changes
+    const stockChanges = [];
     for (const item of data.items) {
       const dbItem = await ItemsRepo.getById(item.itemId);
       if (!dbItem) throw new Error(`Item not found: ${item.itemId}`);
-      if (dbItem.current_stock < item.quantity) {
-        throw new Error(`Insufficient stock for "${dbItem.name}". Available: ${dbItem.current_stock}`);
+      
+      const stockBefore = dbItem.current_stock;
+      const stockAfter = stockBefore - item.quantity;
+      
+      if (stockAfter < 0) {
+        throw new Error(`Insufficient stock for "${dbItem.name}". Available: ${stockBefore}`);
       }
+      
+      stockChanges.push({
+        item,
+        dbItem,
+        stockBefore,
+        stockAfter
+      });
+    }
+
+    // 2. Deduct stock BEFORE doing the slow challan creation to prevent concurrent race conditions
+    const completedDeductions = [];
+    try {
+      for (const change of stockChanges) {
+        // Fetch freshest stock right before updating to catch any concurrent updates
+        const freshItem = await ItemsRepo.getById(change.item.itemId);
+        if (freshItem.current_stock < change.item.quantity) {
+          throw new Error(`Insufficient stock for "${freshItem.name}". Available: ${freshItem.current_stock}`);
+        }
+        
+        const freshStockBefore = freshItem.current_stock;
+        const freshStockAfter = freshStockBefore - change.item.quantity;
+        
+        await ItemsRepo.updateStock(change.item.itemId, freshStockAfter);
+        completedDeductions.push({
+          itemId: change.item.itemId,
+          quantity: change.item.quantity,
+          stockBefore: freshStockBefore,
+          stockAfter: freshStockAfter
+        });
+      }
+    } catch (err) {
+      // Rollback any stock that was already deducted in this loop
+      for (const deduction of completedDeductions) {
+        await ItemsRepo.updateStock(deduction.itemId, deduction.stockBefore);
+      }
+      throw err;
     }
 
     const user = await AuthService.getCurrentUser();
     const prefix = await SettingsRepo.get('challan_prefix') || 'KA';
-    const challanNumber = await ChallansRepo.getNextNumber(prefix);
+    
+    let challanId;
+    let challanNumber;
+    let attempts = 0;
+    
+    try {
+      while (attempts < 5) {
+        challanNumber = await ChallansRepo.getNextNumber(prefix);
+        try {
+          challanId = await ChallansRepo.create({
+            ...data, challanNumber,
+            challanDate: data.challanDate || new Date().toISOString(),
+            createdBy: user?.id,
+          });
+          break; // Success
+        } catch (err) {
+          if (err.message.includes('already exists') && attempts < 4) {
+            attempts++;
+            console.warn(`[ChallanService] Challan number collision: "${challanNumber}" taken. Retrying (${attempts}/5)...`);
+            continue;
+          }
+          throw err;
+        }
+      }
+    } catch (err) {
+      // Rollback all stock updates if challan creation completely fails
+      for (const deduction of completedDeductions) {
+        await ItemsRepo.updateStock(deduction.itemId, deduction.stockBefore);
+      }
+      throw err;
+    }
 
-    const challanId = await ChallansRepo.create({
-      ...data, challanNumber,
-      challanDate: data.challanDate || new Date().toISOString(),
-      createdBy: user?.id,
-    });
-
-    // Deduct stock
-    for (const item of data.items) {
-      const dbItem = await ItemsRepo.getById(item.itemId);
-      const stockBefore = dbItem.current_stock;
-      const stockAfter = stockBefore - item.quantity;
-      await ItemsRepo.updateStock(item.itemId, stockAfter);
+    // 3. Create stock transactions
+    for (const deduction of completedDeductions) {
       await StockTransactionsRepo.create({
-        itemId: item.itemId, type: 'OUT', quantity: item.quantity, stockBefore, stockAfter,
+        itemId: deduction.itemId, type: 'OUT', quantity: deduction.quantity,
+        stockBefore: deduction.stockBefore, stockAfter: deduction.stockAfter,
         challanId, reference: `Challan: ${challanNumber}`,
         notes: `Delivered to ${data.receiverName}`, createdBy: user?.id,
       });
@@ -105,14 +168,25 @@ const ChallanService = {
     if (challan.status === 'CANCELLED') throw new Error('Already cancelled');
 
     const user = await AuthService.getCurrentUser();
-    await ChallansRepo.cancel(id, user?.id, reason);
+    
+    // IMPORTANT: Check if the update actually happened to prevent double-reversal race conditions
+    const result = await ChallansRepo.cancel(id, user?.id, reason);
+    const affectedRows = result?.changes !== undefined ? result.changes : (result === true ? 1 : 0);
+    
+    if (affectedRows === 0 && !isCloudEnabled()) {
+      throw new Error('Challan already cancelled or not active');
+    }
 
-    // Reverse stock
+    // Reverse stock using atomic adjustment
     for (const item of challan.items) {
       const dbItem = await ItemsRepo.getById(item.item_id);
+      if (!dbItem) continue;
+      
       const stockBefore = dbItem.current_stock;
+      await ItemsRepo.adjustStock(item.item_id, item.quantity);
+      
+      // Update transaction log with accurate "after" value
       const stockAfter = stockBefore + item.quantity;
-      await ItemsRepo.updateStock(item.item_id, stockAfter);
       await StockTransactionsRepo.create({
         itemId: item.item_id, type: 'IN', quantity: item.quantity, stockBefore, stockAfter,
         challanId: id, reference: `Challan Cancelled: ${challan.challan_number}`,
@@ -136,8 +210,9 @@ const ChallanService = {
         const dbItem = await ItemsRepo.getById(item.item_id);
         if (dbItem) {
           const stockBefore = dbItem.current_stock;
+          await ItemsRepo.adjustStock(item.item_id, item.quantity);
           const stockAfter = stockBefore + item.quantity;
-          await ItemsRepo.updateStock(item.item_id, stockAfter);
+          
           await StockTransactionsRepo.create({
             itemId: item.item_id, type: 'IN', quantity: item.quantity, stockBefore, stockAfter,
             reference: `Challan Deleted: ${challan.challan_number}`,
@@ -151,5 +226,6 @@ const ChallanService = {
     await AuditLogsRepo.create({ userId: user?.id, action: 'DELETE', entityType: 'challan', entityId: id, oldValue: { challanNumber: challan.challan_number } });
     return { success: true };
   },
+
 };
 module.exports = ChallanService;

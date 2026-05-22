@@ -7,7 +7,7 @@ export default function ConfirmDialog() {
   if (!confirmDialog) return null;
 
   return (
-    <div className="modal-overlay" onClick={() => closeConfirm(false)}>
+    <div className="modal-overlay confirm-overlay" onClick={() => closeConfirm(false)}>
       <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 420 }}>
         <div className="modal-body">
           <div className={`confirm-icon ${confirmDialog.type || 'danger'}`}>

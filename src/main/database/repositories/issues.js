@@ -65,7 +65,7 @@ const IssuesRepo = {
 
       if (iss) {
         const { data: items, error: iErr } = await supabase.from('issue_items').select(`
-          *, items (name, item_code, unit, current_stock)
+          *, items (name, item_code, unit, current_stock, buyer_name, size, color, style_name, purchase_no, order_number)
         `).eq('issue_id', id);
         if (iErr) throw iErr;
         iss.items = items.map(i => ({
@@ -74,6 +74,12 @@ const IssuesRepo = {
           item_code: i.items?.item_code,
           item_unit: i.items?.unit,
           current_stock: i.items?.current_stock,
+          buyer_name: i.items?.buyer_name || '-',
+          size: i.items?.size || '-',
+          color: i.items?.color || '-',
+          style_no: i.style_no || i.items?.style_name || '-',
+          purchase_no: i.purchase_no || i.items?.purchase_no || '-',
+          order_number: i.order_number || i.items?.order_number || '-',
         }));
         iss.created_by_name = iss.users?.full_name;
       }
@@ -88,7 +94,11 @@ const IssuesRepo = {
 
     if (iss) {
       iss.items = dbPrepare(`
-        SELECT ii.*, it.name as item_name, it.item_code, it.unit as item_unit, it.current_stock
+        SELECT ii.*, it.name as item_name, it.item_code, it.unit as item_unit, it.current_stock,
+          it.buyer_name, it.size, it.color,
+          COALESCE(NULLIF(ii.style_no, ''), it.style_name) as style_no,
+          COALESCE(NULLIF(ii.purchase_no, ''), it.purchase_no) as purchase_no,
+          COALESCE(NULLIF(ii.order_number, ''), it.order_number) as order_number
         FROM issue_items ii
         JOIN items it ON ii.item_id = it.id
         WHERE ii.issue_id = ?
@@ -97,7 +107,10 @@ const IssuesRepo = {
     return iss;
   },
 
-  async create({ issueId, issueType, recipientId, recipientName, issueDate, expectedReturnDate, remarks, createdBy, items }) {
+  async create({ issueId, issueType, recipientId, recipientName, issueDate, expectedReturnDate, remarks, createdBy, items, isReturnable, producedItemId }) {
+    const isRet = isReturnable === undefined ? true : !!isReturnable;
+    const initialStatus = !isRet ? 'RETURNED' : 'PENDING';
+
     if (isCloudEnabled()) {
       const supabase = getSupabase();
       const { data: iss, error } = await supabase.from('issues').insert([{
@@ -108,8 +121,10 @@ const IssuesRepo = {
         issue_date: issueDate,
         expected_return_date: expectedReturnDate || null,
         remarks: remarks || null,
-        status: 'PENDING',
+        is_returnable: isRet,
+        status: initialStatus,
         created_by: createdBy,
+        produced_item_id: producedItemId || null,
       }]).select().single();
       if (error) throw error;
 
@@ -129,9 +144,21 @@ const IssuesRepo = {
     }
 
     const r = dbPrepare(`
-      INSERT INTO issues (issue_id, issue_type, recipient_id, recipient_name, issue_date, expected_return_date, remarks, status, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING', ?)
-    `).run(issueId, issueType, recipientId, recipientName, issueDate, expectedReturnDate || null, remarks || null, createdBy);
+      INSERT INTO issues (issue_id, issue_type, recipient_id, recipient_name, issue_date, expected_return_date, remarks, is_returnable, status, created_by, produced_item_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      issueId, 
+      issueType, 
+      recipientId, 
+      recipientName, 
+      issueDate, 
+      expectedReturnDate || null, 
+      remarks || null, 
+      isRet ? 1 : 0, 
+      initialStatus, 
+      createdBy,
+      producedItemId || null
+    );
 
     const id = r.lastInsertRowid;
     for (const item of items) {
@@ -167,14 +194,33 @@ const IssuesRepo = {
   },
 
   async updateStatus(issueId) {
+    // Check if returnable. If not, status is always RETURNED
+    let isReturnable = true;
+    if (isCloudEnabled()) {
+      const { data, error } = await getSupabase().from('issues').select('is_returnable').eq('id', issueId).single();
+      if (!error && data) isReturnable = data.is_returnable;
+    } else {
+      const row = dbPrepare('SELECT is_returnable FROM issues WHERE id = ?').get(issueId);
+      if (row) isReturnable = row.is_returnable === 1;
+    }
+
+    if (!isReturnable) {
+      if (isCloudEnabled()) {
+        await getSupabase().from('issues').update({ status: 'RETURNED', updated_at: new Date().toISOString() }).eq('id', issueId);
+      } else {
+        dbPrepare("UPDATE issues SET status = 'RETURNED', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(issueId);
+      }
+      return 'RETURNED';
+    }
+
     // Recalculate status based on issue_items
     let items;
     if (isCloudEnabled()) {
       const { data, error } = await getSupabase().from('issue_items')
-        .select('quantity, returned_quantity, damage_quantity, rejected_quantity')
+        .select('quantity, returned_quantity, damage_quantity, rejected_quantity, consumed_quantity')
         .eq('issue_id', issueId);
       if (error) throw error;
-      items = data.map(i => ({ ...i, consumed_quantity: 0 }));
+      items = data || [];
     } else {
       items = dbPrepare('SELECT quantity, returned_quantity, damage_quantity, rejected_quantity, consumed_quantity FROM issue_items WHERE issue_id = ?').all(issueId);
     }
@@ -212,7 +258,7 @@ const IssuesRepo = {
         item_name: i.items?.name,
         item_code: i.items?.item_code,
         item_unit: i.items?.unit,
-        remaining: i.quantity - (i.returned_quantity || 0) - (i.damage_quantity || 0) - (i.rejected_quantity || 0),
+        remaining: i.quantity - (i.returned_quantity || 0) - (i.damage_quantity || 0) - (i.rejected_quantity || 0) - (i.consumed_quantity || 0),
       })).filter(i => i.remaining > 0);
     }
 
@@ -296,7 +342,7 @@ const IssuesRepo = {
       const supabase = getSupabase();
       let query = supabase.from('issue_items').select(`
         *, issues (issue_id, issue_type, recipient_name, issue_date, status, expected_return_date),
-        items (name, item_code, unit)
+        items (name, item_code, unit, style_name, purchase_no, order_number, size, color, buyer_name)
       `);
       const { data, error } = await query;
       if (error) throw error;
@@ -310,13 +356,19 @@ const IssuesRepo = {
         expected_return_date: r.issues?.expected_return_date,
         item_name: r.items?.name,
         item_code: r.items?.item_code,
+        style_name: r.style_no || r.items?.style_name || '-',
+        purchase_no: r.purchase_no || r.items?.purchase_no || '-',
+        order_number: r.order_number || r.items?.order_number || '-',
+        size: r.items?.size,
+        color: r.items?.color,
+        buyer_name: r.items?.buyer_name,
         quantity: r.quantity,
         returned_quantity: r.returned_quantity,
         damage_quantity: r.damage_quantity,
         rejected_quantity: r.rejected_quantity,
-        consumed_quantity: 0,
-        outstanding: r.quantity - (r.returned_quantity || 0) - (r.damage_quantity || 0) - (r.rejected_quantity || 0),
-        unit: r.unit,
+        consumed_quantity: r.consumed_quantity || 0,
+        outstanding: r.quantity - (r.returned_quantity || 0) - (r.damage_quantity || 0) - (r.rejected_quantity || 0) - (r.consumed_quantity || 0),
+        unit: r.unit || r.items?.unit || 'pcs',
       }));
 
       if (filters.issueType) result = result.filter(r => r.issue_type === filters.issueType);
@@ -337,7 +389,11 @@ const IssuesRepo = {
 
     return dbPrepare(`
       SELECT ii.*, iss.issue_id, iss.issue_type, iss.recipient_name, iss.issue_date, iss.status, iss.expected_return_date,
-        it.name as item_name, it.item_code,
+        it.name as item_name, it.item_code, it.size, it.color, it.buyer_name,
+        COALESCE(NULLIF(ii.style_no, ''), it.style_name) as style_name,
+        COALESCE(NULLIF(ii.purchase_no, ''), it.purchase_no) as purchase_no,
+        COALESCE(NULLIF(ii.order_number, ''), it.order_number) as order_number,
+        COALESCE(NULLIF(ii.unit, ''), it.unit) as unit,
         (ii.quantity - COALESCE(ii.returned_quantity,0) - COALESCE(ii.damage_quantity,0) - COALESCE(ii.rejected_quantity,0) - COALESCE(ii.consumed_quantity,0)) as outstanding
       FROM issue_items ii
       JOIN issues iss ON ii.issue_id = iss.id
@@ -415,7 +471,7 @@ const IssuesRepo = {
           expected_return_date: r.issues?.expected_return_date,
           item_name: r.items?.name,
           item_code: r.items?.item_code,
-          outstanding: r.quantity - (r.returned_quantity || 0) - (r.damage_quantity || 0) - (r.rejected_quantity || 0),
+          outstanding: r.quantity - (r.returned_quantity || 0) - (r.damage_quantity || 0) - (r.rejected_quantity || 0) - (r.consumed_quantity || 0),
         }))
         .filter(r => r.outstanding > 0);
     }
@@ -460,7 +516,7 @@ const IssuesRepo = {
       const supabase = getSupabase();
       const { data, error } = await supabase.from('issues').select(`
         issue_id, issue_type, recipient_name, issue_date, status,
-        issue_items (quantity, returned_quantity, damage_quantity, rejected_quantity)
+        issue_items (quantity, returned_quantity, damage_quantity, rejected_quantity, consumed_quantity)
       `);
       if (error) throw error;
       let result = data.map(r => {
@@ -469,12 +525,13 @@ const IssuesRepo = {
         const totalReturned = items.reduce((s, i) => s + (i.returned_quantity || 0), 0);
         const totalDamaged = items.reduce((s, i) => s + (i.damage_quantity || 0), 0);
         const totalRejected = items.reduce((s, i) => s + (i.rejected_quantity || 0), 0);
+        const totalConsumed = items.reduce((s, i) => s + (i.consumed_quantity || 0), 0);
         return {
           issue_id: r.issue_id, issue_type: r.issue_type, recipient_name: r.recipient_name,
           issue_date: r.issue_date, status: r.status,
           total_issued: totalIssued, total_returned: totalReturned, total_damaged: totalDamaged,
-          total_rejected: totalRejected, total_consumed: 0,
-          outstanding: totalIssued - totalReturned - totalDamaged - totalRejected,
+          total_rejected: totalRejected, total_consumed: totalConsumed,
+          outstanding: totalIssued - totalReturned - totalDamaged - totalRejected - totalConsumed,
         };
       });
       if (filters.dateFrom) result = result.filter(r => r.issue_date >= filters.dateFrom);

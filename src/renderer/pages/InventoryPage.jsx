@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import useStore from '../store/useStore';
-import { Plus, Search, Edit2, Trash2, ArrowDownCircle, ArrowUpCircle, Package, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { Plus, Search, Edit2, Trash2, ArrowDownCircle, ArrowUpCircle, Package, ArrowUpDown, ArrowUp, ArrowDown, Printer } from 'lucide-react';
 
 export default function InventoryPage() {
   const { addToast, showConfirm, categories, suppliers, units, setCategories, setSuppliers, setUnits, user, openModal } = useStore();
@@ -137,7 +137,7 @@ export default function InventoryPage() {
                 <SortHeader label="Stock" field="current_stock" className="text-right" />
                 <th className="text-right">Total Value</th>
                 <SortHeader label="Unit" field="unit" />
-                {user?.permissions?.inventory === 'rw' && <th>Actions</th>}
+                {(user?.permissions?.inventory === 'rw' || user?.permissions?.inventory === 'r') && <th>Actions</th>}
               </tr>
             </thead>
             <tbody>
@@ -155,18 +155,25 @@ export default function InventoryPage() {
                   </td>
                   <td className="text-right text-mono">{item.currency === 'USD' ? '$' : '৳'}{Number((item.current_stock * (item.unit_price || 0))).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
                   <td style={{ color: 'var(--text-muted)' }}>{item.unit}</td>
-                  {user?.permissions?.inventory === 'rw' && (
-                    <td>
-                      <div className="table-actions">
+                {(user?.permissions?.inventory === 'rw' || user?.permissions?.inventory === 'r') && (
+                  <td>
+                    <div className="table-actions">
+                      {user?.permissions?.inventory === 'rw' && (
                         <button className="btn btn-ghost btn-icon btn-sm" title="Stock IN" onClick={() => openModal('STOCK_MOVEMENT', { item, type: 'IN', onSaved: loadData })}><ArrowDownCircle size={15} color="var(--success)" /></button>
-                        {user?.roleName !== 'Inventory' && (
-                          <button className="btn btn-ghost btn-icon btn-sm" title="Stock OUT" onClick={() => openModal('STOCK_MOVEMENT', { item, type: 'OUT', onSaved: loadData })}><ArrowUpCircle size={15} color="var(--warning)" /></button>
-                        )}
-                        <button className="btn btn-ghost btn-icon btn-sm" title="Edit" onClick={() => openModal('ITEM_FORM', { item, buyers, distinctValues, onSaved: loadData })}><Edit2 size={15} /></button>
-                        <button className="btn btn-ghost btn-icon btn-sm" title="Delete" onClick={() => handleDelete(item)}><Trash2 size={15} color="var(--danger)" /></button>
-                      </div>
-                    </td>
-                  )}
+                      )}
+                      {user?.permissions?.inventory === 'rw' && user?.roleName !== 'Inventory' && (
+                        <button className="btn btn-ghost btn-icon btn-sm" title="Stock OUT" onClick={() => openModal('STOCK_MOVEMENT', { item, type: 'OUT', onSaved: loadData })}><ArrowUpCircle size={15} color="var(--warning)" /></button>
+                      )}
+                      <button className="btn btn-ghost btn-icon btn-sm" title="Print Barcode" onClick={() => openModal('BARCODE', item)}><Printer size={15} color="var(--text-color)" /></button>
+                      {user?.permissions?.inventory === 'rw' && (
+                        <>
+                          <button className="btn btn-ghost btn-icon btn-sm" title="Edit" onClick={() => openModal('ITEM_FORM', { item, buyers, distinctValues, onSaved: loadData })}><Edit2 size={15} /></button>
+                          <button className="btn btn-ghost btn-icon btn-sm" title="Delete" onClick={() => handleDelete(item)}><Trash2 size={15} color="var(--danger)" /></button>
+                        </>
+                      )}
+                    </div>
+                  </td>
+                )}
                 </tr>
               ))}
             </tbody>
