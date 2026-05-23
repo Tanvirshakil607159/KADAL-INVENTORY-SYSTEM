@@ -56,7 +56,7 @@ export const webBridge = {
         fullName: user.full_name,
         roleId: user.role_id,
         roleName: user.roles?.name,
-        permissions: safeParseJSON(user.roles?.permissions || user.permissions || '{}'),
+        permissions: safeParseJSON(user.custom_permissions || user.roles?.permissions || '{}'),
       };
       
       sessionStorage.setItem('kadal_user', JSON.stringify(currentUser));
