@@ -528,31 +528,59 @@ const PdfGenerator = {
             body: [
               [{ text: 'Issued To:', style: 'label' }, { text: issue.recipient_name, style: 'value', bold: true }],
               [{ text: 'Expected Return:', style: 'label' }, { text: issue.expected_return_date ? new Date(issue.expected_return_date).toLocaleDateString('en-GB') : '-', style: 'value' }],
-              [{ text: 'Status:', style: 'label' }, { text: issue.status, style: 'value', color: issue.status === 'RETURNED' ? '#10b981' : '#f59e0b' }],
+              [{ text: 'Status:', style: 'label' }, { text: issue.status, style: 'value', color: issue.status === 'RETURNED' ? '#10b981' : '#f59e0b', bold: true }],
             ],
           },
           layout: 'noBorders',
         },
 
-        // Items Table
-        { text: '', margin: [0, 15, 0, 0] },
+        // Production & Order Information (if available)
+        ...(issue.produced_item ? [
+          { text: 'PRODUCTION & ORDER INFORMATION', style: 'sectionHeader', margin: [0, 15, 0, 5] },
+          {
+            table: {
+              widths: ['*', '*', 'auto', 'auto'],
+              body: [
+                [
+                  { text: 'Produced Item', style: 'tableHeader' },
+                  { text: 'Order No. / Style / Purchase No.', style: 'tableHeader' },
+                  { text: 'Order Qty', style: 'tableHeader', alignment: 'right' },
+                  { text: 'Specs (Color/Size)', style: 'tableHeader' }
+                ],
+                [
+                  { text: `[${issue.produced_item.item_code}]\n${issue.produced_item.name}`, style: 'tableCell', bold: true },
+                  { text: [issue.produced_item.order_number, issue.produced_item.style_name, issue.produced_item.purchase_no].filter(Boolean).join(' / ') || '-', style: 'tableCell' },
+                  { text: `${issue.produced_item.order_quantity.toLocaleString()} ${issue.produced_item.unit}`, style: 'tableCell', alignment: 'right', bold: true },
+                  { text: [issue.produced_item.color, issue.produced_item.size].filter(Boolean).join(' / ') || '-', style: 'tableCell' }
+                ]
+              ]
+            },
+            layout: {
+              hLineWidth: () => 0.5, vLineWidth: () => 0.5,
+              hLineColor: () => '#ddd', vLineColor: () => '#ddd',
+              fillColor: (rowIndex) => rowIndex === 0 ? '#4f46e5' : null,
+            }
+          }
+        ] : []),
+
+        // Material Details (Issued Items)
+        { text: 'MATERIAL DETAILS (ISSUED ITEMS)', style: 'sectionHeader', margin: [0, 15, 0, 5] },
         (() => {
           const headers = [
             { text: '#', style: 'tableHeader' },
-            { text: 'Item', style: 'tableHeader' },
-            { text: 'Style / Order / Purchase', style: 'tableHeader' },
+            { text: 'Issue Item', style: 'tableHeader' },
+            { text: 'Color', style: 'tableHeader' },
             { text: 'Issued Qty', style: 'tableHeader', alignment: 'right' },
             { text: 'Unit', style: 'tableHeader' },
-            { text: 'Returned', style: 'tableHeader', alignment: 'right' },
+            { text: 'Returned Qty', style: 'tableHeader', alignment: 'right' },
           ];
-          const widths = [25, '*', 120, 70, 40, 70];
+          const widths = [25, '*', 100, 80, 50, 80];
 
           const rows = (issue.items || []).map((item, idx) => {
-            const spo = [item.style_no, item.order_number, item.purchase_no].filter(Boolean).join(' / ') || '-';
             return [
               { text: idx + 1, style: 'tableCell' },
-              { text: item.item_name || '-', style: 'tableCell' },
-              { text: spo, style: 'tableCell', fontSize: 8 },
+              { text: item.item_name || '-', style: 'tableCell', bold: true },
+              { text: item.color || '-', style: 'tableCell' },
               { text: item.quantity.toString(), style: 'tableCell', alignment: 'right', bold: true },
               { text: item.unit || '-', style: 'tableCell' },
               { text: (item.returned_quantity || 0).toString(), style: 'tableCell', alignment: 'right' },
@@ -574,13 +602,14 @@ const PdfGenerator = {
         issue.remarks ? { text: 'Remarks:', style: 'label' } : {},
         issue.remarks ? { text: issue.remarks, style: 'notes' } : {},
 
-        // Signatures
-        { text: '', margin: [0, 50, 0, 0] },
+        // Sign-off / Approvals
+        { text: '', margin: [0, 60, 0, 0] },
         {
           columns: [
-            { width: '*', stack: [{ canvas: [{ type: 'line', x1: 0, y1: 0, x2: 120, y2: 0, lineWidth: 1 }] }, { text: 'Prepared By', margin: [0, 5, 0, 0], fontSize: 9 }] },
-            { width: '*', stack: [{ canvas: [{ type: 'line', x1: 0, y1: 0, x2: 120, y2: 0, lineWidth: 1 }] }, { text: 'Receiver Signature', margin: [0, 5, 0, 0], fontSize: 9 }] },
-            { width: '*', stack: [{ canvas: [{ type: 'line', x1: 0, y1: 0, x2: 120, y2: 0, lineWidth: 1 }] }, { text: 'Authorized By', margin: [0, 5, 0, 0], fontSize: 9 }], alignment: 'right' },
+            { width: '*', stack: [{ canvas: [{ type: 'line', x1: 0, y1: 0, x2: 110, y2: 0, lineWidth: 1 }] }, { text: 'Receiver', margin: [0, 5, 0, 0], fontSize: 9, color: '#555', bold: true }] },
+            { width: '*', stack: [{ canvas: [{ type: 'line', x1: 0, y1: 0, x2: 110, y2: 0, lineWidth: 1 }] }, { text: 'Issued by', margin: [0, 5, 0, 0], fontSize: 9, color: '#555', bold: true }] },
+            { width: '*', stack: [{ canvas: [{ type: 'line', x1: 0, y1: 0, x2: 110, y2: 0, lineWidth: 1 }] }, { text: 'Order by', margin: [0, 5, 0, 0], fontSize: 9, color: '#555', bold: true }] },
+            { width: '*', stack: [{ canvas: [{ type: 'line', x1: 0, y1: 0, x2: 110, y2: 0, lineWidth: 1 }] }, { text: 'Approved by', margin: [0, 5, 0, 0], fontSize: 9, color: '#555', bold: true }], alignment: 'right' },
           ],
         },
       ],
@@ -595,6 +624,7 @@ const PdfGenerator = {
         tableHeader: { fontSize: 9, bold: true, color: '#fff', margin: [4, 6, 4, 6] },
         tableCell: { fontSize: 8, margin: [4, 5, 4, 5], color: '#333' },
         notes: { fontSize: 9, color: '#555', italics: true, margin: [0, 4, 0, 0] },
+        sectionHeader: { fontSize: 11, bold: true, color: '#4f46e5', margin: [0, 15, 0, 5], letterSpacing: 0.5 },
       },
       footer: (currentPage, pageCount) => ({
         columns: [

@@ -96,6 +96,21 @@ const ExcelGenerator = {
     const summaryRow = sheet.addRow([`Total Records: ${data.length}`]);
     summaryRow.getCell(1).font = { size: 9, italic: true, color: { argb: 'FF666666' } };
 
+    if (options?.signatures) {
+      sheet.addRow([]);
+      sheet.addRow([]);
+      sheet.addRow([]);
+      const sigRow = sheet.addRow([]);
+      options.signatures.forEach((sig, idx) => {
+        const colIdx = Math.floor((columns.length / options.signatures.length) * idx) + 1;
+        const cell = sigRow.getCell(colIdx);
+        cell.value = `_____________________\n${sig}`;
+        cell.font = { size: 9, bold: true, color: { argb: 'FF333333' } };
+        cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+      });
+      sigRow.height = 35;
+    }
+
     // Save
     const outputDir = path.join(app.getPath('userData'), 'exports');
     if (!fs.existsSync(outputDir)) {

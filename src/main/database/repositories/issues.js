@@ -82,6 +82,27 @@ const IssuesRepo = {
           order_number: i.order_number || i.items?.order_number || '-',
         }));
         iss.created_by_name = iss.users?.full_name;
+
+        if (iss.produced_item_id) {
+          const { data: prodItem } = await supabase.from('items')
+            .select('name, item_code, style_name, purchase_no, order_number, order_quantity, unit, color, size, buyer_name')
+            .eq('id', iss.produced_item_id)
+            .maybeSingle();
+          if (prodItem) {
+            iss.produced_item = {
+              name: prodItem.name,
+              item_code: prodItem.item_code,
+              style_name: prodItem.style_name,
+              purchase_no: prodItem.purchase_no,
+              order_number: prodItem.order_number,
+              order_quantity: prodItem.order_quantity,
+              unit: prodItem.unit,
+              color: prodItem.color,
+              size: prodItem.size,
+              buyer_name: prodItem.buyer_name,
+            };
+          }
+        }
       }
       return iss;
     }
@@ -103,6 +124,13 @@ const IssuesRepo = {
         JOIN items it ON ii.item_id = it.id
         WHERE ii.issue_id = ?
       `).all(id);
+
+      if (iss.produced_item_id) {
+        iss.produced_item = dbPrepare(`
+          SELECT name, item_code, style_name, purchase_no, order_number, order_quantity, unit, color, size, buyer_name
+          FROM items WHERE id = ?
+        `).get(iss.produced_item_id);
+      }
     }
     return iss;
   },

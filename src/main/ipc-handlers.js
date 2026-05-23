@@ -600,8 +600,8 @@ function registerIpcHandlers() {
     const issue = await IssueService.getById(id);
     const settings = await SettingsRepo.getAll();
     const columns = [
-      { label: 'Item Name', key: 'item_name' },
-      { label: 'SPO', key: 'spo', format: (v, r) => [r.style_no, r.order_number, r.purchase_no].filter(Boolean).join(' / ') || '-' },
+      { label: 'Issue Item', key: 'item_name' },
+      { label: 'Color', key: 'color' },
       { label: 'Issued Qty', key: 'quantity', align: 'right' },
       { label: 'Returned Qty', key: 'returned_quantity', align: 'right' },
       { label: 'Unit', key: 'unit' }
@@ -611,7 +611,18 @@ function registerIpcHandlers() {
       `Date: ${new Date(issue.issue_date).toLocaleDateString('en-GB')}`,
       `Recipient: ${issue.recipient_name} (${issue.issue_type})`
     ];
-    return ExcelGenerator.generateReport(`Issue-${issue.issue_id}`, columns, issue.items, settings, { subtitles });
+
+    if (issue.produced_item) {
+      subtitles.push(`--- PRODUCTION & ORDER INFORMATION ---`);
+      subtitles.push(`Produced Item: [${issue.produced_item.item_code}] ${issue.produced_item.name}`);
+      subtitles.push(`Order No. / Style / Purchase No.: ${[issue.produced_item.order_number, issue.produced_item.style_name, issue.produced_item.purchase_no].filter(Boolean).join(' / ') || '-'}`);
+      subtitles.push(`Order Qty: ${issue.produced_item.order_quantity.toLocaleString()} ${issue.produced_item.unit}`);
+      subtitles.push(`Specs (Color/Size): ${[issue.produced_item.color, issue.produced_item.size].filter(Boolean).join(' / ') || '-'}`);
+    }
+
+    const signatures = ['Receiver', 'Issued by', 'Order by', 'Approved by'];
+
+    return ExcelGenerator.generateReport(`Issue-${issue.issue_id}`, columns, issue.items, settings, { subtitles, signatures });
   }));
 
   // ==================== RETURNS ====================
