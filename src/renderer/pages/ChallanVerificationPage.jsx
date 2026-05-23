@@ -37,12 +37,16 @@ function generateVerificationHash(challan) {
   return Math.abs(hash).toString(16).toUpperCase().padStart(8, '0');
 }
 
-// Browser SVG QR generator
+// Browser PNG QR generator
 async function generateQRSvg(value) {
   try {
-    return await QRCode.toString(value, {
-      type: 'svg',
-      margin: 1
+    // Generate clean PNG Data URL for QR codes.
+    // Use errorCorrectionLevel 'L' to keep the grid size minimum (larger dots)
+    // and margin 4 (standard quiet zone) for maximum scanning reliability.
+    return await QRCode.toDataURL(value, {
+      errorCorrectionLevel: 'L',
+      margin: 4,
+      width: 300
     });
   } catch (err) {
     console.error('[PdfGenerator] QR code generation failed:', err.message);
@@ -128,9 +132,9 @@ export default function ChallanVerificationPage({ challanNumber }) {
       if (barcodeSvg) {
         rightStack.push({
           table: {
-            widths: [70],
+            widths: [95],
             body: [
-              [{ svg: barcodeSvg, fit: [70, 70], alignment: 'center', link: verificationUrl }],
+              [{ image: barcodeSvg, fit: [95, 95], alignment: 'center', link: verificationUrl }],
               [{ text: challan.challan_number, alignment: 'center', fontSize: 8, bold: true, color: '#6366f1', margin: [0, 2, 0, 0], link: verificationUrl }]
             ]
           },
@@ -143,7 +147,7 @@ export default function ChallanVerificationPage({ challanNumber }) {
             paddingBottom: () => 0,
           },
           alignment: 'right',
-          margin: [0, 6, 0, 0]
+          margin: [0, 4, 0, 0]
         });
       }
 

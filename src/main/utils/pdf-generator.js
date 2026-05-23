@@ -9,11 +9,15 @@ async function generateBarcodeSvg(value, format = 'CODE128') {
   if (format === 'QR') {
     try {
       const QRCode = require('qrcode');
-      const svg = await QRCode.toString(value, {
-        type: 'svg',
-        margin: 1
+      // Generate clean PNG Data URL for QR codes.
+      // Use errorCorrectionLevel 'L' to keep the grid size minimum (larger dots)
+      // and margin 4 (standard quiet zone) for maximum scanning reliability.
+      const pngDataUrl = await QRCode.toDataURL(value, {
+        errorCorrectionLevel: 'L',
+        margin: 4,
+        width: 300
       });
-      return svg;
+      return pngDataUrl;
     } catch (err) {
       console.error('[PdfGenerator] QR code generation failed:', err.message);
       return null;
@@ -111,15 +115,17 @@ const PdfGenerator = {
 
     if (barcodeSvg) {
       const isQR = format === 'QR';
-      const containerWidth = isQR ? 70 : 180;
-      const fitDimensions = isQR ? [70, 70] : [180, 45];
-      const marginVal = isQR ? [0, 6, 0, 0] : [0, 8, 0, 0];
+      const containerWidth = isQR ? 95 : 180;
+      const fitDimensions = isQR ? [95, 95] : [180, 45];
+      const marginVal = isQR ? [0, 4, 0, 0] : [0, 8, 0, 0];
 
       rightStack.push({
         table: {
           widths: [containerWidth],
           body: [
-            [{ svg: barcodeSvg, fit: fitDimensions, alignment: 'center', link: verificationUrl }],
+            isQR
+              ? [{ image: barcodeSvg, fit: fitDimensions, alignment: 'center', link: verificationUrl }]
+              : [{ svg: barcodeSvg, fit: fitDimensions, alignment: 'center', link: verificationUrl }],
             [{ text: challan.challan_number, alignment: 'center', fontSize: 8, bold: true, color: '#6366f1', margin: [0, 2, 0, 0], link: verificationUrl }]
           ]
         },
