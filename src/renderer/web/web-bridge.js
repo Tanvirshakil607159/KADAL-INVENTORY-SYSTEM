@@ -14,6 +14,19 @@ async function wrap(fn) {
   }
 }
 
+// Helper to parse JSON fields safely that might already be parsed objects (Supabase client auto-parses JSON columns)
+function safeParseJSON(val, fallback = {}) {
+  if (typeof val === 'object' && val !== null) {
+    return val;
+  }
+  try {
+    return val ? JSON.parse(val) : fallback;
+  } catch (err) {
+    console.error('[WebBridge] JSON parse failed:', err, 'for value:', val);
+    return fallback;
+  }
+}
+
 export const webBridge = {
   // Auth
   auth: {
@@ -43,7 +56,7 @@ export const webBridge = {
         fullName: user.full_name,
         roleId: user.role_id,
         roleName: user.roles?.name,
-        permissions: JSON.parse(user.roles?.permissions || user.permissions || '{}'),
+        permissions: safeParseJSON(user.roles?.permissions || user.permissions || '{}'),
       };
       
       sessionStorage.setItem('kadal_user', JSON.stringify(currentUser));
@@ -641,7 +654,7 @@ export const webBridge = {
       if (!supabase) throw new Error('Supabase not configured');
       const { data: prod } = await supabase.from('factory_production').select('*').eq('id', id).single();
       if (!prod) throw new Error('Production record not found');
-      const consumedItems = prod.consumed_items ? JSON.parse(prod.consumed_items) : [];
+      const consumedItems = safeParseJSON(prod.consumed_items, []);
 
       const { data: itemRow } = await supabase.from('items').select('current_stock').eq('id', prod.product_item_id).single();
       const stockBefore = itemRow?.current_stock || 0;
