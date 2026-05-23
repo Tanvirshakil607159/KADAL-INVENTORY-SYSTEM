@@ -92,16 +92,11 @@ const PdfGenerator = {
     const companyAddress = settings.company_address || '';
     const companyPhone = settings.company_phone || '';
 
-    // Generate Barcode SVG — always encode full verification URL for QR codes
+    // Generate Barcode/QR Code — encode clean, short verification URL for QR codes
     const format = settings.barcode_format === 'CODE128' ? 'CODE128' : 'QR';
     const baseUrl = (settings.public_web_url || 'https://kadal-inventory.web.app').trim().replace(/\/$/, '');
-    let verificationUrl = `${baseUrl}/challan/${challan.challan_number}`;
-    const u = settings.supabase_url || '';
-    const k = settings.supabase_key || '';
-    if (u && k) {
-      verificationUrl += `?u=${encodeURIComponent(u)}&k=${encodeURIComponent(k)}`;
-    }
-    console.log('[PdfGenerator] QR/Barcode format:', format, '| Verification URL:', verificationUrl.substring(0, 80) + '...');
+    const verificationUrl = `${baseUrl}/challan/${challan.challan_number}`;
+    console.log('[PdfGenerator] QR/Barcode format:', format, '| Verification URL:', verificationUrl);
 
     const barcodeValue = format === 'QR' ? verificationUrl : challan.challan_number;
     const barcodeSvg = await generateBarcodeSvg(barcodeValue, format);
@@ -115,8 +110,8 @@ const PdfGenerator = {
 
     if (barcodeSvg) {
       const isQR = format === 'QR';
-      const containerWidth = isQR ? 95 : 180;
-      const fitDimensions = isQR ? [95, 95] : [180, 45];
+      const containerWidth = isQR ? 110 : 180;
+      const fitDimensions = isQR ? [110, 110] : [180, 45];
       const marginVal = isQR ? [0, 4, 0, 0] : [0, 8, 0, 0];
 
       rightStack.push({
@@ -126,7 +121,7 @@ const PdfGenerator = {
             isQR
               ? [{ image: barcodeSvg, fit: fitDimensions, alignment: 'center', link: verificationUrl }]
               : [{ svg: barcodeSvg, fit: fitDimensions, alignment: 'center', link: verificationUrl }],
-            [{ text: challan.challan_number, alignment: 'center', fontSize: 8, bold: true, color: '#6366f1', margin: [0, 2, 0, 0], link: verificationUrl }]
+            [{ text: challan.challan_number, alignment: 'center', fontSize: 10, bold: true, color: '#6366f1', margin: [0, 3, 0, 0], link: verificationUrl, noWrap: true }]
           ]
         },
         layout: {

@@ -71,6 +71,34 @@ export default function ChallanVerificationPage({ challanNumber }) {
       try {
         setLoading(true);
         setError(null);
+
+        // Fetch config.json from public root if url/key are not in storage/params (web fallback)
+        const urlParams = new URLSearchParams(window.location.search);
+        let hasParams = urlParams.get('u') && urlParams.get('k');
+        if (!hasParams && window.location.hash) {
+          const qIndex = window.location.hash.indexOf('?');
+          if (qIndex !== -1) {
+            const hashParams = new URLSearchParams(window.location.hash.substring(qIndex));
+            hasParams = hashParams.get('u') && hashParams.get('k');
+          }
+        }
+
+        if (!hasParams && !localStorage.getItem('supabase_url') && !sessionStorage.getItem('temp_supabase_url')) {
+          try {
+            console.log('[Verification] Fetching backend config from server...');
+            const configRes = await fetch('/config.json');
+            if (configRes.ok) {
+              const config = await configRes.json();
+              if (config.supabase_url && config.supabase_key) {
+                sessionStorage.setItem('temp_supabase_url', config.supabase_url);
+                sessionStorage.setItem('temp_supabase_key', config.supabase_key);
+                console.log('[Verification] Backend credentials loaded from config.json.');
+              }
+            }
+          } catch (configErr) {
+            console.warn('Failed to load local config.json:', configErr);
+          }
+        }
         
         const [challanRes, settingsRes] = await Promise.all([
           window.kadal.challans.getByNumber(challanNumber),
@@ -113,12 +141,7 @@ export default function ChallanVerificationPage({ challanNumber }) {
       const companyPhone = settings.company_phone || '';
       
       const baseUrl = (settings.public_web_url || 'https://kadal-inventory.web.app').trim().replace(/\/$/, '');
-      let verificationUrl = `${baseUrl}/challan/${challan.challan_number}`;
-      const u = settings.supabase_url || sessionStorage.getItem('temp_supabase_url') || localStorage.getItem('supabase_url');
-      const k = settings.supabase_key || sessionStorage.getItem('temp_supabase_key') || localStorage.getItem('supabase_key');
-      if (u && k) {
-        verificationUrl += `?u=${encodeURIComponent(u)}&k=${encodeURIComponent(k)}`;
-      }
+      const verificationUrl = `${baseUrl}/challan/${challan.challan_number}`;
 
       const barcodeSvg = await generateQRSvg(verificationUrl);
 
@@ -132,10 +155,10 @@ export default function ChallanVerificationPage({ challanNumber }) {
       if (barcodeSvg) {
         rightStack.push({
           table: {
-            widths: [95],
+            widths: [110],
             body: [
-              [{ image: barcodeSvg, fit: [95, 95], alignment: 'center', link: verificationUrl }],
-              [{ text: challan.challan_number, alignment: 'center', fontSize: 8, bold: true, color: '#6366f1', margin: [0, 2, 0, 0], link: verificationUrl }]
+              [{ image: barcodeSvg, fit: [110, 110], alignment: 'center', link: verificationUrl }],
+              [{ text: challan.challan_number, alignment: 'center', fontSize: 10, bold: true, color: '#6366f1', margin: [0, 3, 0, 0], link: verificationUrl, noWrap: true }]
             ]
           },
           layout: {

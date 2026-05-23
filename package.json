@@ -11,7 +11,7 @@
     "dev:renderer": "vite",
     "dev:main": "cross-env NODE_ENV=development electron .",
     "build": "vite build",
-    "build:web": "vite build --base /",
+    "build:web": "node scripts/generate-config.js && vite build --base /",
     "dist": "npm run build && electron-builder && node scripts/copy-installer.js",
     "release": "npm run build && electron-builder --publish always && node scripts/copy-installer.js"
   },
