@@ -109,6 +109,7 @@ contextBridge.exposeInMainWorld('kadal', {
     factoryProductionReport: (filters) => ipcRenderer.invoke('reports:factoryProductionReport', filters),
     employeeOutstandingReport: (filters) => ipcRenderer.invoke('reports:employeeOutstandingReport', filters),
     issueReturnSummary: (filters) => ipcRenderer.invoke('reports:issueReturnSummary', filters),
+    auditReport: (filters) => ipcRenderer.invoke('reports:auditReport', filters),
   },
   approvals: {
     getAll: (status) => ipcRenderer.invoke('approvals:getAll', status),
@@ -160,6 +161,7 @@ contextBridge.exposeInMainWorld('kadal', {
   production: {
     getAll: (filters) => ipcRenderer.invoke('production:getAll', filters),
     create: (data) => ipcRenderer.invoke('production:create', data),
+    createBatch: (data) => ipcRenderer.invoke('production:createBatch', data),
     delete: (id) => ipcRenderer.invoke('production:delete', id),
   },
 
@@ -198,6 +200,8 @@ contextBridge.exposeInMainWorld('kadal', {
     parseGoogleSheet: (url) => ipcRenderer.invoke('import:parseGoogleSheet', url),
     importItems: (rows) => ipcRenderer.invoke('import:importItems', rows),
     downloadTemplate: () => ipcRenderer.invoke('import:downloadTemplate'),
+    downloadProductionTemplate: () => ipcRenderer.invoke('import:downloadProductionTemplate'),
+    importProductionItems: (rows) => ipcRenderer.invoke('import:importProductionItems', rows),
   },
 
   // Auto Update
@@ -222,6 +226,9 @@ contextBridge.exposeInMainWorld('kadal', {
   system: {
     clearData: () => ipcRenderer.invoke('system:clearData'),
     getVersion: () => ipcRenderer.invoke('system:getVersion'),
+    getCurrentDbPath: () => ipcRenderer.invoke('system:getCurrentDbPath'),
+    selectDatabase: () => ipcRenderer.invoke('system:selectDatabase'),
+    createDatabase: () => ipcRenderer.invoke('system:createDatabase'),
   },
   
   // Warehouses
@@ -234,6 +241,41 @@ contextBridge.exposeInMainWorld('kadal', {
     getStockByItem: (itemId) => ipcRenderer.invoke('warehouses:getStockByItem', itemId),
     getStockByWarehouse: (warehouseId) => ipcRenderer.invoke('warehouses:getStockByWarehouse', warehouseId),
     transferStock: (data) => ipcRenderer.invoke('warehouses:transferStock', data),
+    getNextCode: () => ipcRenderer.invoke('warehouses:getNextCode'),
+  },
+
+  warehouseZones: {
+    getByWarehouse: (warehouseId) => ipcRenderer.invoke('warehouseZones:getByWarehouse', warehouseId),
+    create: (data) => ipcRenderer.invoke('warehouseZones:create', data),
+    delete: (id) => ipcRenderer.invoke('warehouseZones:delete', id),
+  },
+
+  warehouseBins: {
+    getByZone: (zoneId) => ipcRenderer.invoke('warehouseBins:getByZone', zoneId),
+    getByWarehouse: (warehouseId) => ipcRenderer.invoke('warehouseBins:getByWarehouse', warehouseId),
+    create: (data) => ipcRenderer.invoke('warehouseBins:create', data),
+    delete: (id) => ipcRenderer.invoke('warehouseBins:delete', id),
+  },
+
+  binStock: {
+    getByBin: (binId) => ipcRenderer.invoke('binStock:getByBin', binId),
+    adjust: (binId, itemId, delta) => ipcRenderer.invoke('binStock:adjust', binId, itemId, delta),
+  },
+
+  // Requisitions
+  requisitions: {
+    getAll: (filters) => ipcRenderer.invoke('requisitions:getAll', filters),
+    getById: (id) => ipcRenderer.invoke('requisitions:getById', id),
+    create: (data) => ipcRenderer.invoke('requisitions:create', data),
+    approve: (id, notes) => ipcRenderer.invoke('requisitions:approve', id, notes),
+    reject: (id, notes) => ipcRenderer.invoke('requisitions:reject', id, notes),
+    cancel: (id, notes) => ipcRenderer.invoke('requisitions:cancel', id, notes),
+    fulfill: (id) => ipcRenderer.invoke('requisitions:fulfill', id),
+    delete: (id) => ipcRenderer.invoke('requisitions:delete', id),
+    getNextNumber: () => ipcRenderer.invoke('requisitions:getNextNumber'),
+    getFieldSuggestions: (field, query) => ipcRenderer.invoke('requisitions:getFieldSuggestions', field, query),
+    exportPdf: (id) => ipcRenderer.invoke('requisitions:exportPdf', id),
+    exportExcel: (id) => ipcRenderer.invoke('requisitions:exportExcel', id),
   },
 
 });

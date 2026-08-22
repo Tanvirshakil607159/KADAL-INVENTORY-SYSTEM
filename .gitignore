@@ -10,3 +10,8 @@ out
 .vscode
 build
 installers/
+
+.vercel
+scratch_*
+fix_*
+exports/

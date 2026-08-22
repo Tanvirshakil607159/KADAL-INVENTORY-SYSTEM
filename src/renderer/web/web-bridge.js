@@ -3,6 +3,17 @@ import bcrypt from 'bcryptjs';
 import { inventoryApi, fetchAll } from './inventory-api';
 import { challansApi } from './challans-api';
 
+function parseId(id) {
+  if (id === undefined || id === null || id === 'undefined' || id === 'null') return null;
+  if (typeof id === 'object') {
+    if (id.id !== undefined) id = id.id; // handle case where object is passed
+    else return null;
+  }
+  const val = Number(id);
+  if (isNaN(val) || val <= 0) return null;
+  return val;
+}
+
 // Helper to wrap Supabase calls in the same response format as IPC
 async function wrap(fn) {
   try {
@@ -199,6 +210,23 @@ export const webBridge = {
       if (!supabase) throw new Error('Supabase not configured');
       const { data: item, error: itemErr } = await supabase.from('items').select('current_stock').eq('id', data.itemId).single();
       if (itemErr) throw itemErr;
+      const userRaw = sessionStorage.getItem('kadal_user');
+      const user = userRaw ? JSON.parse(userRaw) : null;
+
+      // Duplicate prevention (Idempotency within 60s)
+      const OneMinuteAgo = new Date(Date.now() - 60000).toISOString();
+      const { data: duplicates } = await supabase.from('stock_transactions')
+        .select('id, stock_after')
+        .eq('item_id', data.itemId)
+        .eq('type', data.type)
+        .eq('quantity', data.quantity)
+        .eq('created_by', user?.id || null)
+        .gte('created_at', OneMinuteAgo);
+        
+      if (duplicates && duplicates.length > 0) {
+        console.warn('[WebBridge] Duplicate transaction blocked for item', data.itemId);
+        return { success: true, stockAfter: duplicates[0].stock_after };
+      }
 
       const stockBefore = item.current_stock || 0;
       let stockAfter = stockBefore;
@@ -217,8 +245,6 @@ export const webBridge = {
 
       await supabase.from('items').update({ current_stock: stockAfter }).eq('id', data.itemId);
 
-      const userRaw = sessionStorage.getItem('kadal_user');
-      const user = userRaw ? JSON.parse(userRaw) : null;
 
       const { error: txErr } = await supabase.from('stock_transactions').insert([{
         item_id: data.itemId,
@@ -376,9 +402,11 @@ export const webBridge = {
       return data;
     }),
     getById: (id) => wrap(async () => {
+      const parsedId = parseId(id);
+      if (!parsedId) return null;
       const supabase = getSupabase();
       if (!supabase) return null;
-      const { data, error } = await supabase.from('warehouses').select('*').eq('id', id).single();
+      const { data, error } = await supabase.from('warehouses').select('*').eq('id', parsedId).single();
       if (error) throw error;
       return data;
     }),
@@ -386,34 +414,55 @@ export const webBridge = {
       const supabase = getSupabase();
       if (!supabase) throw new Error('Supabase not configured');
       const { name, code, address, is_default = 0 } = data;
-      const { data: inserted, error } = await supabase.from('warehouses').insert([{ name, code, address, is_default, is_active: 1 }]).select().single();
+      let finalCode = code;
+      if (!finalCode) {
+        const { data: list } = await supabase.from('warehouses').select('code').like('code', 'WH-%');
+        const codes = (list || []).map(w => w.code);
+        let maxSeq = 0;
+        codes.forEach(c => {
+          const parts = c.split('-');
+          const lastPart = parts[parts.length - 1];
+          const num = parseInt(lastPart, 10);
+          if (!isNaN(num) && /^\d+$/.test(lastPart)) {
+            if (num > maxSeq) maxSeq = num;
+          }
+        });
+        finalCode = `WH-${(maxSeq + 1).toString().padStart(2, '0')}`;
+      }
+      const { data: inserted, error } = await supabase.from('warehouses').insert([{ name, code: finalCode, address, is_default, is_active: 1 }]).select().single();
       if (error) throw error;
       return inserted.id;
     }),
     update: (id, data) => wrap(async () => {
+      const parsedId = parseId(id);
+      if (!parsedId) throw new Error('Invalid warehouse ID');
       const supabase = getSupabase();
       if (!supabase) throw new Error('Supabase not configured');
       const { name, code, address, is_default } = data;
       const updateData = { name, code, address };
       if (is_default !== undefined) updateData.is_default = is_default;
-      const { error } = await supabase.from('warehouses').update(updateData).eq('id', id);
+      const { error } = await supabase.from('warehouses').update(updateData).eq('id', parsedId);
       if (error) throw error;
       return true;
     }),
     delete: (id) => wrap(async () => {
+      const parsedId = parseId(id);
+      if (!parsedId) throw new Error('Invalid warehouse ID');
       const supabase = getSupabase();
       if (!supabase) throw new Error('Supabase not configured');
-      const { error } = await supabase.from('warehouses').update({ is_active: 0 }).eq('id', id).eq('is_default', 0);
+      const { error } = await supabase.from('warehouses').update({ is_active: 0 }).eq('id', parsedId).eq('is_default', 0);
       if (error) throw error;
       return true;
     }),
     getStockByItem: (itemId) => wrap(async () => {
+      const parsedItemId = parseId(itemId);
+      if (!parsedItemId) return [];
       const supabase = getSupabase();
       if (!supabase) return [];
       const { data, error } = await supabase
         .from('warehouse_stock')
         .select('*, warehouses(name, code)')
-        .eq('item_id', itemId)
+        .eq('item_id', parsedItemId)
         .limit(10000);
       if (error) throw error;
       return data.map(d => ({
@@ -423,12 +472,14 @@ export const webBridge = {
       }));
     }),
     getStockByWarehouse: (warehouseId) => wrap(async () => {
+      const parsedWarehouseId = parseId(warehouseId);
+      if (!parsedWarehouseId) return [];
       const supabase = getSupabase();
       if (!supabase) return [];
       const data = await fetchAll(supabase
         .from('warehouse_stock')
         .select('*, items(name, item_code, current_stock, unit)')
-        .eq('warehouse_id', warehouseId));
+        .eq('warehouse_id', parsedWarehouseId));
       return data.map(d => ({
         ...d,
         item_name: d.items?.name,
@@ -439,10 +490,13 @@ export const webBridge = {
     }),
     transferStock: (data) => wrap(async () => {
       const { fromWarehouseId, toWarehouseId, itemId, quantity, notes } = data;
-      if (!fromWarehouseId || !toWarehouseId || !itemId || !quantity || quantity <= 0) {
+      const parsedFromWh = parseId(fromWarehouseId);
+      const parsedToWh = parseId(toWarehouseId);
+      const parsedItemId = parseId(itemId);
+      if (!parsedFromWh || !parsedToWh || !parsedItemId || !quantity || quantity <= 0) {
         throw new Error('Invalid transfer details');
       }
-      if (fromWarehouseId === toWarehouseId) {
+      if (parsedFromWh === parsedToWh) {
         throw new Error('Cannot transfer to the same warehouse');
       }
       const supabase = getSupabase();
@@ -452,10 +506,10 @@ export const webBridge = {
       const { data: sourceStockList, error: listErr } = await supabase
         .from('warehouse_stock')
         .select('*, warehouses(name, code)')
-        .eq('item_id', itemId)
+        .eq('item_id', parsedItemId)
         .limit(10000);
       if (listErr) throw listErr;
-      const sourceStockEntry = sourceStockList.find(s => s.warehouse_id === Number(fromWarehouseId));
+      const sourceStockEntry = sourceStockList.find(s => s.warehouse_id === Number(parsedFromWh));
       if (!sourceStockEntry || sourceStockEntry.quantity < quantity) {
         throw new Error('Insufficient stock in source warehouse');
       }
@@ -471,18 +525,18 @@ export const webBridge = {
       };
 
       // 2. Deduct from source & add to destination
-      await adjustStock(fromWarehouseId, itemId, -quantity);
-      await adjustStock(toWarehouseId, itemId, quantity);
+      await adjustStock(parsedFromWh, parsedItemId, -quantity);
+      await adjustStock(parsedToWh, parsedItemId, quantity);
 
       // 3. Log transaction
-      const { data: whFrom } = await supabase.from('warehouses').select('*').eq('id', fromWarehouseId).single();
-      const { data: whTo } = await supabase.from('warehouses').select('*').eq('id', toWarehouseId).single();
+      const { data: whFrom } = await supabase.from('warehouses').select('*').eq('id', parsedFromWh).single();
+      const { data: whTo } = await supabase.from('warehouses').select('*').eq('id', parsedToWh).single();
 
       const userRaw = sessionStorage.getItem('kadal_user');
       const user = userRaw ? JSON.parse(userRaw) : null;
 
       await supabase.from('stock_transactions').insert([{
-        item_id: itemId,
+        item_id: parsedItemId,
         type: 'TRANSFER',
         quantity,
         stock_before: sourceStockEntry.quantity,
@@ -493,6 +547,27 @@ export const webBridge = {
       }]);
 
       return true;
+    }),
+    getNextCode: () => wrap(async () => {
+      const supabase = getSupabase();
+      if (!supabase) return 'WH-01';
+      const { data, error } = await supabase
+        .from('warehouses')
+        .select('code')
+        .like('code', 'WH-%');
+      if (error) throw error;
+      
+      const codes = (data || []).map(w => w.code);
+      let maxSeq = 0;
+      codes.forEach(code => {
+        const parts = code.split('-');
+        const lastPart = parts[parts.length - 1];
+        const num = parseInt(lastPart, 10);
+        if (!isNaN(num) && /^\d+$/.test(lastPart)) {
+          if (num > maxSeq) maxSeq = num;
+        }
+      });
+      return `WH-${(maxSeq + 1).toString().padStart(2, '0')}`;
     })
   },
 
@@ -581,6 +656,118 @@ export const webBridge = {
     })
   },
 
+  // Zones
+  warehouseZones: {
+    getByWarehouse: (warehouseId) => wrap(async () => {
+      const parsedId = parseId(warehouseId);
+      if (!parsedId) return [];
+      const supabase = getSupabase();
+      if (!supabase) return [];
+      const { data, error } = await supabase.from('warehouse_zones').select('*').eq('warehouse_id', parsedId).order('name');
+      if (error) throw error;
+      return data;
+    }),
+    create: (data) => wrap(async () => {
+      const parsedWarehouseId = parseId(data.warehouse_id);
+      if (!parsedWarehouseId) throw new Error('Invalid warehouse_id');
+      const supabase = getSupabase();
+      const { data: inserted, error } = await supabase.from('warehouse_zones').insert([{
+        warehouse_id: parsedWarehouseId,
+        name: data.name,
+        type: data.type
+      }]).select().single();
+      if (error) throw error;
+      return inserted.id;
+    }),
+    delete: (id) => wrap(async () => {
+      const parsedId = parseId(id);
+      if (!parsedId) throw new Error('Invalid zone ID');
+      const supabase = getSupabase();
+      const { error } = await supabase.from('warehouse_zones').delete().eq('id', parsedId);
+      if (error) throw error;
+      return true;
+    }),
+  },
+
+  // Bins
+  warehouseBins: {
+    getByZone: (zoneId) => wrap(async () => {
+      const parsedZoneId = parseId(zoneId);
+      if (!parsedZoneId) return [];
+      const supabase = getSupabase();
+      if (!supabase) return [];
+      const { data, error } = await supabase.from('warehouse_bins').select('*').eq('zone_id', parsedZoneId).order('name');
+      if (error) throw error;
+      return data;
+    }),
+    getByWarehouse: (warehouseId) => wrap(async () => {
+      const parsedId = parseId(warehouseId);
+      if (!parsedId) return [];
+      const supabase = getSupabase();
+      if (!supabase) return [];
+      const { data, error } = await supabase.from('warehouse_bins').select('*, warehouse_zones!inner(warehouse_id)').eq('warehouse_zones.warehouse_id', parsedId);
+      if (error) throw error;
+      return data;
+    }),
+    create: (data) => wrap(async () => {
+      const parsedZoneId = parseId(data.zone_id);
+      if (!parsedZoneId) throw new Error('Invalid zone_id');
+      const supabase = getSupabase();
+      const { data: inserted, error } = await supabase.from('warehouse_bins').insert([{
+        zone_id: parsedZoneId,
+        barcode: data.barcode,
+        name: data.name,
+        capacity: data.capacity || 0
+      }]).select().single();
+      if (error) throw error;
+      return inserted.id;
+    }),
+    delete: (id) => wrap(async () => {
+      const parsedId = parseId(id);
+      if (!parsedId) throw new Error('Invalid bin ID');
+      const supabase = getSupabase();
+      const { error } = await supabase.from('warehouse_bins').delete().eq('id', parsedId);
+      if (error) throw error;
+      return true;
+    }),
+  },
+
+  // Bin Stock
+  binStock: {
+    getByBin: (binId) => wrap(async () => {
+      const parsedBinId = parseId(binId);
+      if (!parsedBinId) return [];
+      const supabase = getSupabase();
+      if (!supabase) return [];
+      const { data, error } = await supabase.from('bin_stock').select('*, items(name, item_code, unit)').eq('bin_id', parsedBinId);
+      if (error) throw error;
+      return data.map(d => ({
+        ...d,
+        item_name: d.items?.name,
+        item_code: d.items?.item_code,
+        unit: d.items?.unit
+      }));
+    }),
+    adjust: (binId, itemId, delta) => wrap(async () => {
+      const parsedBinId = parseId(binId);
+      const parsedItemId = parseId(itemId);
+      const numericDelta = Number(delta);
+      if (!parsedBinId || !parsedItemId || isNaN(numericDelta)) {
+        throw new Error('Invalid parameters for adjusting bin stock');
+      }
+      const supabase = getSupabase();
+      if (!supabase) throw new Error('Supabase not configured');
+      const { data: current } = await supabase.from('bin_stock').select('quantity').eq('bin_id', parsedBinId).eq('item_id', parsedItemId).maybeSingle();
+      const newQty = (current?.quantity || 0) + numericDelta;
+      if (newQty <= 0) {
+        await supabase.from('bin_stock').delete().eq('bin_id', parsedBinId).eq('item_id', parsedItemId);
+      } else {
+        await supabase.from('bin_stock').upsert({ bin_id: parsedBinId, item_id: parsedItemId, quantity: newQty }, { onConflict: 'bin_id,item_id' });
+      }
+      return true;
+    }),
+  },
+
   // Production (Mocked for web)
   production: {
     getAll: (filters) => wrap(async () => {
@@ -649,6 +836,105 @@ export const webBridge = {
 
       return prod.id;
     }),
+    createBatch: (data) => wrap(async () => {
+      const supabase = getSupabase();
+      if (!supabase) throw new Error('Supabase not configured');
+      
+      const { issueId, producedProducts, items, remarks, createdBy } = data;
+      const consumedItemsStr = JSON.stringify(items || []);
+      const OneMinuteAgo = new Date(Date.now() - 60000).toISOString();
+      let firstProdId = null;
+
+      for (let i = 0; i < (producedProducts || []).length; i++) {
+        const p = producedProducts[i];
+        
+        const { data: duplicates } = await supabase.from('factory_production')
+          .select('id')
+          .eq('issue_id', issueId)
+          .eq('product_item_id', p.productItemId)
+          .eq('production_quantity', p.productionQuantity)
+          .gte('created_at', OneMinuteAgo);
+          
+        if (duplicates && duplicates.length > 0) {
+          if (i === 0) firstProdId = duplicates[0].id;
+          continue;
+        }
+
+        const { data: prod, error: pErr } = await supabase.from('factory_production').insert([{
+          issue_id: issueId,
+          product_item_id: p.productItemId,
+          product_name: p.productName,
+          production_quantity: Number(p.productionQuantity),
+          wastage_quantity: Number(p.wastageQuantity),
+          balance_quantity: Number(p.productionQuantity),
+          consumed_items: i === 0 ? consumedItemsStr : '[]'
+        }]).select().single();
+        if (pErr) throw pErr;
+
+        if (i === 0) firstProdId = prod.id;
+
+        if (Number(p.productionQuantity) > 0) {
+          const { data: itemRow, error: iErr } = await supabase.from('items').select('current_stock').eq('id', p.productItemId).single();
+          if (iErr) throw iErr;
+          const stockBefore = itemRow?.current_stock || 0;
+          const stockAfter = stockBefore + Number(p.productionQuantity);
+          await supabase.from('items').update({ current_stock: stockAfter, updated_at: new Date().toISOString() }).eq('id', p.productItemId);
+
+          await supabase.from('stock_transactions').insert([{
+            item_id: p.productItemId,
+            type: 'IN',
+            quantity: Number(p.productionQuantity),
+            stock_before: stockBefore,
+            stock_after: stockAfter,
+            reference: `Production: PRD-${prod.id}`,
+            notes: remarks || `Produced from Issue #${issueId}`,
+            created_by: createdBy
+          }]);
+        }
+      }
+
+      for (const item of (items || [])) {
+        const { data: issueItem, error: fErr } = await supabase.from('issue_items').select('item_id, consumed_quantity, returned_quantity, damage_quantity').eq('id', item.issueItemId).single();
+        if (fErr) throw fErr;
+        
+        const newConsumed = (issueItem?.consumed_quantity || 0) + Number(item.consumedQty);
+        const newWastage = (issueItem?.damage_quantity || 0) + Number(item.wastageQty || 0);
+        const newReturned = (issueItem?.returned_quantity || 0) + Number(item.returnQty || 0);
+        
+        await supabase.from('issue_items').update({ 
+          consumed_quantity: newConsumed,
+          damage_quantity: newWastage,
+          returned_quantity: newReturned 
+        }).eq('id', item.issueItemId);
+
+        const retQty = Number(item.returnQty || 0);
+        if (retQty > 0) {
+          const { data: rawItem, error: riErr } = await supabase.from('items').select('current_stock').eq('id', issueItem.item_id).single();
+          if (riErr) throw riErr;
+          
+          const stockBefore = rawItem?.current_stock || 0;
+          const stockAfter = stockBefore + retQty;
+          
+          await supabase.from('items').update({ 
+            current_stock: stockAfter, 
+            updated_at: new Date().toISOString() 
+          }).eq('id', issueItem.item_id);
+
+          await supabase.from('stock_transactions').insert([{
+            item_id: issueItem.item_id,
+            type: 'IN',
+            quantity: retQty,
+            stock_before: stockBefore,
+            stock_after: stockAfter,
+            reference: firstProdId ? `Production Return: PRD-${firstProdId}` : `Production Return`,
+            notes: firstProdId ? `Returned from Factory under Production Batch PRD-${firstProdId}` : 'Returned from Factory Production',
+            created_by: createdBy
+          }]);
+        }
+      }
+
+      return { success: true };
+    }),
     delete: (id) => wrap(async () => {
       const supabase = getSupabase();
       if (!supabase) throw new Error('Supabase not configured');
@@ -686,6 +972,241 @@ export const webBridge = {
       await supabase.from('factory_production').delete().eq('id', id);
       return true;
     })
+  },
+
+  // Requisitions
+  requisitions: {
+    getAll: (filters = {}) => wrap(async () => {
+      const supabase = getSupabase();
+      if (!supabase) throw new Error('Supabase not configured');
+      let query = supabase.from('requisitions').select(`
+        *,
+        recipients (name),
+        users!requisitions_created_by_fkey (full_name),
+        requisition_items (id, item_id, requested_quantity, approved_quantity, issued_quantity, items (name, item_code))
+      `).order('created_at', { ascending: false });
+
+      if (filters.status) query = query.eq('status', filters.status);
+      if (filters.recipientId) query = query.eq('recipient_id', filters.recipientId);
+      if (filters.dateFrom) query = query.gte('requisition_date', filters.dateFrom);
+      if (filters.dateTo) query = query.lte('requisition_date', filters.dateTo + 'T23:59:59.999Z');
+      if (filters.search) {
+        query = query.or(`requisition_no.ilike.%${filters.search}%,requester_name.ilike.%${filters.search}%,department.ilike.%${filters.search}%`);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+      return data.map(r => ({
+        ...r,
+        created_by_name: r.users?.full_name,
+        recipient_name: r.recipients?.name,
+        item_count: (r.requisition_items || []).length,
+        total_requested: (r.requisition_items || []).reduce((s, i) => s + (i.requested_quantity || 0), 0),
+      }));
+    }),
+
+    getById: (id) => wrap(async () => {
+      const supabase = getSupabase();
+      if (!supabase) throw new Error('Supabase not configured');
+      const { data: req, error } = await supabase.from('requisitions').select(`
+        *,
+        users!requisitions_created_by_fkey (full_name),
+        recipients (name, type)
+      `).eq('id', id).single();
+      if (error) throw error;
+      if (req) {
+        const { data: items, error: iErr } = await supabase.from('requisition_items').select(`
+          *, items (name, item_code, unit, current_stock, buyer_name, size, color, style_name, purchase_no, order_number)
+        `).eq('requisition_id', id);
+        if (iErr) throw iErr;
+        req.items = items.map(i => ({
+          ...i,
+          item_name: i.items?.name,
+          item_code: i.items?.item_code,
+          item_unit: i.items?.unit,
+          current_stock: i.items?.current_stock,
+          buyer_name: i.items?.buyer_name || '-',
+          size: i.items?.size || '-',
+          color: i.items?.color || '-',
+          style_name: i.items?.style_name || '-',
+          purchase_no: i.items?.purchase_no || '-',
+          order_number: i.items?.order_number || '-',
+        }));
+        req.created_by_name = req.users?.full_name;
+        req.recipient_name = req.recipients?.name;
+      }
+      return req;
+    }),
+
+    create: (data) => wrap(async () => {
+      const supabase = getSupabase();
+      if (!supabase) throw new Error('Supabase not configured');
+      const userRaw = sessionStorage.getItem('kadal_user');
+      const user = userRaw ? JSON.parse(userRaw) : null;
+
+      // Get next number
+      const { data: existing, error: nErr } = await supabase.from('requisitions')
+        .select('requisition_no').like('requisition_no', `${data.prefix || 'REQ'}-%`).order('requisition_no', { ascending: false });
+      if (nErr) throw nErr;
+      let max = 0;
+      (existing || []).forEach(r => {
+        const parts = r.requisition_no.split('-');
+        const num = parseInt(parts[parts.length - 1], 10);
+        if (!isNaN(num) && num > max) max = num;
+      });
+      const requisitionNo = `${data.prefix || 'REQ'}-${(max + 1).toString().padStart(4, '0')}`;
+
+      const { data: req, error } = await supabase.from('requisitions').insert([{
+        requisition_no: requisitionNo,
+        recipient_id: data.recipientId || null,
+        requester_name: data.requesterName || null,
+        department: data.department || null,
+        purpose: data.purpose || null,
+        notes: data.notes || null,
+        status: 'PENDING',
+        requisition_date: data.requisitionDate || new Date().toISOString(),
+        created_by: user?.id,
+      }]).select().single();
+      if (error) throw error;
+
+      const reqItems = data.items.map(item => ({
+        requisition_id: req.id,
+        item_id: item.itemId,
+        requested_quantity: item.quantity,
+        approved_quantity: 0,
+        issued_quantity: 0,
+        notes: item.notes || null,
+      }));
+      const { error: iErr } = await supabase.from('requisition_items').insert(reqItems);
+      if (iErr) throw iErr;
+      return { success: true, id: req.id, requisitionNo };
+    }),
+
+    approve: (id, notes) => wrap(async () => {
+      const supabase = getSupabase();
+      if (!supabase) throw new Error('Supabase not configured');
+      const userRaw = sessionStorage.getItem('kadal_user');
+      const user = userRaw ? JSON.parse(userRaw) : null;
+      const { error } = await supabase.from('requisitions').update({
+        status: 'APPROVED',
+        approved_by: user?.fullName || user?.full_name || 'Admin',
+        updated_at: new Date().toISOString(),
+      }).eq('id', id);
+      if (error) throw error;
+      return { success: true };
+    }),
+
+    reject: (id, notes) => wrap(async () => {
+      const supabase = getSupabase();
+      if (!supabase) throw new Error('Supabase not configured');
+      const { error } = await supabase.from('requisitions').update({
+        status: 'REJECTED', updated_at: new Date().toISOString()
+      }).eq('id', id);
+      if (error) throw error;
+      return { success: true };
+    }),
+
+    cancel: (id, notes) => wrap(async () => {
+      const supabase = getSupabase();
+      if (!supabase) throw new Error('Supabase not configured');
+      const { error } = await supabase.from('requisitions').update({
+        status: 'CANCELLED', updated_at: new Date().toISOString()
+      }).eq('id', id);
+      if (error) throw error;
+      return { success: true };
+    }),
+
+    fulfill: (id) => wrap(async () => {
+      const supabase = getSupabase();
+      if (!supabase) throw new Error('Supabase not configured');
+      const userRaw = sessionStorage.getItem('kadal_user');
+      const user = userRaw ? JSON.parse(userRaw) : null;
+
+      const { data: req, error: rErr } = await supabase.from('requisitions').select('*').eq('id', id).single();
+      if (rErr) throw rErr;
+      if (!['PENDING', 'APPROVED'].includes(req.status)) throw new Error(`Cannot fulfill a requisition with status: ${req.status}`);
+
+      const { data: reqItems, error: iErr } = await supabase.from('requisition_items').select('*, items(current_stock, name)').eq('requisition_id', id);
+      if (iErr) throw iErr;
+      if (!reqItems || reqItems.length === 0) throw new Error('Requisition has no items');
+
+      const fulfillItems = reqItems.map(item => ({
+        ...item,
+        fulfillQty: (req.status === 'APPROVED' && item.approved_quantity > 0) ? item.approved_quantity : item.requested_quantity,
+      })).filter(i => i.fulfillQty > 0);
+
+      // Validate stock
+      for (const item of fulfillItems) {
+        if (item.items.current_stock < item.fulfillQty) {
+          throw new Error(`Insufficient stock for "${item.items.name}". Available: ${item.items.current_stock}, Requested: ${item.fulfillQty}`);
+        }
+      }
+
+      // Deduct stock and log transactions
+      for (const item of fulfillItems) {
+        const { data: freshItem } = await supabase.from('items').select('current_stock').eq('id', item.item_id).single();
+        const stockBefore = freshItem?.current_stock || 0;
+        const stockAfter = stockBefore - item.fulfillQty;
+        await supabase.from('items').update({ current_stock: stockAfter }).eq('id', item.item_id);
+        await supabase.from('stock_transactions').insert([{
+          item_id: item.item_id,
+          type: 'OUT',
+          quantity: item.fulfillQty,
+          stock_before: stockBefore,
+          stock_after: stockAfter,
+          reference: `Requisition: ${req.requisition_no}`,
+          notes: `Fulfilled from requisition`,
+          created_by: user?.id || null,
+        }]);
+        await supabase.from('requisition_items').update({ issued_quantity: item.fulfillQty }).eq('id', item.id);
+      }
+
+      const { error: upErr } = await supabase.from('requisitions').update({
+        status: 'FULFILLED',
+        approved_by: user?.fullName || user?.full_name || 'Store',
+        updated_at: new Date().toISOString(),
+      }).eq('id', id);
+      if (upErr) throw upErr;
+      return { success: true };
+    }),
+
+    delete: (id) => wrap(async () => {
+      const supabase = getSupabase();
+      if (!supabase) throw new Error('Supabase not configured');
+      await supabase.from('requisition_items').delete().eq('requisition_id', id);
+      const { error } = await supabase.from('requisitions').delete().eq('id', id);
+      if (error) throw error;
+      return true;
+    }),
+
+    getNextNumber: () => wrap(async () => {
+      const supabase = getSupabase();
+      if (!supabase) throw new Error('Supabase not configured');
+      const { data: prefixSetting } = await supabase.from('settings').select('value').eq('key', 'requisition_prefix').single();
+      const prefix = prefixSetting?.value || 'REQ';
+      const { data, error } = await supabase.from('requisitions').select('requisition_no').like('requisition_no', `${prefix}-%`).order('requisition_no', { ascending: false });
+      if (error) throw error;
+      let max = 0;
+      (data || []).forEach(r => {
+        const parts = r.requisition_no.split('-');
+        const num = parseInt(parts[parts.length - 1], 10);
+        if (!isNaN(num) && num > max) max = num;
+      });
+      return `${prefix}-${(max + 1).toString().padStart(4, '0')}`;
+    }),
+
+    getFieldSuggestions: (field, query) => wrap(async () => {
+      const supabase = getSupabase();
+      if (!supabase) throw new Error('Supabase not configured');
+      const validFields = ['requester_name', 'department', 'purpose'];
+      if (!validFields.includes(field)) return [];
+      const { data, error } = await supabase.from('requisitions').select(field).ilike(field, `%${query}%`).not(field, 'is', null).limit(20);
+      if (error) throw error;
+      return [...new Set(data.map(r => r[field]))].sort();
+    }),
+
+    exportPdf: (id) => wrap(async () => { throw new Error('PDF export not available in web version'); }),
+    exportExcel: (id) => wrap(async () => { throw new Error('Excel export not available in web version'); }),
   },
 
   // System

@@ -9,6 +9,7 @@ const SuppliersRepo = require('../database/repositories/suppliers');
 const BuyersRepo = require('../database/repositories/buyers');
 const StockTransactionsRepo = require('../database/repositories/stock-transactions');
 const AuthService = require('./auth-service');
+const { normalizeBuyerName } = require('../utils/buyer-normalizer');
 
 // Known header aliases for smart column mapping
 const HEADER_MAP = {
@@ -192,10 +193,11 @@ const ImportService = {
           }
         }
 
-        // Auto-create buyer if specified and doesn't exist
+        // Normalize and auto-create buyer if specified and doesn't exist
         if (row.buyerName) {
+          row.buyerName = normalizeBuyerName(row.buyerName);
           const buyers = await BuyersRepo.getAll();
-          const existing = buyers.find(b => b.name.toLowerCase() === row.buyerName.toLowerCase());
+          const existing = buyers.find(b => b.name.toUpperCase() === row.buyerName.toUpperCase());
           if (!existing) {
             await BuyersRepo.create({ name: row.buyerName });
           }
@@ -219,6 +221,71 @@ const ImportService = {
           orderQuantity: row.orderQuantity || 0,
           unitPrice: row.unitPrice || 0,
           currency: row.currency || 'BDT',
+        });
+
+        if (!res.success) throw new Error(res.error || 'Failed to create item');
+        imported++;
+      } catch (e) {
+        skipped++;
+        errors.push(`Row "${row.name}": ${e.message}`);
+      }
+    }
+
+    return { imported, skipped, errors };
+  },
+
+  async importProductionItems(rows) {
+    // Tag each row as PRODUCTION type before importing
+    const productionRows = rows.map(row => ({ ...row, sourceType: 'PRODUCTION' }));
+
+    let imported = 0;
+    let skipped = 0;
+    const errors = [];
+
+    for (const row of productionRows) {
+      try {
+        // Auto-create category if specified and doesn't exist
+        let categoryId = null;
+        if (row.category) {
+          const cats = await CategoriesRepo.getAll();
+          const existing = cats.find(c => c.name.toLowerCase() === row.category.toLowerCase());
+          if (existing) {
+            categoryId = existing.id;
+          } else {
+            const r = await CategoriesRepo.create({ name: row.category });
+            categoryId = r.lastInsertRowid || r;
+          }
+        }
+
+        // Normalize and auto-create buyer if specified and doesn't exist
+        if (row.buyerName) {
+          row.buyerName = normalizeBuyerName(row.buyerName);
+          const buyers = await BuyersRepo.getAll();
+          const existing = buyers.find(b => b.name.toUpperCase() === row.buyerName.toUpperCase());
+          if (!existing) {
+            await BuyersRepo.create({ name: row.buyerName });
+          }
+        }
+
+        // Create item using InventoryService with PRODUCTION source type
+        const res = await InventoryService._executeCreate({
+          name: row.name,
+          categoryId,
+          size: row.size || null,
+          color: row.color || null,
+          unit: row.unit || 'pcs',
+          supplierId: null,
+          openingStock: row.openingStock || 0,
+          minStockLevel: row.minStockLevel || 0,
+          notes: row.notes || 'Imported from Production template',
+          buyerName: row.buyerName || null,
+          styleName: row.styleName || null,
+          purchaseNo: row.purchaseNo || null,
+          orderNumber: row.orderNumber || null,
+          orderQuantity: row.orderQuantity || 0,
+          unitPrice: row.unitPrice || 0,
+          currency: row.currency || 'BDT',
+          sourceType: 'PRODUCTION',
         });
 
         if (!res.success) throw new Error(res.error || 'Failed to create item');
@@ -324,6 +391,157 @@ const ImportService = {
     await workbook.xlsx.writeFile(result.filePath);
     return true;
   },
+
+  async downloadProductionTemplate() {
+    const result = await dialog.showSaveDialog({
+      title: 'Save Production Item Template',
+      defaultPath: 'production_item_import_template.xlsx',
+      filters: [{ name: 'Excel Files', extensions: ['xlsx'] }],
+    });
+    if (result.canceled || !result.filePath) return false;
+
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Production Items');
+
+    worksheet.columns = [
+      { header: 'Item Name', key: 'name', width: 30 },
+      { header: 'Category', key: 'category', width: 18 },
+      { header: 'Size', key: 'size', width: 12 },
+      { header: 'Color', key: 'color', width: 15 },
+      { header: 'Unit', key: 'unit', width: 10 },
+      { header: 'Buyer Name', key: 'buyerName', width: 20 },
+      { header: 'Style Name', key: 'styleName', width: 15 },
+      { header: 'Purchase No', key: 'purchaseNo', width: 15 },
+      { header: 'Order Number', key: 'orderNumber', width: 15 },
+      { header: 'Order Quantity', key: 'orderQuantity', width: 15 },
+      { header: 'Unit Price', key: 'unitPrice', width: 15 },
+      { header: 'Currency', key: 'currency', width: 10 },
+      { header: 'Opening Stock', key: 'openingStock', width: 15 },
+      { header: 'Min Stock Level', key: 'minStockLevel', width: 15 },
+      { header: 'Notes', key: 'notes', width: 30 }
+    ];
+
+    // Header styling
+    const headerRow = worksheet.getRow(1);
+    headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2E7D32' } };
+    headerRow.alignment = { horizontal: 'center', vertical: 'middle' };
+    headerRow.height = 22;
+
+    // Add sample rows
+    const sampleRows = [
+      {
+        name: 'Mens Jacket (Style RMB052)',
+        category: 'Finished Garments',
+        size: 'M',
+        color: 'Navy Blue',
+        unit: 'pcs',
+        buyerName: 'Regatta',
+        styleName: 'RMB052',
+        purchaseNo: '#01117/2026',
+        orderNumber: '00030618',
+        orderQuantity: 5000,
+        unitPrice: 12.50,
+        currency: 'USD',
+        openingStock: 0,
+        minStockLevel: 0,
+        notes: 'Factory produced item'
+      },
+      {
+        name: 'Ladies T-Shirt (Style TS-445)',
+        category: 'Finished Garments',
+        size: 'L',
+        color: 'White/Red',
+        unit: 'pcs',
+        buyerName: 'Target',
+        styleName: 'TS-445',
+        purchaseNo: 'PO-20260801',
+        orderNumber: '00045210',
+        orderQuantity: 8000,
+        unitPrice: 8.75,
+        currency: 'USD',
+        openingStock: 500,
+        minStockLevel: 100,
+        notes: 'Initial batch completed'
+      },
+      {
+        name: 'Kids Polo Shirt (Style KP-112)',
+        category: 'Finished Garments',
+        size: 'S',
+        color: 'Green/White',
+        unit: 'pcs',
+        buyerName: 'H&M',
+        styleName: 'KP-112',
+        purchaseNo: 'PO-20260715',
+        orderNumber: '00038900',
+        orderQuantity: 10000,
+        unitPrice: 6.25,
+        currency: 'USD',
+        openingStock: 0,
+        minStockLevel: 0,
+        notes: 'Production pending'
+      },
+    ];
+
+    sampleRows.forEach(row => worksheet.addRow(row));
+
+    // Style data rows with alternating colors
+    for (let i = 2; i <= worksheet.rowCount; i++) {
+      const row = worksheet.getRow(i);
+      row.alignment = { vertical: 'middle' };
+      if (i % 2 === 0) {
+        row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F8E9' } };
+      }
+    }
+
+    // Add instruction sheet
+    const instrSheet = workbook.addWorksheet('Instructions');
+    instrSheet.getColumn(1).width = 50;
+    instrSheet.getColumn(2).width = 60;
+
+    const instructions = [
+      ['PRODUCTION ITEM IMPORT TEMPLATE', ''],
+      ['', ''],
+      ['Column', 'Description'],
+      ['Item Name *', 'Name of the produced/finished item (REQUIRED)'],
+      ['Category', 'Category name (auto-created if not exists). e.g., Finished Garments'],
+      ['Size', 'Size of the product (S, M, L, XL, etc.)'],
+      ['Color', 'Color description'],
+      ['Unit', 'Unit of measurement (pcs, dozen, etc.). Default: pcs'],
+      ['Buyer Name', 'Buyer/Customer name (auto-created if not exists)'],
+      ['Style Name', 'Style reference number'],
+      ['Purchase No', 'Purchase order number'],
+      ['Order Number', 'Order/Booking reference number'],
+      ['Order Quantity', 'Total ordered quantity'],
+      ['Unit Price', 'Price per unit'],
+      ['Currency', 'BDT or USD. Default: BDT'],
+      ['Opening Stock', 'Initial stock quantity on hand. Default: 0'],
+      ['Min Stock Level', 'Minimum stock alert level. Default: 0'],
+      ['Notes', 'Any additional notes or remarks'],
+      ['', ''],
+      ['IMPORTANT NOTES:', ''],
+      ['1. Only "Item Name" is required.', 'All other columns are optional.'],
+      ['2. Duplicate rows with same Name+Category+Style+PO+Order+Size+Color', 'will be merged and quantities summed.'],
+      ['3. Items will be created as PRODUCTION type.', 'They will appear under Factory Produce in the system.'],
+      ['4. Delete these sample rows before importing.', 'Keep only the header row and your data.'],
+    ];
+
+    instructions.forEach((row, idx) => {
+      const r = instrSheet.addRow(row);
+      if (idx === 0) {
+        r.font = { bold: true, size: 14 };
+      } else if (idx === 2) {
+        r.font = { bold: true };
+        r.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8F5E9' } };
+      } else if (idx >= 19) {
+        r.font = { bold: true, color: { argb: 'FFD32F2F' } };
+      }
+    });
+
+    await workbook.xlsx.writeFile(result.filePath);
+    return true;
+  },
 };
 
 module.exports = ImportService;
+

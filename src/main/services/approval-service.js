@@ -33,6 +33,9 @@ const ApprovalService = {
         case 'CREATE_ITEM':
           result = await InventoryService._executeCreate(data);
           break;
+        case 'PENDING_ITEM': // Merchandiser creates item, inventory approves -> goes to Admin Approval
+          result = await this.createRequest('CREATE_ITEM', data);
+          break;
         case 'UPDATE_ITEM':
           result = await InventoryService._executeUpdate(data.id, data.data);
           break;
@@ -45,6 +48,10 @@ const ApprovalService = {
         case 'CREATE_GATE_PASS':
           const GatePassService = require('./gate-pass-service');
           result = await GatePassService._executeCreate(data, { excludeApprovalId: id });
+          break;
+        case 'CREATE_REQUISITION':
+          const RequisitionService = require('./requisition-service');
+          result = await RequisitionService._executeCreate(data);
           break;
         default:
           throw new Error('Unknown approval type: ' + request.type);

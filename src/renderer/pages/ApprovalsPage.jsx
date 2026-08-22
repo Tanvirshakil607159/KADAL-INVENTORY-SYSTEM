@@ -71,9 +71,10 @@ export default function ApprovalsPage() {
 
   useEffect(() => { load(); }, []);
 
-  const filteredRequests = sortedRequests.filter(r => 
-    activeTab === 'pending' ? r.status === 'PENDING' : r.status !== 'PENDING'
-  );
+  const filteredRequests = sortedRequests.filter(r => {
+    if (r.type === 'PENDING_ITEM') return false; // Hide from Admin Approvals (handled in Pending Items module)
+    return activeTab === 'pending' ? r.status === 'PENDING' : r.status !== 'PENDING';
+  });
 
   const renderDataDetail = (data, type) => {
     if (!data) return null;
@@ -94,6 +95,7 @@ export default function ApprovalsPage() {
 
     switch (type) {
       case 'CREATE_ITEM':
+      case 'PENDING_ITEM':
       case 'UPDATE_ITEM':
         const itemData = (type === 'UPDATE_ITEM' ? safeData.data : safeData) || {};
         const oldData = (type === 'UPDATE_ITEM' ? safeData.oldData : null);
@@ -121,6 +123,7 @@ export default function ApprovalsPage() {
               {renderField('Buyer', itemData.buyerName || itemData.buyer_name, oldData?.buyer_name)}
               {renderField('Style', itemData.styleName || itemData.style_name, oldData?.style_name)}
               {renderField('Order No', itemData.orderNumber || itemData.order_number, oldData?.order_number)}
+              {renderField('Order Qty', itemData.orderQuantity || itemData.order_quantity, oldData?.order_quantity)}
               {renderField('Purchase No', itemData.purchaseNo || itemData.purchase_no, oldData?.purchase_no)}
               {renderField('Size', itemData.size, oldData?.size)}
               {renderField('Color', itemData.color, oldData?.color)}
@@ -294,6 +297,7 @@ export default function ApprovalsPage() {
                     </td>
                     <td style={{ fontSize: 13 }}>
                       {req.type === 'CREATE_ITEM' && `New Item: ${req.data.name}`}
+                      {req.type === 'PENDING_ITEM' && `Pending Item: ${req.data.name}`}
                       {req.type === 'UPDATE_ITEM' && `Update Item: ${req.data.data?.name || req.data.name}`}
                       {req.type === 'STOCK_MOVEMENT' && `Stock ${req.data.type}: ${req.data.quantity} ${req.data.itemName || 'units'}`}
                       {req.type === 'CREATE_CHALLAN' && `New Challan: ${req.data.receiverName}`}

@@ -1,4 +1,5 @@
 const { dbPrepare, getSupabase, isCloudEnabled } = require('../connection');
+const { normalizeBuyerName } = require('../../utils/buyer-normalizer');
 
 const ItemsRepo = {
   async getAll(filters = {}) {
@@ -16,7 +17,7 @@ const ItemsRepo = {
       if (filters.purchaseNo) query = query.eq('purchase_no', filters.purchaseNo);
       if (filters.buyerName) query = query.eq('buyer_name', filters.buyerName);
       if (filters.search) {
-        query = query.or(`name.ilike.%${filters.search}%,item_code.ilike.%${filters.search}%,color.ilike.%${filters.search}%,buyer_name.ilike.%${filters.search}%,style_name.ilike.%${filters.search}%,purchase_no.ilike.%${filters.search}%,order_number.ilike.%${filters.search}%`);
+        query = query.or(`name.ilike.%${filters.search}%,item_code.ilike.%${filters.search}%,color.ilike.%${filters.search}%,size.ilike.%${filters.search}%,buyer_name.ilike.%${filters.search}%,style_name.ilike.%${filters.search}%,purchase_no.ilike.%${filters.search}%,order_number.ilike.%${filters.search}%`);
       }
       if (filters.lowStock) {
         query = query.lte('current_stock', 'min_stock_level');
@@ -39,7 +40,7 @@ const ItemsRepo = {
         return allData;
       }
 
-      const data = await fetchAll(query.order('name', { ascending: true }));
+      const data = await fetchAll(query.order('name', { ascending: true }).order('id', { ascending: true }));
       
       // Map Supabase relation format to match local format
       return data.map(i => ({
@@ -59,8 +60,8 @@ const ItemsRepo = {
     if (filters.purchaseNo) { where.push('i.purchase_no = ?'); params.push(filters.purchaseNo); }
     if (filters.buyerName) { where.push('i.buyer_name = ?'); params.push(filters.buyerName); }
     if (filters.search) {
-      where.push('(i.name LIKE ? OR i.item_code LIKE ? OR i.color LIKE ? OR i.buyer_name LIKE ? OR i.style_name LIKE ? OR i.purchase_no LIKE ? OR i.order_number LIKE ?)');
-      const s = `%${filters.search}%`; params.push(s, s, s, s, s, s, s);
+      where.push('(i.name LIKE ? OR i.item_code LIKE ? OR i.color LIKE ? OR i.size LIKE ? OR i.buyer_name LIKE ? OR i.style_name LIKE ? OR i.purchase_no LIKE ? OR i.order_number LIKE ?)');
+      const s = `%${filters.search}%`; params.push(s, s, s, s, s, s, s, s);
     }
     if (filters.lowStock) { where.push('i.current_stock <= i.min_stock_level'); }
     const w = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
@@ -90,18 +91,21 @@ const ItemsRepo = {
         .from('items')
         .select('*, categories(name)')
         .eq('is_active', true)
-        .or(`name.ilike.%${query}%,item_code.ilike.%${query}%,color.ilike.%${query}%,buyer_name.ilike.%${query}%,style_name.ilike.%${query}%,purchase_no.ilike.%${query}%,order_number.ilike.%${query}%`)
+        .or(`name.ilike.%${query}%,item_code.ilike.%${query}%,color.ilike.%${query}%,size.ilike.%${query}%,buyer_name.ilike.%${query}%,style_name.ilike.%${query}%,purchase_no.ilike.%${query}%,order_number.ilike.%${query}%`)
         .limit(50)
-        .order('name', { ascending: true });
+        .order('name', { ascending: true })
+        .order('id', { ascending: true });
       if (error) throw error;
       return data.map(i => ({ ...i, category_name: i.categories?.name }));
     }
     const s = `%${query}%`;
-    return dbPrepare(`SELECT i.*, c.name as category_name FROM items i LEFT JOIN categories c ON i.category_id = c.id WHERE i.is_active = 1 AND (i.name LIKE ? OR i.item_code LIKE ? OR i.color LIKE ? OR i.buyer_name LIKE ? OR i.style_name LIKE ? OR i.purchase_no LIKE ? OR i.order_number LIKE ?) ORDER BY i.name ASC LIMIT 50`).all(s, s, s, s, s, s, s);
+    return dbPrepare(`SELECT i.*, c.name as category_name FROM items i LEFT JOIN categories c ON i.category_id = c.id WHERE i.is_active = 1 AND (i.name LIKE ? OR i.item_code LIKE ? OR i.color LIKE ? OR i.size LIKE ? OR i.buyer_name LIKE ? OR i.style_name LIKE ? OR i.purchase_no LIKE ? OR i.order_number LIKE ?) ORDER BY i.name ASC LIMIT 50`).all(s, s, s, s, s, s, s, s);
   },
 
   async create(data) {
     const finalCode = data.itemCode || await this.getNextCode();
+    // Normalize buyer name to canonical format
+    const normalizedBuyer = data.buyerName ? normalizeBuyerName(data.buyerName) : null;
     
     if (isCloudEnabled()) {
       const { data: inserted, error } = await getSupabase()
@@ -118,7 +122,7 @@ const ItemsRepo = {
           current_stock: data.openingStock || 0,
           min_stock_level: data.minStockLevel || 0,
           notes: data.notes || null,
-          buyer_name: data.buyerName || null,
+          buyer_name: normalizedBuyer,
           style_name: data.styleName || null,
           purchase_no: data.purchaseNo || null,
           order_number: data.orderNumber || null,
@@ -134,11 +138,14 @@ const ItemsRepo = {
     }
 
     return dbPrepare(`INSERT INTO items (item_code, name, category_id, size, color, unit, supplier_id, opening_stock, current_stock, min_stock_level, notes, buyer_name, style_name, purchase_no, order_number, order_quantity, unit_price, currency, source_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-      finalCode, data.name, data.categoryId||null, data.size||null, data.color||null, data.unit||'pcs', data.supplierId||null, data.openingStock||0, data.openingStock||0, data.minStockLevel||0, data.notes||null, data.buyerName||null, data.styleName||null, data.purchaseNo||null, data.orderNumber||null, data.orderQuantity||0, data.unitPrice||0, data.currency||'BDT', data.sourceType||'SOURCE'
+      finalCode, data.name, data.categoryId||null, data.size||null, data.color||null, data.unit||'pcs', data.supplierId||null, data.openingStock||0, data.openingStock||0, data.minStockLevel||0, data.notes||null, normalizedBuyer, data.styleName||null, data.purchaseNo||null, data.orderNumber||null, data.orderQuantity||0, data.unitPrice||0, data.currency||'BDT', data.sourceType||'SOURCE'
     ).lastInsertRowid;
   },
 
   async update(id, data) {
+    // Normalize buyer name to canonical format
+    const normalizedBuyer = data.buyerName ? normalizeBuyerName(data.buyerName) : null;
+    
     if (isCloudEnabled()) {
       const { error } = await getSupabase()
         .from('items')
@@ -151,7 +158,7 @@ const ItemsRepo = {
           supplier_id: data.supplierId || null,
           min_stock_level: data.minStockLevel || 0,
           notes: data.notes || null,
-          buyer_name: data.buyerName || null,
+          buyer_name: normalizedBuyer,
           style_name: data.styleName || null,
           purchase_no: data.purchaseNo || null,
           order_number: data.orderNumber || null,
@@ -166,7 +173,7 @@ const ItemsRepo = {
       return true;
     }
     return dbPrepare(`UPDATE items SET name=?, category_id=?, size=?, color=?, unit=?, supplier_id=?, min_stock_level=?, notes=?, buyer_name=?, style_name=?, purchase_no=?, order_number=?, order_quantity=?, unit_price=?, currency=?, source_type=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(
-      data.name, data.categoryId||null, data.size||null, data.color||null, data.unit||'pcs', data.supplierId||null, data.minStockLevel||0, data.notes||null, data.buyerName||null, data.styleName||null, data.purchaseNo||null, data.orderNumber||null, data.orderQuantity||0, data.unitPrice||0, data.currency||'BDT', data.sourceType||'SOURCE', id
+      data.name, data.categoryId||null, data.size||null, data.color||null, data.unit||'pcs', data.supplierId||null, data.minStockLevel||0, data.notes||null, normalizedBuyer, data.styleName||null, data.purchaseNo||null, data.orderNumber||null, data.orderQuantity||0, data.unitPrice||0, data.currency||'BDT', data.sourceType||'SOURCE', id
     );
   },
 
@@ -355,13 +362,13 @@ const ItemsRepo = {
       // Fetching only required columns to reduce bandwidth
       const { data, error } = await getSupabase()
         .from('items')
-        .select('name, color, size, style_name, purchase_no, order_number, buyer_name')
+        .select('name, color, size, style_name, purchase_no, order_number, buyer_name, notes')
         .eq('is_active', true);
       
       if (error) throw error;
 
       // Efficient unique extraction
-      const res = { names: new Set(), colors: new Set(), sizes: new Set(), styles: new Set(), purchases: new Set(), orders: new Set(), buyers: new Set() };
+      const res = { names: new Set(), colors: new Set(), sizes: new Set(), styles: new Set(), purchases: new Set(), orders: new Set(), buyers: new Set(), notes: new Set() };
       
       data.forEach(i => {
         if (i.name) res.names.add(i.name);
@@ -371,7 +378,16 @@ const ItemsRepo = {
         if (i.purchase_no) res.purchases.add(i.purchase_no);
         if (i.order_number) res.orders.add(i.order_number);
         if (i.buyer_name) res.buyers.add(i.buyer_name);
+        if (i.notes) res.notes.add(i.notes);
       });
+
+      const { data: cData } = await getSupabase()
+        .from('challans')
+        .select('receiver_name')
+        .not('receiver_name', 'is', null)
+        .neq('receiver_name', '');
+      const receivers = new Set();
+      if (cData) cData.forEach(c => receivers.add(c.receiver_name));
 
       return {
         names: [...res.names].sort(),
@@ -381,6 +397,8 @@ const ItemsRepo = {
         purchases: [...res.purchases].sort(),
         orders: [...res.orders].sort(),
         buyers: [...res.buyers].sort(),
+        notes: [...res.notes].sort(),
+        receivers: [...receivers].sort(),
       };
     }
 
@@ -391,7 +409,9 @@ const ItemsRepo = {
     const purchases = dbPrepare("SELECT DISTINCT purchase_no FROM items WHERE is_active = 1 AND purchase_no IS NOT NULL AND purchase_no != '' ORDER BY purchase_no").all().map(r => r.purchase_no);
     const orders = dbPrepare("SELECT DISTINCT order_number FROM items WHERE is_active = 1 AND order_number IS NOT NULL AND order_number != '' ORDER BY order_number").all().map(r => r.order_number);
     const buyers = dbPrepare("SELECT DISTINCT buyer_name FROM items WHERE is_active = 1 AND buyer_name IS NOT NULL AND buyer_name != '' ORDER BY buyer_name").all().map(r => r.buyer_name);
-    return { names, colors, sizes, styles, purchases, orders, buyers };
+    const notes = dbPrepare("SELECT DISTINCT notes FROM items WHERE is_active = 1 AND notes IS NOT NULL AND notes != '' ORDER BY notes").all().map(r => r.notes);
+    const receivers = dbPrepare("SELECT DISTINCT receiver_name FROM challans WHERE receiver_name IS NOT NULL AND TRIM(receiver_name) != '' ORDER BY receiver_name").all().map(r => r.receiver_name);
+    return { names, colors, sizes, styles, purchases, orders, buyers, notes, receivers };
   },
 
   async getNextCode() {

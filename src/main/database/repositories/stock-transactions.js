@@ -2,7 +2,23 @@ const { dbPrepare, getSupabase, isCloudEnabled } = require('../connection');
 
 const StockTransactionsRepo = {
   async create(data) {
+    const OneMinuteAgo = new Date(Date.now() - 60000).toISOString();
     if (isCloudEnabled()) {
+      // duplicate check
+      const { data: duplicates } = await getSupabase()
+        .from('stock_transactions')
+        .select('id')
+        .eq('item_id', data.itemId)
+        .eq('type', data.type)
+        .eq('quantity', data.quantity)
+        .eq('created_by', data.createdBy || null)
+        .gte('created_at', OneMinuteAgo);
+        
+      if (duplicates && duplicates.length > 0) {
+        console.warn(`[StockTransactionsRepo] Duplicate transaction blocked for item ${data.itemId}`);
+        return duplicates[0].id;
+      }
+
       const { data: inserted, error } = await getSupabase()
         .from('stock_transactions')
         .insert([{
@@ -21,6 +37,15 @@ const StockTransactionsRepo = {
       if (error) throw error;
       return inserted.id;
     }
+
+    // duplicate check for local DB
+    const dup = dbPrepare(`SELECT id FROM stock_transactions WHERE item_id = ? AND type = ? AND quantity = ? AND (created_by = ? OR (created_by IS NULL AND ? IS NULL)) AND created_at >= ? LIMIT 1`).get(data.itemId, data.type, data.quantity, data.createdBy || null, data.createdBy || null, OneMinuteAgo);
+    
+    if (dup) {
+      console.warn(`[StockTransactionsRepo] Duplicate local transaction blocked for item ${data.itemId}`);
+      return dup.id;
+    }
+
     return dbPrepare(`INSERT INTO stock_transactions (item_id, type, quantity, stock_before, stock_after, challan_id, reference, notes, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
       data.itemId, data.type, data.quantity, data.stockBefore, data.stockAfter, data.challanId || null, data.reference || null, data.notes || null, data.createdBy || null
     ).lastInsertRowid;
@@ -98,7 +123,7 @@ const StockTransactionsRepo = {
       }
 
       // Fetch items first
-      let itemsQuery = supabase.from('items').select('*').eq('is_active', true).order('name');
+      let itemsQuery = supabase.from('items').select('*').eq('is_active', true).order('name').order('id');
       if (filters.search) {
         itemsQuery = itemsQuery.or(`name.ilike.%${filters.search}%,item_code.ilike.%${filters.search}%,style_name.ilike.%${filters.search}%,order_number.ilike.%${filters.search}%,purchase_no.ilike.%${filters.search}%`);
       }
@@ -114,6 +139,7 @@ const StockTransactionsRepo = {
       if (filters.dateFrom) txQuery = txQuery.gte('created_at', filters.dateFrom);
       if (filters.dateTo) txQuery = txQuery.lte('created_at', filters.dateTo + 'T23:59:59.999Z');
 
+      txQuery = txQuery.order('id');
       const txs = await fetchAll(txQuery);
 
       return items.map(i => {
@@ -150,7 +176,7 @@ const StockTransactionsRepo = {
     if (filters.buyerName) { whereConditions += ' AND i.buyer_name = ?'; whereParams.push(filters.buyerName); }
 
     const params = [...joinParams, ...whereParams];
-    return dbPrepare(`SELECT i.id, i.item_code, i.name as item_name, i.unit, i.unit_price, i.currency, i.style_name, i.purchase_no, i.order_number, i.size, i.color, i.buyer_name, COALESCE(SUM(CASE WHEN st.type = 'IN' THEN st.quantity ELSE 0 END), 0) as total_in, COALESCE(SUM(CASE WHEN st.type = 'OUT' THEN st.quantity ELSE 0 END), 0) as total_out, i.current_stock FROM items i LEFT JOIN stock_transactions st ON ${joinConditions} WHERE ${whereConditions} GROUP BY i.id ORDER BY i.name`).all(...params);
+    return dbPrepare(`SELECT i.id, i.item_code, i.name as item_name, i.unit, i.unit_price, i.currency, i.style_name, i.purchase_no, i.order_number, i.order_quantity, i.size, i.color, i.buyer_name, COALESCE(SUM(CASE WHEN st.type = 'IN' THEN st.quantity ELSE 0 END), 0) as total_in, COALESCE(SUM(CASE WHEN st.type = 'OUT' THEN st.quantity ELSE 0 END), 0) as total_out, i.current_stock FROM items i LEFT JOIN stock_transactions st ON ${joinConditions} WHERE ${whereConditions} GROUP BY i.id ORDER BY i.name`).all(...params);
   },
 
   async getDailySummary(date) {

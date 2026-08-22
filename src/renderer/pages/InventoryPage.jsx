@@ -1,18 +1,20 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import useStore from '../store/useStore';
-import { Plus, Search, Edit2, Trash2, ArrowDownCircle, ArrowUpCircle, Package, ArrowUpDown, ArrowUp, ArrowDown, Printer } from 'lucide-react';
+import { Plus, Search, Package, ArrowUpDown, ArrowUp, ArrowDown, Printer, Edit2, Trash2 } from 'lucide-react';
 
 export default function InventoryPage() {
-  const { addToast, showConfirm, categories, suppliers, units, setCategories, setSuppliers, setUnits, user, openModal } = useStore();
+  const { addToast, showConfirm, categories, setCategories, setSuppliers, setUnits, user, openModal } = useStore();
   const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [hasSearched, setHasSearched] = useState(false);
+  const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
   const [catFilter, setCatFilter] = useState('');
   const [styleFilter, setStyleFilter] = useState('');
   const [orderFilter, setOrderFilter] = useState('');
   const [purchaseFilter, setPurchaseFilter] = useState('');
-
   const [buyers, setBuyers] = useState([]);
+
   const [distinctValues, setDistinctValues] = useState({ names: [], colors: [], sizes: [], styles: [], purchases: [] });
   const [sortConfig, setSortConfig] = useState({ key: 'name', direction: 'asc' });
 
@@ -57,28 +59,62 @@ export default function InventoryPage() {
     </th>
   );
 
+  // Load filter dropdowns on mount
+  useEffect(() => {
+    const loadFilters = async () => {
+      try {
+        const [catsRes, dvRes, buyersRes, suppRes, unitsRes] = await Promise.all([
+          window.kadal.categories.getAll(),
+          window.kadal.items.getDistinctValues(),
+          window.kadal.buyers.getAll(),
+          window.kadal.suppliers.getAll(),
+          window.kadal.units.getAll(),
+        ]);
+        if (catsRes.success) setCategories(catsRes.data);
+        if (dvRes.success) setDistinctValues(dvRes.data);
+        if (buyersRes.success) setBuyers(buyersRes.data);
+        if (suppRes.success) setSuppliers(suppRes.data);
+        if (unitsRes.success) setUnits(unitsRes.data);
+      } catch (e) { /* silent */ }
+    };
+    loadFilters();
+  }, []);
+
   const loadData = useCallback(async () => {
+    // Only search when user has entered a query or selected a filter
+    const hasFilters = search || catFilter || styleFilter || orderFilter || purchaseFilter;
+    if (!hasFilters) {
+      setItems([]);
+      setHasSearched(false);
+      return;
+    }
     setLoading(true);
+    setHasSearched(true);
     try {
-      const [itemsRes, catsRes, suppRes, buyersRes, unitsRes, dvRes] = await Promise.all([
-        window.kadal.items.getAll({ search, categoryId: catFilter || undefined, styleName: styleFilter || undefined, orderNumber: orderFilter || undefined, purchaseNo: purchaseFilter || undefined }),
-        window.kadal.categories.getAll(),
-        window.kadal.suppliers.getAll(),
-        window.kadal.buyers.getAll(),
-        window.kadal.units.getAll(),
-        window.kadal.items.getDistinctValues(),
-      ]);
+      const itemsRes = await window.kadal.items.getAll({ search, categoryId: catFilter || undefined, styleName: styleFilter || undefined, orderNumber: orderFilter || undefined, purchaseNo: purchaseFilter || undefined });
       if (itemsRes.success) setItems(itemsRes.data);
-      if (catsRes.success) setCategories(catsRes.data);
-      if (suppRes.success) setSuppliers(suppRes.data);
-      if (buyersRes.success) setBuyers(buyersRes.data);
-      if (unitsRes.success) setUnits(unitsRes.data);
-      if (dvRes.success) setDistinctValues(dvRes.data);
     } catch (e) { addToast('error', 'Failed to load data'); }
     setLoading(false);
   }, [search, catFilter, styleFilter, orderFilter, purchaseFilter]);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  // Re-search when filters change (but only if a search has been done or a filter is selected)
+  useEffect(() => {
+    if (search || catFilter || styleFilter || orderFilter || purchaseFilter) {
+      loadData();
+    }
+  }, [catFilter, styleFilter, orderFilter, purchaseFilter, search]);
+
+  const handleSearch = (e) => {
+    e.preventDefault();
+    setSearch(searchInput);
+    if (!searchInput && !catFilter && !styleFilter && !orderFilter && !purchaseFilter) {
+      setItems([]);
+      setHasSearched(false);
+      return;
+    }
+    setHasSearched(true);
+    loadData();
+  };
 
   const handleDelete = async (item) => {
     const confirmed = await showConfirm({ title: 'Delete Item', message: `Are you sure you want to delete "${item.name}"? This action cannot be undone.`, type: 'danger', confirmText: 'Delete' });
@@ -91,11 +127,14 @@ export default function InventoryPage() {
   return (
     <div>
       <div className="toolbar">
-        <div className="toolbar-left">
-          <div className="search-bar">
-            <Search />
-            <input className="form-input" placeholder="Search name, style, order, purchase..." value={search} onChange={e => setSearch(e.target.value)} />
-          </div>
+        <div className="toolbar-left" style={{ flex: 1 }}>
+          <form onSubmit={handleSearch} style={{ display: 'flex', gap: 8, alignItems: 'center', flex: 1 }}>
+            <div className="search-bar" style={{ flex: 1, maxWidth: 400 }}>
+              <Search />
+              <input className="form-input" placeholder="Search name, code, style, order, purchase..." value={searchInput} onChange={e => setSearchInput(e.target.value)} />
+            </div>
+            <button type="submit" className="btn btn-primary">Search</button>
+          </form>
           <select className="form-select" value={catFilter} onChange={e => setCatFilter(e.target.value)} style={{ width: 'auto', minWidth: 150, padding: '8px 32px 8px 12px', fontSize: 13 }}>
             <option value="">All Categories</option>
             {categories.filter(c=>c.is_active).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -120,8 +159,14 @@ export default function InventoryPage() {
         </div>
       </div>
 
-      {loading ? <div className="loading"><div className="spinner"></div></div> : items.length === 0 ? (
-        <div className="empty-state"><Package size={48} /><h3>No items found</h3><p>Add your first inventory item to get started</p></div>
+      {loading ? <div className="loading"><div className="spinner"></div></div> : !hasSearched ? (
+        <div className="empty-state">
+          <Search size={48} strokeWidth={1} />
+          <h3>Search for items to view inventory</h3>
+          <p>Use the search bar or filters above to find items and check their current stock levels</p>
+        </div>
+      ) : items.length === 0 ? (
+        <div className="empty-state"><Package size={48} /><h3>No items found</h3><p>Try a different search term or filter</p></div>
       ) : (
         <div className="table-wrapper">
           <table className="data-table">
@@ -137,7 +182,7 @@ export default function InventoryPage() {
                 <SortHeader label="Stock" field="current_stock" className="text-right" />
                 <th className="text-right">Total Value</th>
                 <SortHeader label="Unit" field="unit" />
-                {(user?.permissions?.inventory === 'rw' || user?.permissions?.inventory === 'r') && <th>Actions</th>}
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -155,25 +200,17 @@ export default function InventoryPage() {
                   </td>
                   <td className="text-right text-mono">{item.currency === 'USD' ? '$' : '৳'}{Number((item.current_stock * (item.unit_price || 0))).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
                   <td style={{ color: 'var(--text-muted)' }}>{item.unit}</td>
-                {(user?.permissions?.inventory === 'rw' || user?.permissions?.inventory === 'r') && (
                   <td>
                     <div className="table-actions">
-                      {user?.permissions?.inventory === 'rw' && (
-                        <button className="btn btn-ghost btn-icon btn-sm" title="Stock IN" onClick={() => openModal('STOCK_MOVEMENT', { item, type: 'IN', onSaved: loadData })}><ArrowDownCircle size={15} color="var(--success)" /></button>
-                      )}
-                      {user?.permissions?.inventory === 'rw' && user?.roleName !== 'Inventory' && (
-                        <button className="btn btn-ghost btn-icon btn-sm" title="Stock OUT" onClick={() => openModal('STOCK_MOVEMENT', { item, type: 'OUT', onSaved: loadData })}><ArrowUpCircle size={15} color="var(--warning)" /></button>
-                      )}
                       <button className="btn btn-ghost btn-icon btn-sm" title="Print Barcode" onClick={() => openModal('BARCODE', item)}><Printer size={15} color="var(--text-color)" /></button>
-                      {user?.permissions?.inventory === 'rw' && (
-                        <>
-                          <button className="btn btn-ghost btn-icon btn-sm" title="Edit" onClick={() => openModal('ITEM_FORM', { item, buyers, distinctValues, onSaved: loadData })}><Edit2 size={15} /></button>
-                          <button className="btn btn-ghost btn-icon btn-sm" title="Delete" onClick={() => handleDelete(item)}><Trash2 size={15} color="var(--danger)" /></button>
-                        </>
+                      {(user?.roleName === 'Admin' || user?.roleName === 'Super Admin') && (
+                        <button className="btn btn-ghost btn-icon btn-sm" title="Edit" onClick={() => openModal('ITEM_FORM', { item, buyers, distinctValues, onSaved: loadData })}><Edit2 size={15} /></button>
+                      )}
+                      {user?.roleName === 'Super Admin' && (
+                        <button className="btn btn-ghost btn-icon btn-sm" title="Delete" onClick={() => handleDelete(item)}><Trash2 size={15} color="var(--danger)" /></button>
                       )}
                     </div>
                   </td>
-                )}
                 </tr>
               ))}
             </tbody>

@@ -207,6 +207,143 @@ function runMigrations(db) {
     db.run("INSERT INTO _migrations (name) VALUES ('023-add-warehouses-and-barcodes')");
     console.log('[DB] Migration 023-add-warehouses-and-barcodes applied successfully');
   }
+  // NEW MIGRATION: 024-add-wms-zones-and-bins
+  const applied24 = db.exec("SELECT * FROM _migrations WHERE name = '024-add-wms-zones-and-bins'");
+  if (applied24.length === 0 || applied24[0].values.length === 0) {
+    console.log('[DB] Running migration: 024-add-wms-zones-and-bins');
+    applyTwentyFourthMigration(db);
+    db.run("INSERT INTO _migrations (name) VALUES ('024-add-wms-zones-and-bins')");
+    console.log('[DB] Migration 024-add-wms-zones-and-bins applied successfully');
+  }
+
+  // NEW MIGRATION: 025-add-merchandiser-role
+  const applied25 = db.exec("SELECT * FROM _migrations WHERE name = '025-add-merchandiser-role'");
+  if (applied25.length === 0 || applied25[0].values.length === 0) {
+    console.log('[DB] Running migration: 025-add-merchandiser-role');
+    applyTwentyFifthMigration(db);
+    db.run("INSERT INTO _migrations (name) VALUES ('025-add-merchandiser-role')");
+    console.log('[DB] Migration 025-add-merchandiser-role applied successfully');
+  }
+
+  // NEW MIGRATION: 026-add-address-to-recipients
+  const applied26 = db.exec("SELECT * FROM _migrations WHERE name = '026-add-address-to-recipients'");
+  if (applied26.length === 0 || applied26[0].values.length === 0) {
+    console.log('[DB] Running migration: 026-add-address-to-recipients');
+    applyTwentySixthMigration(db);
+    db.run("INSERT INTO _migrations (name) VALUES ('026-add-address-to-recipients')");
+    console.log('[DB] Migration 026-add-address-to-recipients applied successfully');
+  }
+
+  // NEW MIGRATION: 027-add-requisitions
+  const applied27 = db.exec("SELECT * FROM _migrations WHERE name = '027-add-requisitions'");
+  if (applied27.length === 0 || applied27[0].values.length === 0) {
+    console.log('[DB] Running migration: 027-add-requisitions');
+    applyTwentySeventhMigration(db);
+    db.run("INSERT INTO _migrations (name) VALUES ('027-add-requisitions')");
+    console.log('[DB] Migration 027-add-requisitions applied successfully');
+  }
+
+  // NEW MIGRATION: 028-add-requisition-settings
+  const applied28 = db.exec("SELECT * FROM _migrations WHERE name = '028-add-requisition-settings'");
+  if (applied28.length === 0 || applied28[0].values.length === 0) {
+    console.log('[DB] Running migration: 028-add-requisition-settings');
+    applyTwentyEighthMigration(db);
+    db.run("INSERT INTO _migrations (name) VALUES ('028-add-requisition-settings')");
+    console.log('[DB] Migration 028-add-requisition-settings applied successfully');
+  }
+
+  // NEW MIGRATION: 029-add-produced-item-ids-to-issues
+  const applied29 = db.exec("SELECT * FROM _migrations WHERE name = '029-add-produced-item-ids-to-issues'");
+  if (applied29.length === 0 || applied29[0].values.length === 0) {
+    console.log('[DB] Running migration: 029-add-produced-item-ids-to-issues');
+    applyTwentyNinthMigration(db);
+    db.run("INSERT INTO _migrations (name) VALUES ('029-add-produced-item-ids-to-issues')");
+    console.log('[DB] Migration 029-add-produced-item-ids-to-issues applied successfully');
+  }
+
+  // NEW MIGRATION: 030-normalize-buyer-names
+  const applied30 = db.exec("SELECT * FROM _migrations WHERE name = '030-normalize-buyer-names'");
+  if (applied30.length === 0 || applied30[0].values.length === 0) {
+    console.log('[DB] Running migration: 030-normalize-buyer-names');
+    applyThirtiethMigration(db);
+    db.run("INSERT INTO _migrations (name) VALUES ('030-normalize-buyer-names')");
+    console.log('[DB] Migration 030-normalize-buyer-names applied successfully');
+  }
+}
+
+function applyTwentyNinthMigration(db) {
+  try { db.run(`ALTER TABLE issues ADD COLUMN produced_item_ids TEXT`); } catch (e) {}
+}
+
+function applyTwentySixthMigration(db) {
+  try { db.run(`ALTER TABLE recipients ADD COLUMN receiver_address TEXT`); } catch (e) {}
+}
+
+function applyTwentySeventhMigration(db) {
+  // Requisitions table
+  db.run(`CREATE TABLE IF NOT EXISTS requisitions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    requisition_no TEXT NOT NULL UNIQUE,
+    recipient_id INTEGER REFERENCES recipients(id),
+    requester_name TEXT,
+    department TEXT,
+    purpose TEXT,
+    status TEXT NOT NULL DEFAULT 'PENDING' CHECK(status IN ('PENDING','APPROVED','REJECTED','FULFILLED','CANCELLED')),
+    requested_by TEXT,
+    approved_by TEXT,
+    notes TEXT,
+    requisition_date DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_by INTEGER REFERENCES users(id),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    is_active INTEGER NOT NULL DEFAULT 1
+  )`);
+
+  // Requisition items table
+  db.run(`CREATE TABLE IF NOT EXISTS requisition_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    requisition_id INTEGER NOT NULL REFERENCES requisitions(id) ON DELETE CASCADE,
+    item_id INTEGER NOT NULL REFERENCES items(id),
+    requested_quantity REAL NOT NULL CHECK(requested_quantity > 0),
+    approved_quantity REAL NOT NULL DEFAULT 0,
+    issued_quantity REAL NOT NULL DEFAULT 0,
+    notes TEXT
+  )`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_requisition_items_req ON requisition_items(requisition_id)`);
+}
+
+function applyTwentyEighthMigration(db) {
+  // Requisition settings
+  db.run("INSERT OR IGNORE INTO settings (key, value, description) VALUES ('requisition_prefix', 'REQ', 'Requisition number prefix')");
+  db.run("INSERT OR IGNORE INTO settings (key, value, description) VALUES ('require_requisition_approval', 'false', 'Require approval before requisitions can be fulfilled')");
+
+  // Update all existing roles to include the requisition permission key
+  // Super Admin & Admin: rw, Operator: rw, Inventory: rw, Challan: none, Monitoring: r, Merchandiser: r
+  const roleUpdates = [
+    { name: 'Super Admin', requisition: 'rw' },
+    { name: 'Admin', requisition: 'rw' },
+    { name: 'Operator', requisition: 'rw' },
+    { name: 'Inventory', requisition: 'rw' },
+    { name: 'Challan', requisition: 'none' },
+    { name: 'Monitoring', requisition: 'r' },
+    { name: 'Merchandiser', requisition: 'r' },
+  ];
+  for (const { name, requisition } of roleUpdates) {
+    try {
+      const rows = db.exec(`SELECT permissions FROM roles WHERE name = '${name}'`);
+      if (rows.length > 0 && rows[0].values.length > 0) {
+        const perms = JSON.parse(rows[0].values[0][0] || '{}');
+        perms.requisition = requisition;
+        db.run(`UPDATE roles SET permissions = ? WHERE name = '${name}'`, [JSON.stringify(perms)]);
+      }
+    } catch (e) { console.error('[DB] Failed to update role permissions for', name, e.message); }
+  }
+}
+
+function applyTwentyFifthMigration(db) {
+  // Inventory: rw (allows managing items, but restricted in UI), Reports: r
+  const merchPerms = JSON.stringify({ inventory: 'rw', challan: 'none', reports: 'r', users: 'none', settings: 'none', backup: 'none', maintenance: 'none' });
+  db.run("INSERT OR IGNORE INTO roles (name, permissions) VALUES ('Merchandiser', ?)", [merchPerms]);
 }
 
 function applyTwentyFirstMigration(db) {
@@ -675,5 +812,110 @@ function applyTwentyThirdMigration(db) {
     db.run("UPDATE settings SET value = 'QR' WHERE key = 'barcode_format' AND value = 'CODE128'");
   } catch (e) {
     console.error('[DB] Failed to migrate barcode_format settings to QR:', e.message);
+  }
+}
+
+function applyTwentyFourthMigration(db) {
+  // Warehouse Zones
+  db.run(`CREATE TABLE IF NOT EXISTS warehouse_zones (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    warehouse_id INTEGER NOT NULL REFERENCES warehouses(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    type TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  // Warehouse Bins
+  db.run(`CREATE TABLE IF NOT EXISTS warehouse_bins (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    zone_id INTEGER NOT NULL REFERENCES warehouse_zones(id) ON DELETE CASCADE,
+    barcode TEXT UNIQUE,
+    name TEXT NOT NULL,
+    capacity REAL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  // Bin Stock
+  db.run(`CREATE TABLE IF NOT EXISTS bin_stock (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    bin_id INTEGER NOT NULL REFERENCES warehouse_bins(id) ON DELETE CASCADE,
+    item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+    quantity REAL NOT NULL DEFAULT 0,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(bin_id, item_id)
+  )`);
+}
+
+function applyThirtiethMigration(db) {
+  // Canonical buyer names mapping
+  const CANONICAL_BUYERS = [
+    'REGATTA', 'INTERSPORTS', 'REEBOK', 'UMBRO', 'SPORTISIMO',
+    'TEXTISS SAS', 'MEXICO DC', 'DARE2B', 'RAW GROUP',
+    'PWT BRANDS', 'XCEL BASPOKED LTD',
+  ];
+
+  function normalizeBuyerName(input) {
+    if (!input || typeof input !== 'string') return input;
+    const trimmed = input.trim();
+    if (!trimmed) return trimmed;
+    const upper = trimmed.toUpperCase();
+    const BUYER_ALIASES = { 'SPROTISIMO': 'SPORTISIMO' };
+    const exactMatch = CANONICAL_BUYERS.find(b => b === upper);
+    if (exactMatch) return exactMatch;
+    if (BUYER_ALIASES[upper]) return BUYER_ALIASES[upper];
+    const sorted = [...CANONICAL_BUYERS].sort((a, b) => b.length - a.length);
+    for (const canonical of sorted) {
+      if (upper.startsWith(canonical + ' ') || upper.startsWith(canonical + '-')) {
+        return canonical;
+      }
+    }
+    return upper;
+  }
+
+  // Step 1: Normalize buyer_name in items table
+  try {
+    const items = db.exec("SELECT id, buyer_name FROM items WHERE buyer_name IS NOT NULL AND buyer_name != ''");
+    if (items.length > 0 && items[0].values.length > 0) {
+      const updateStmt = db.prepare('UPDATE items SET buyer_name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?');
+      let fixed = 0;
+      for (const [id, buyerName] of items[0].values) {
+        const normalized = normalizeBuyerName(buyerName);
+        if (normalized !== buyerName) {
+          updateStmt.run([normalized, id]);
+          fixed++;
+        }
+      }
+      updateStmt.free();
+      console.log(`[DB] Migration 030: Normalized ${fixed} item buyer names`);
+    }
+  } catch (e) {
+    console.error('[DB] Migration 030: Error normalizing items:', e.message);
+  }
+
+  // Step 2: Normalize and deduplicate buyers table
+  try {
+    const buyers = db.exec('SELECT id, name FROM buyers ORDER BY id');
+    if (buyers.length > 0 && buyers[0].values.length > 0) {
+      const seen = {}; // normalizedName -> keepId
+      let renamed = 0, deleted = 0;
+      for (const [id, name] of buyers[0].values) {
+        const normalized = normalizeBuyerName(name);
+        if (!seen[normalized]) {
+          // First occurrence — keep this one, rename if needed
+          seen[normalized] = id;
+          if (name !== normalized) {
+            db.run('UPDATE buyers SET name = ? WHERE id = ?', [normalized, id]);
+            renamed++;
+          }
+        } else {
+          // Duplicate — delete it
+          db.run('DELETE FROM buyers WHERE id = ?', [id]);
+          deleted++;
+        }
+      }
+      console.log(`[DB] Migration 030: Renamed ${renamed} buyers, deleted ${deleted} duplicates`);
+    }
+  } catch (e) {
+    console.error('[DB] Migration 030: Error deduplicating buyers:', e.message);
   }
 }

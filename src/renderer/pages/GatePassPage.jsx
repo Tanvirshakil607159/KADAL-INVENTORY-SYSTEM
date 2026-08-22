@@ -165,29 +165,38 @@ export default function GatePassPage() {
 
             </div>
 
-            <div className="mt-4">
-              <label className="form-label">Selected Challans</label>
+          </div>
+
+          <div className="card" style={{ display: 'flex', flexDirection: 'column' }}>
+            <div className="card-header" style={{ marginBottom: '10px' }}><h3 className="card-title">Selected Challans Preview</h3></div>
+            <div style={{ height: '200px', overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', marginBottom: '24px', background: 'rgba(0,0,0,0.1)' }}>
               {selectedChallans.length === 0 ? (
-                <div className="empty-state-mini">No challans selected</div>
+                <div className="empty-state-mini" style={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
+                  No challans selected
+                </div>
               ) : (
-                <table className="data-table">
-                  <thead><tr><th>No.</th><th>Receiver</th><th>Action</th></tr></thead>
+                <table className="data-table" style={{ margin: 0 }}>
+                  <thead style={{ position: 'sticky', top: 0, zIndex: 10, background: 'var(--bg-tertiary)', boxShadow: '0 1px 3px rgba(0,0,0,0.2)' }}>
+                    <tr><th>No.</th><th>Receiver</th><th style={{ textAlign: 'right' }}>Action</th></tr>
+                  </thead>
                   <tbody>
                     {selectedChallans.map(c => (
                       <tr key={c.id}>
                         <td className="text-mono">{c.challan_number}</td>
                         <td>{c.receiver_name}</td>
-                        <td><button className="btn btn-ghost btn-sm" onClick={() => removeChallan(c.id)}><Trash2 size={14} color="var(--danger)" /></button></td>
+                        <td style={{ textAlign: 'right' }}>
+                          <button className="btn btn-ghost btn-sm" onClick={() => removeChallan(c.id)}>
+                            <Trash2 size={14} color="var(--danger)" />
+                          </button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               )}
             </div>
-          </div>
 
-          <div className="card">
-            <div className="card-header"><h3 className="card-title">Packaging Details</h3></div>
+            <div className="card-header" style={{ marginBottom: '16px' }}><h3 className="card-title">Packaging Details</h3></div>
             <div className="form-row">
               <div className="form-group">
                 <label className="form-label"><Box size={14} /> Poly Bags</label>

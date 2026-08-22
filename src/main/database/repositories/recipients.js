@@ -25,24 +25,24 @@ const RecipientsRepo = {
     return dbPrepare('SELECT * FROM recipients WHERE id = ?').get(id);
   },
 
-  async create({ name, type, contactInfo }) {
+  async create({ name, type, contactInfo, address }) {
     if (isCloudEnabled()) {
       const { data, error } = await getSupabase().from('recipients')
-        .insert([{ name, type, contact_info: contactInfo || null }]).select().single();
+        .insert([{ name, type, contact_info: contactInfo || null, receiver_address: address || null }]).select().single();
       if (error) throw error;
       return data.id;
     }
-    return dbPrepare('INSERT INTO recipients (name, type, contact_info) VALUES (?, ?, ?)').run(name, type, contactInfo || null).lastInsertRowid;
+    return dbPrepare('INSERT INTO recipients (name, type, contact_info, receiver_address) VALUES (?, ?, ?, ?)').run(name, type, contactInfo || null, address || null).lastInsertRowid;
   },
 
-  async update(id, { name, type, contactInfo }) {
+  async update(id, { name, type, contactInfo, address }) {
     if (isCloudEnabled()) {
       const { error } = await getSupabase().from('recipients')
-        .update({ name, type, contact_info: contactInfo || null }).eq('id', id);
+        .update({ name, type, contact_info: contactInfo || null, receiver_address: address || null }).eq('id', id);
       if (error) throw error;
       return true;
     }
-    return dbPrepare('UPDATE recipients SET name = ?, type = ?, contact_info = ? WHERE id = ?').run(name, type, contactInfo || null, id);
+    return dbPrepare('UPDATE recipients SET name = ?, type = ?, contact_info = ?, receiver_address = ? WHERE id = ?').run(name, type, contactInfo || null, address || null, id);
   },
 
   async delete(id) {

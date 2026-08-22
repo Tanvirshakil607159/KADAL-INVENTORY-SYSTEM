@@ -14,12 +14,27 @@ console.log(`[Update] Bumping version from ${pkg.version} to ${newVersion}...`);
 pkg.version = newVersion;
 fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2));
 
-console.log(`[Update] Starting build and release process for v${newVersion}...`);
+const cwd = path.join(__dirname, '..');
+
+console.log(`[Update] Committing changes and creating tag v${newVersion}...`);
 try {
-  // Use cmd /c for Windows compatibility
-  execSync('cmd /c "npm run release"', { stdio: 'inherit', cwd: path.join(__dirname, '..') });
-  console.log(`\n[Success] Version ${newVersion} has been published successfully!`);
-  console.log(`[Success] Installer copied to installers/ folder.`);
+  // Stage all changes
+  execSync('git add .', { stdio: 'inherit', cwd });
+  
+  // Commit with a standard message
+  execSync(`git commit -m "chore: release v${newVersion}"`, { stdio: 'inherit', cwd });
+  
+  // Create a new git tag
+  execSync(`git tag v${newVersion}`, { stdio: 'inherit', cwd });
+  
+  // Push the commit and the tag to GitHub
+  console.log(`[Update] Pushing to GitHub to trigger GitHub Actions...`);
+  execSync('git push origin main', { stdio: 'inherit', cwd });
+  execSync(`git push origin v${newVersion}`, { stdio: 'inherit', cwd });
+
+  console.log(`\n[Success] Version ${newVersion} pushed to GitHub successfully!`);
+  console.log(`[Success] GitHub Actions will now build and publish the release in the background.`);
+  console.log(`[Success] You can check the progress in the 'Actions' tab of your GitHub repository.`);
 } catch (error) {
   console.error('\n[Error] Update failed:', error.message);
   process.exit(1);

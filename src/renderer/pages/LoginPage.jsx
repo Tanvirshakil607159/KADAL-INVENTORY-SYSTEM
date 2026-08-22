@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import useStore from '../store/useStore';
-import { Lock, User, LogIn, ShieldCheck, Eye, EyeOff } from 'lucide-react';
+import { Lock, User, LogIn, ShieldCheck, Eye, EyeOff, Database } from 'lucide-react';
 import logo from '../assets/logo.png';
 
 export default function LoginPage() {
@@ -98,11 +98,23 @@ export default function LoginPage() {
   };
 
   const [version, setVersion] = useState('');
+  const [supabaseUrl, setSupabaseUrl] = useState('');
+
   useEffect(() => {
     window.kadal.system.getVersion().then(res => {
       if (res.success) setVersion(res.data);
     });
+    window.kadal.settings.getAll().then(res => {
+      if (res?.success && res.data.supabase_url) {
+        setSupabaseUrl(res.data.supabase_url);
+      }
+    });
   }, []);
+
+  const handleReconfigureCloud = async () => {
+    await window.kadal.settings.setBulk({ supabase_url: '', supabase_key: '' });
+    window.location.reload();
+  };
 
   return (
     <div className="login-wrapper">
@@ -258,6 +270,26 @@ export default function LoginPage() {
             <button className="btn-link" onClick={() => setIsRegister(!isRegister)}>
               {isRegister ? 'Already have an account? Sign In' : "Don't have an account? Create one"}
             </button>
+          </div>
+
+          <div style={{ marginTop: '20px', padding: '15px', backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+              <Database size={16} className="text-muted" />
+              <span style={{ fontSize: '13px', fontWeight: '500', color: 'var(--text-color)' }}>Supabase Database Connection</span>
+            </div>
+            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '12px', wordBreak: 'break-all' }}>
+              {supabaseUrl || 'Not configured'}
+            </div>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button 
+                type="button"
+                className="btn btn-outline btn-sm" 
+                style={{ flex: 1, fontSize: '12px' }}
+                onClick={handleReconfigureCloud}
+              >
+                Reconfigure Cloud
+              </button>
+            </div>
           </div>
 
           <div className="login-footer-modern">

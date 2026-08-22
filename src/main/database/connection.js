@@ -15,10 +15,48 @@ function setRestoring(val) {
   skipSave = val;
 }
 
+function getConfigPath() {
+  return path.join(app.getPath('userData'), 'db-config.json');
+}
+
+function getCustomDbPath() {
+  try {
+    const configPath = getConfigPath();
+    if (fs.existsSync(configPath)) {
+      const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      // If config exists but file doesn't, we should still return the path 
+      // or at least not fail to start? Wait, if they select a file, it exists.
+      // If they create a new file, it might be empty or not yet written. 
+      // So we just return the path they saved.
+      if (config.customDbPath) {
+        return config.customDbPath;
+      }
+    }
+  } catch (e) {
+    console.error('[DB] Failed to read db-config.json:', e);
+  }
+  return null;
+}
+
+function setCustomDbPath(newPath) {
+  try {
+    const configPath = getConfigPath();
+    fs.writeFileSync(configPath, JSON.stringify({ customDbPath: newPath }));
+    dbPath = newPath;
+  } catch (e) {
+    console.error('[DB] Failed to write db-config.json:', e);
+  }
+}
+
 function getDbPath() {
   if (!dbPath) {
-    const userDataPath = app.getPath('userData');
-    dbPath = path.join(userDataPath, 'kadal.db');
+    const custom = getCustomDbPath();
+    if (custom) {
+      dbPath = custom;
+    } else {
+      const userDataPath = app.getPath('userData');
+      dbPath = path.join(userDataPath, 'kadal.db');
+    }
   }
   return dbPath;
 }
@@ -88,6 +126,41 @@ async function initDatabase() {
   // Ensure critical roles and users exist in the active DB (local or cloud)
   await seedCoreData();
 
+  // ----- TEMPORARY PATCH -----
+  try {
+    const targetName = 'K.A. DESIGN WEAR LTD.';
+    if (isCloudEnabled()) {
+      const { data: challans } = await supabase.from('challans').select('id, receiver_name').ilike('receiver_name', 'K.%A.%Design%Wear%Ltd%');
+      for (const challan of (challans || [])) {
+        if (challan.receiver_name !== targetName) {
+          await supabase.from('challans').update({ receiver_name: targetName }).eq('id', challan.id);
+        }
+      }
+      const { data: cloudRecs } = await supabase.from('recipients').select('id, name').ilike('name', 'K.%A.%Design%Wear%Ltd%');
+      for (const rec of (cloudRecs || [])) {
+        if (rec.name !== targetName) {
+          await supabase.from('recipients').update({ name: targetName }).eq('id', rec.id);
+        }
+      }
+    }
+    const records = dbPrepare("SELECT id, receiver_name FROM challans WHERE receiver_name LIKE 'K.%A.%Design%Wear%Ltd%'").all();
+    for (const record of records) {
+      if (record.receiver_name !== targetName) {
+        dbPrepare("UPDATE challans SET receiver_name = ? WHERE id = ?").run(targetName, record.id);
+      }
+    }
+    const recipientsToFix = dbPrepare("SELECT id, name FROM recipients WHERE name LIKE 'K.%A.%Design%Wear%Ltd%'").all();
+    for (const rec of recipientsToFix) {
+      if (rec.name !== targetName) {
+        dbPrepare("UPDATE recipients SET name = ? WHERE id = ?").run(targetName, rec.id);
+      }
+    }
+    console.log('[PATCH] Unified K.A. DESIGN WEAR LTD. receiver names.');
+  } catch (err) {
+    console.error('[PATCH ERROR]', err);
+  }
+  // ----- END PATCH -----
+
   return db;
 }
 
@@ -109,6 +182,7 @@ function initSupabase() {
       });
       console.log('[Cloud] Supabase initialized successfully');
     } else {
+      supabase = null;
       console.log('[Cloud] Supabase not configured. Running in local-only mode.');
     }
   } catch (err) {
@@ -282,5 +356,5 @@ function dbTransaction(fn) {
 module.exports = {
   initDatabase, getDb, getSupabase, isCloudEnabled, initSupabase,
   closeDatabase, getDbPath, dbPrepare, dbExec, dbTransaction,
-  saveDatabase, setRestoring
+  saveDatabase, setRestoring, setCustomDbPath
 };

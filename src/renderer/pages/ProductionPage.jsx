@@ -101,11 +101,8 @@ function ProductionEntryTab({ addToast, user }) {
   const [selectedIssue, setSelectedIssue] = useState(null);
   const [issueItems, setIssueItems] = useState([]);
   const [allItems, setAllItems] = useState([]);
-  const [searchItemQuery, setSearchItemQuery] = useState('');
-  const [selectedProduct, setSelectedProduct] = useState(null);
-
-  const [productionQty, setProductionQty] = useState('');
-  const [wastageQty, setWastageQty] = useState('');
+  const [producedProducts, setProducedProducts] = useState([]);
+  const [entryMode, setEntryMode] = useState('fractional'); // 'fractional' or 'reconciliation'
   const [remarks, setRemarks] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -139,8 +136,7 @@ function ProductionEntryTab({ addToast, user }) {
     if (!issueId) {
       setSelectedIssue(null);
       setIssueItems([]);
-      setSelectedProduct(null);
-      setSearchItemQuery('');
+      setProducedProducts([]);
       return;
     }
 
@@ -162,25 +158,92 @@ function ProductionEntryTab({ addToast, user }) {
         }).filter(item => item.remaining > 0);
         setIssueItems(formattedItems);
 
-        // Auto-select the expected produced finished product linked in the issue!
-        if (res.data.produced_item_id) {
-          const matchedProd = allItems.find(it => it.id === res.data.produced_item_id);
-          if (matchedProd) {
-            setSelectedProduct(matchedProd);
-            setSearchItemQuery(matchedProd.name);
-          } else {
-            const itemFetch = await window.kadal.items.getById(res.data.produced_item_id);
-            if (itemFetch?.success) {
-              setSelectedProduct(itemFetch.data);
-              setSearchItemQuery(itemFetch.data.name);
+        // ---- Robustly gather ALL linked target product IDs ----
+        let prodIds = [];
+
+        // Source 1: Backend already populated produced_items array
+        if (res.data.produced_items && res.data.produced_items.length > 0) {
+          prodIds = res.data.produced_items.map(p => Number(p.id)).filter(Boolean);
+        }
+
+        // Source 2: produced_item_ids field (JSON array string or array)
+        if (prodIds.length === 0 && res.data.produced_item_ids) {
+          try {
+            const parsed = typeof res.data.produced_item_ids === 'string'
+              ? JSON.parse(res.data.produced_item_ids)
+              : res.data.produced_item_ids;
+            if (Array.isArray(parsed)) {
+              prodIds = parsed.map(Number).filter(Boolean);
+            }
+          } catch (e) { /* ignore parse error */ }
+        }
+
+        // Source 3: Remarks tag [PRODUCED_ITEM_IDS:1,2,3] — check both cleaned and raw remarks
+        if (prodIds.length === 0) {
+          const remarksToCheck = res.data._raw_remarks || res.data.remarks || '';
+          const match = String(remarksToCheck).match(/\[PRODUCED_ITEM_IDS:([0-9,]+)\]/);
+          if (match && match[1]) {
+            prodIds = match[1].split(',').map(Number).filter(Boolean);
+          }
+        }
+
+        // Source 4: Single produced_item_id fallback
+        if (prodIds.length === 0 && res.data.produced_item_id) {
+          prodIds = [Number(res.data.produced_item_id)];
+        }
+
+        // Source 5: produced_item object fallback
+        if (prodIds.length === 0 && res.data.produced_item?.id) {
+          prodIds = [Number(res.data.produced_item.id)];
+        }
+
+        // De-duplicate
+        prodIds = [...new Set(prodIds)];
+
+        console.log('[Production] Issue', issueId, '→ extracted prodIds:', prodIds, '| produced_items:', res.data.produced_items?.length, '| produced_item_ids:', res.data.produced_item_ids, '| produced_item_id:', res.data.produced_item_id);
+
+        // Build the linked items list with full details
+        let linkedItems = [];
+        if (prodIds.length > 0) {
+          // If backend already gave us produced_items, use those enriched with allItems
+          const backendMap = {};
+          (res.data.produced_items || []).forEach(p => { backendMap[String(p.id)] = p; });
+
+          for (const pid of prodIds) {
+            const backendItem = backendMap[String(pid)];
+            const localItem = allItems.find(it => String(it.id) === String(pid));
+            
+            if (backendItem || localItem) {
+              const base = backendItem || {};
+              const full = localItem || {};
+              linkedItems.push({
+                ...base,
+                ...full,
+                id: pid,
+                prodQty: '',
+                wastQty: '',
+                current_stock: full.current_stock ?? base.current_stock ?? 0,
+                unit: full.unit || base.unit || 'Pcs'
+              });
+            } else {
+              // Neither backend nor local cache has this item — fetch it directly
+              try {
+                const itemFetch = await window.kadal.items.getById(pid);
+                if (itemFetch?.success && itemFetch.data) {
+                  linkedItems.push({ ...itemFetch.data, prodQty: '', wastQty: '' });
+                }
+              } catch (fetchErr) {
+                console.warn('[Production] Could not fetch item', pid, fetchErr);
+              }
             }
           }
-        } else {
-          setSelectedProduct(null);
-          setSearchItemQuery('');
         }
+
+        console.log('[Production] Final linkedItems:', linkedItems.length, linkedItems.map(i => i.name));
+        setProducedProducts(linkedItems);
       }
     } catch (e) {
+      console.error('[Production] handleIssueChange error:', e);
       addToast('error', 'Failed to load issue details');
     }
   };
@@ -196,79 +259,83 @@ function ProductionEntryTab({ addToast, user }) {
     updated[idx].wastageQty = val === '' ? '' : Number(val);
     setIssueItems(updated);
   };
-
-  // Filter items for searchable dropdown
-  const filteredProducts = allItems.filter(item => 
-    item.name.toLowerCase().includes(searchItemQuery.toLowerCase()) ||
-    item.item_code.toLowerCase().includes(searchItemQuery.toLowerCase())
-  ).slice(0, 15);
+  const handleProductChange = (idx, field, value) => {
+    const updated = [...producedProducts];
+    updated[idx][field] = value;
+    setProducedProducts(updated);
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!selectedIssueId) return addToast('error', 'Select a Factory Issue');
-    if (!selectedProduct) return addToast('error', 'Select a produced finished product');
-    if (!productionQty || Number(productionQty) <= 0) return addToast('error', 'Enter a valid production quantity');
+    if (producedProducts.length === 0) return addToast('error', 'No target finished products were linked to this issue. You cannot log production.');
+    
+    const validProducts = producedProducts.filter(p => Number(p.prodQty) > 0 || Number(p.wastQty) > 0);
+    if (validProducts.length === 0) {
+      return addToast('error', 'Enter production or wastage quantity for at least one target product');
+    }
 
     // Validate consumed and wastage quantities
     const consumptionList = [];
-    for (const item of issueItems) {
-      const cQty = item.consumedQty === '' ? 0 : Number(item.consumedQty);
-      const wQty = item.wastageQty === '' ? 0 : Number(item.wastageQty);
-      
-      if (cQty < 0) {
-        return addToast('error', `Consumption quantity cannot be negative for ${item.item_name}`);
+    if (entryMode === 'reconciliation') {
+      for (const item of issueItems) {
+        const cQty = item.consumedQty === '' ? 0 : Number(item.consumedQty);
+        const wQty = item.wastageQty === '' ? 0 : Number(item.wastageQty);
+        
+        if (cQty < 0) {
+          return addToast('error', `Consumption quantity cannot be negative for ${item.item_name}`);
+        }
+        if (wQty < 0) {
+          return addToast('error', `Wastage quantity cannot be negative for ${item.item_name}`);
+        }
+        if (cQty + wQty > item.remaining) {
+          return addToast('error', `Sum of consume (${cQty}) and wastage (${wQty}) cannot exceed remaining outstanding (${item.remaining}) for ${item.item_name}`);
+        }
+        
+        const returnQty = Math.max(0, item.remaining - (cQty + wQty));
+        if (cQty > 0 || wQty > 0 || returnQty > 0) {
+          consumptionList.push({
+            issueItemId: item.id,
+            consumedQty: cQty,
+            wastageQty: wQty,
+            returnQty: returnQty
+          });
+        }
       }
-      if (wQty < 0) {
-        return addToast('error', `Wastage quantity cannot be negative for ${item.item_name}`);
-      }
-      if (cQty + wQty > item.remaining) {
-        return addToast('error', `Sum of consume (${cQty}) and wastage (${wQty}) cannot exceed remaining outstanding (${item.remaining}) for ${item.item_name}`);
-      }
-      
-      const returnQty = Math.max(0, item.remaining - (cQty + wQty));
-      if (cQty > 0 || wQty > 0 || returnQty > 0) {
-        consumptionList.push({
-          issueItemId: item.id,
-          consumedQty: cQty,
-          wastageQty: wQty,
-          returnQty: returnQty
-        });
-      }
-    }
 
-    if (consumptionList.length === 0) {
-      const ok = await showConfirm({
-        title: 'Zero Raw Materials Consumed',
-        message: 'You have logged 0 raw material consumption for this production. Are you sure you want to proceed?',
-        confirmText: 'Yes, Proceed',
-        danger: false
-      });
-      if (!ok) return;
+      if (consumptionList.length === 0) {
+        const ok = await showConfirm({
+          title: 'Zero Raw Materials Consumed',
+          message: 'You have logged 0 raw material consumption for this production. Are you sure you want to proceed?',
+          confirmText: 'Yes, Proceed',
+          danger: false
+        });
+        if (!ok) return;
+      }
     }
 
     setSubmitting(true);
     try {
-      const res = await window.kadal.production.create({
+      const res = await window.kadal.production.createBatch({
         issueId: Number(selectedIssueId),
-        productItemId: selectedProduct.id,
-        productName: selectedProduct.name,
-        productionQuantity: Number(productionQty),
-        wastageQuantity: Number(wastageQty || 0),
+        producedProducts: validProducts.map(p => ({
+          productItemId: p.id,
+          productName: p.name,
+          productionQuantity: Number(p.prodQty || 0),
+          wastageQuantity: Number(p.wastQty || 0)
+        })),
         items: consumptionList,
-        remarks: remarks || `Produced finished product from issue #${selectedIssue?.issue_id}`,
+        remarks: remarks || `Produced finished products from issue #${selectedIssue?.issue_id}`,
         createdBy: user?.id
       });
 
       if (res?.success) {
-        addToast('success', `Production run successfully logged! Stock updated for "${selectedProduct.name}" (+${productionQty}).`);
+        addToast('success', `Production batch successfully logged!`);
         // Reset form
         setSelectedIssueId('');
         setSelectedIssue(null);
         setIssueItems([]);
-        setSelectedProduct(null);
-        setSearchItemQuery('');
-        setProductionQty('');
-        setWastageQty('');
+        setProducedProducts([]);
         setRemarks('');
         loadInitialData();
       } else {
@@ -282,7 +349,35 @@ function ProductionEntryTab({ addToast, user }) {
   };
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      {/* Mode Selector */}
+      <div className="card" style={{ padding: '16px 20px', display: 'flex', gap: 20, alignItems: 'center' }}>
+        <h3 style={{ margin: 0, fontSize: 16 }}>Entry Mode:</h3>
+        <div style={{ display: 'flex', gap: 12 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+            <input 
+              type="radio" 
+              name="entryMode" 
+              value="fractional" 
+              checked={entryMode === 'fractional'} 
+              onChange={() => setEntryMode('fractional')} 
+            />
+            <strong>Fractional (Output Only)</strong>
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+            <input 
+              type="radio" 
+              name="entryMode" 
+              value="reconciliation" 
+              checked={entryMode === 'reconciliation'} 
+              onChange={() => setEntryMode('reconciliation')} 
+            />
+            <strong>Final Reconciliation (Consume Materials)</strong>
+          </label>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
       {/* LEFT: Select Issue and consumption */}
       <div className="card" style={{ padding: 20 }}>
         <h3 style={{ marginTop: 0, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -313,71 +408,84 @@ function ProductionEntryTab({ addToast, user }) {
               <div><strong>Remarks:</strong> {selectedIssue.remarks || 'None'}</div>
             </div>
 
-            <h4 style={{ margin: '0 0 10px 0' }}>Raw Materials Issued</h4>
-            <div className="table-wrapper" style={{ maxHeight: 260, overflowY: 'auto' }}>
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Raw Material</th>
-                    <th style={{ textAlign: 'right' }}>Issued</th>
-                    <th style={{ textAlign: 'right' }}>Remaining</th>
-                    <th style={{ width: 100, textAlign: 'right' }}>Consume Qty</th>
-                    <th style={{ width: 100, textAlign: 'right' }}>Wastage Qty</th>
-                    <th style={{ width: 100, textAlign: 'right' }}>Return Qty</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {issueItems.length === 0 ? (
-                    <tr><td colSpan="6" className="text-center">No raw material items in this issue</td></tr>
-                  ) : (
-                    issueItems.map((item, idx) => (
-                       <tr key={item.id}>
-                        <td>
-                          <div style={{ fontWeight: 600 }}>{item.item_name}</div>
-                          <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{item.item_code}</div>
-                        </td>
-                        <td className="text-right text-mono">{item.quantity} {item.unit}</td>
-                        <td className="text-right text-mono fw-bold" style={{ color: 'var(--accent)' }}>
-                          {item.remaining} {item.unit}
-                        </td>
-                        <td>
-                          <input 
-                            type="number" 
-                            className="form-input text-right text-mono"
-                            style={{ padding: '4px 8px', fontSize: 13 }}
-                            value={item.consumedQty}
-                            min={0}
-                            max={item.remaining}
-                            onChange={e => handleConsumedQtyChange(idx, e.target.value)}
-                          />
-                        </td>
-                        <td>
-                          <input 
-                            type="number" 
-                            className="form-input text-right text-mono"
-                            style={{ padding: '4px 8px', fontSize: 13 }}
-                            value={item.wastageQty}
-                            min={0}
-                            max={item.remaining}
-                            onChange={e => handleWastageQtyChange(idx, e.target.value)}
-                          />
-                        </td>
-                        <td>
-                          <input 
-                            type="number" 
-                            className="form-input text-right text-mono"
-                            style={{ padding: '4px 8px', fontSize: 13, background: 'var(--bg-hover)', color: 'var(--text-muted)' }}
-                            value={Math.max(0, item.remaining - ((item.consumedQty || 0) + (item.wastageQty || 0)))}
-                            readOnly
-                            disabled
-                          />
-                        </td>
+            {entryMode === 'reconciliation' ? (
+              <>
+                <h4 style={{ margin: '0 0 10px 0' }}>Raw Materials Issued</h4>
+                <div className="table-wrapper" style={{ maxHeight: 260, overflowY: 'auto' }}>
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Raw Material</th>
+                        <th style={{ textAlign: 'right' }}>Issued</th>
+                        <th style={{ textAlign: 'right' }}>Remaining</th>
+                        <th style={{ width: 100, textAlign: 'right' }}>Consume Qty</th>
+                        <th style={{ width: 100, textAlign: 'right' }}>Wastage Qty</th>
+                        <th style={{ width: 100, textAlign: 'right' }}>Return Qty</th>
                       </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
+                    </thead>
+                    <tbody>
+                      {issueItems.length === 0 ? (
+                        <tr><td colSpan="6" className="text-center">No raw material items in this issue</td></tr>
+                      ) : (
+                        issueItems.map((item, idx) => (
+                           <tr key={item.id}>
+                            <td>
+                              <div style={{ fontWeight: 600 }}>{item.item_name}</div>
+                              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                                Code: {item.item_code || '-'}
+                                {item.order_quantity != null && item.order_quantity > 0 ? ` | Order Qty: ${item.order_quantity}` : ''}
+                                {item.style_no ? ` | Style: ${item.style_no}` : ''}
+                              </div>
+                            </td>
+                            <td className="text-right text-mono">{item.quantity} {item.unit}</td>
+                            <td className="text-right text-mono fw-bold" style={{ color: 'var(--accent)' }}>
+                              {item.remaining} {item.unit}
+                            </td>
+                            <td>
+                              <input 
+                                type="number" 
+                                className="form-input text-right text-mono"
+                                style={{ padding: '4px 8px', fontSize: 13 }}
+                                value={item.consumedQty}
+                                min={0}
+                                max={item.remaining}
+                                onChange={e => handleConsumedQtyChange(idx, e.target.value)}
+                              />
+                            </td>
+                            <td>
+                              <input 
+                                type="number" 
+                                className="form-input text-right text-mono"
+                                style={{ padding: '4px 8px', fontSize: 13 }}
+                                value={item.wastageQty}
+                                min={0}
+                                max={item.remaining}
+                                onChange={e => handleWastageQtyChange(idx, e.target.value)}
+                              />
+                            </td>
+                            <td>
+                              <input 
+                                type="number" 
+                                className="form-input text-right text-mono"
+                                style={{ padding: '4px 8px', fontSize: 13, background: 'var(--bg-hover)', color: 'var(--text-muted)' }}
+                                value={Math.max(0, item.remaining - ((item.consumedQty || 0) + (item.wastageQty || 0)))}
+                                readOnly
+                                disabled
+                              />
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            ) : (
+              <div style={{ padding: 16, background: 'rgba(100, 150, 255, 0.1)', color: 'var(--text-muted)', borderRadius: 6, fontSize: 13, marginTop: 20 }}>
+                <Info size={16} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 8, color: 'var(--accent)' }} />
+                Raw material consumption is hidden in Fractional mode. Use this mode to log daily finished goods. Switch to Final Reconciliation when the order is complete.
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -389,97 +497,77 @@ function ProductionEntryTab({ addToast, user }) {
         </h3>
 
         <form onSubmit={handleSubmit}>
-          <div style={{ marginBottom: 16, position: 'relative' }}>
-            <label className="form-label">Search & Select Produced Item *</label>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <input 
-                type="text" 
-                className="form-input" 
-                placeholder="Type item name or code to search..."
-                value={searchItemQuery}
-                onChange={e => setSearchItemQuery(e.target.value)}
-              />
-              {selectedProduct && (
-                <button 
-                  type="button" 
-                  className="btn btn-outline" 
-                  onClick={() => { setSelectedProduct(null); setSearchItemQuery(''); }}
-                >
-                  Clear Selection
-                </button>
-              )}
+          {producedProducts.length > 0 ? (
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent)', marginBottom: 8 }}>
+                Enter production quantities for the linked target finished products:
+              </div>
+              <div className="table-wrapper" style={{ overflow: 'visible' }}>
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Finished Product</th>
+                      <th style={{ width: 140 }}>Production Quantity *</th>
+                      <th style={{ width: 140 }}>Wastage Quantity</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {producedProducts.map((pItem, pIdx) => (
+                      <tr key={pItem.id || pIdx}>
+                        <td>
+                          <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--success)' }}>{pItem.name}</div>
+                          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                            Code: {pItem.item_code || '-'} | Stock: {pItem.current_stock ?? 0} {pItem.unit || 'Pcs'}
+                            {pItem.order_quantity != null && pItem.order_quantity > 0 ? ` | Order Qty: ${pItem.order_quantity}` : ''}
+                            {pItem.style_name || pItem.style_no ? ` | Style: ${pItem.style_name || pItem.style_no}` : ''}
+                          </div>
+                        </td>
+                        <td>
+                          <input 
+                            type="number" 
+                            className="form-input text-mono" 
+                            style={{ padding: '6px 8px', fontSize: 13 }}
+                            placeholder="0"
+                            value={pItem.prodQty}
+                            min={0}
+                            onChange={e => handleProductChange(pIdx, 'prodQty', e.target.value)}
+                          />
+                        </td>
+                        <td>
+                          <input 
+                            type="number" 
+                            className="form-input text-mono" 
+                            style={{ padding: '6px 8px', fontSize: 13 }}
+                            placeholder="0"
+                            value={pItem.wastQty}
+                            min={0}
+                            onChange={e => handleProductChange(pIdx, 'wastQty', e.target.value)}
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
-
-            {selectedProduct ? (
-              <div style={{ marginTop: 8, padding: 12, border: '1px solid var(--success)', background: 'rgba(var(--success-rgb), 0.1)', borderRadius: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                  <div style={{ fontWeight: 600, color: 'var(--success)' }}>{selectedProduct.name}</div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Code: {selectedProduct.item_code} | Current Stock: {selectedProduct.current_stock} {selectedProduct.unit}</div>
+          ) : selectedIssue ? (
+            <div style={{ marginBottom: 16, padding: 14, border: '1px solid var(--danger)', background: 'rgba(239, 68, 68, 0.08)', borderRadius: 6, display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+              <AlertTriangle size={18} color="var(--danger)" style={{ flexShrink: 0, marginTop: 2 }} />
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--danger)', marginBottom: 2 }}>
+                  No Linked Target Products
                 </div>
-                <div style={{ fontSize: 11 }} className="badge badge-success">Selected</div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  No target finished products were linked to this issue. You cannot log production.
+                </div>
               </div>
-            ) : searchItemQuery.trim() !== '' && (
-              <div style={{ 
-                position: 'absolute', zIndex: 10, width: '100%', 
-                background: 'var(--bg-card)', border: '1px solid var(--border)', 
-                borderRadius: 6, marginTop: 4, maxHeight: 200, overflowY: 'auto',
-                boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
-              }}>
-                {filteredProducts.length === 0 ? (
-                  <div style={{ padding: 12, color: 'var(--text-muted)', fontSize: 13 }}>No matching items found</div>
-                ) : (
-                  filteredProducts.map(item => (
-                    <div 
-                      key={item.id}
-                      onClick={() => {
-                        setSelectedProduct(item);
-                        setSearchItemQuery(item.name);
-                      }}
-                      style={{ 
-                        padding: '10px 12px', cursor: 'pointer', borderBottom: '1px solid var(--border)',
-                        display: 'flex', justifyContent: 'space-between', fontSize: 13,
-                        transition: 'background 0.2s'
-                      }}
-                      onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-muted)'}
-                      onMouseLeave={e => e.currentTarget.style.background = 'none'}
-                    >
-                      <div>
-                        <strong>{item.name}</strong> 
-                        <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 6 }}>({item.item_code})</span>
-                      </div>
-                      <span style={{ color: 'var(--accent)' }}>{item.current_stock} {item.unit}</span>
-                    </div>
-                  ))
-                )}
-              </div>
-            )}
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
-            <div>
-              <label className="form-label">Production Quantity *</label>
-              <input 
-                type="number" 
-                className="form-input text-mono" 
-                placeholder="e.g. 500"
-                value={productionQty}
-                min={1}
-                required
-                onChange={e => setProductionQty(e.target.value)}
-              />
             </div>
-            <div>
-              <label className="form-label">Wastage Quantity</label>
-              <input 
-                type="number" 
-                className="form-input text-mono" 
-                placeholder="e.g. 15"
-                value={wastageQty}
-                min={0}
-                onChange={e => setWastageQty(e.target.value)}
-              />
+          ) : (
+            <div style={{ marginBottom: 16, padding: 16, background: 'var(--bg-muted)', borderRadius: 6, color: 'var(--text-muted)', fontSize: 13, textAlign: 'center' }}>
+              <Info size={16} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 6, color: 'var(--accent)' }} />
+              Select an active factory issue to view target products.
             </div>
-          </div>
+          )}
 
           <div style={{ marginBottom: 20 }}>
             <label className="form-label">Production Remarks</label>
@@ -498,7 +586,7 @@ function ProductionEntryTab({ addToast, user }) {
               type="submit" 
               className="btn btn-primary"
               style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 24px' }}
-              disabled={submitting || !selectedIssueId || !selectedProduct}
+              disabled={submitting || !selectedIssueId || producedProducts.length === 0}
             >
               {submitting ? (
                 <>
@@ -506,13 +594,14 @@ function ProductionEntryTab({ addToast, user }) {
                 </>
               ) : (
                 <>
-                  <Package size={16} /> Log Production & Stock In <ArrowRight size={16} />
+                  <Package size={16} /> Log Batch Production & Stock In <ArrowRight size={16} />
                 </>
               )}
             </button>
           </div>
         </form>
       </div>
+    </div>
     </div>
   );
 }

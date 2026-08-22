@@ -12,6 +12,33 @@ const InventoryService = {
   async search(query) { return await ItemsRepo.search(query); },
 
   async create(data) {
+    const user = AuthService.getCurrentUser();
+    
+    // intercept Merchandiser item creation
+    if (user?.roleName === 'Merchandiser') {
+       const ApprovalService = require('./approval-service');
+       if (data.categoryId) {
+          const CategoriesRepo = require('../database/repositories/categories');
+          const cat = await CategoriesRepo.getById(data.categoryId);
+          if (cat) data.categoryName = cat.name;
+       }
+       if (data.supplierId) {
+          const SuppliersRepo = require('../database/repositories/suppliers');
+          const supp = await SuppliersRepo.getById(data.supplierId);
+          if (supp) data.supplierName = supp.name;
+       }
+       // Don't save code, generate upon approval
+       delete data.itemCode;
+       
+       if (data.sourceType === 'PRODUCTION') {
+         // Factory production items go straight to Admin approval
+         return await ApprovalService.createRequest('CREATE_ITEM', data);
+       } else {
+         // Source/Import items go to Pending Items for Inventory user to add Opening Stock
+         return await ApprovalService.createRequest('PENDING_ITEM', data);
+       }
+    }
+
     // Check if the code already exists (or is pending approval)
     // We automatically resolve collisions instead of throwing an error to handle multiple users working at once
     let attempts = 0;
@@ -21,7 +48,6 @@ const InventoryService = {
       console.warn(`[InventoryService] Initial code collision: "${oldCode}" taken. Automatically using: "${data.itemCode}"`);
       attempts++;
     }
-    const user = AuthService.getCurrentUser();
     const isAdmin = user?.roleName === 'Admin' || user?.roleName === 'Super Admin';
     if (!isAdmin) {
       const requireApproval = SettingsRepo.get('require_inventory_approval') === 'true';

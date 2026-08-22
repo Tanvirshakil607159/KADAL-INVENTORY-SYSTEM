@@ -293,14 +293,14 @@ export default function ChallanPage() {
                     receiverId: rec.id,
                     receiverName: rec.name,
                     receiverContact: rec.contact_info || '',
-                    receiverAddress: rec.address || ''
+                    receiverAddress: rec.receiver_address || ''
                   });
                 } else {
                   setChallanForm({ ...challanForm, receiverId: '', receiverName: '' });
                 }
               }}
             >
-              <option value="">Select Managed Recipient...</option>
+              <option value="">Select Managed Receiver...</option>
               {(recipients || []).map(r => <option key={r.id} value={r.id}>{r.name} ({r.type})</option>)}
             </select>
           </div>

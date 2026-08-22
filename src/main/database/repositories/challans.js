@@ -104,24 +104,42 @@ const ChallansRepo = {
   },
 
   async getDetailedHistory(filters = {}) {
+    const limitCount = filters.limit || 1000;
     if (isCloudEnabled()) {
       const supabase = getSupabase();
       let query = supabase.from('challan_items').select(`
         id, quantity, unit, notes, challan_id,
         challans!inner(challan_number, challan_date, receiver_name, status, created_at, users!challans_created_by_fkey(full_name)),
-        items!inner(*)
-      `).order('challan_date', { foreignTable: 'challans', ascending: false }).limit(1000);
+        items!inner(*, categories(name))
+      `).order('challan_date', { foreignTable: 'challans', ascending: false });
 
       if (filters.status) query = query.eq('challans.status', filters.status);
       if (filters.dateFrom) query = query.gte('challans.challan_date', filters.dateFrom);
       if (filters.dateTo) query = query.lte('challans.challan_date', filters.dateTo + 'T23:59:59.999Z');
+      if (filters.receiverName) query = query.ilike('challans.receiver_name', `%${filters.receiverName}%`);
       if (filters.buyerName) query = query.eq('items.buyer_name', filters.buyerName);
       if (filters.styleName) query = query.eq('items.style_name', filters.styleName);
       if (filters.orderNumber) query = query.eq('items.order_number', filters.orderNumber);
       if (filters.purchaseNo) query = query.eq('items.purchase_no', filters.purchaseNo);
 
-      const { data, error } = await query;
-      if (error) throw error;
+      let data = [];
+      let page = 0;
+      let pageSize = 1000;
+      while (data.length < limitCount) {
+        const from = page * pageSize;
+        const to = from + pageSize - 1;
+        const { data: pageData, error } = await query.range(from, to);
+        if (error) throw error;
+        if (!pageData || pageData.length === 0) break;
+        data = data.concat(pageData);
+        if (pageData.length < pageSize) break;
+        page++;
+      }
+      
+      // Enforce the requested limit exactly just in case
+      if (data.length > limitCount) {
+        data = data.slice(0, limitCount);
+      }
 
       // Optimize: Fetch all totals in one go instead of a loop
       const itemIds = [...new Set(data.map(r => r.items.id))];
@@ -139,19 +157,22 @@ const ChallansRepo = {
         totalMap[t.item_id] = (totalMap[t.item_id] || 0) + t.quantity;
       });
 
-      return data.map(row => {
+      let result = data.map(row => {
         const item = row.items;
         const challan = row.challans;
         const total_shipped = totalMap[item.id] || 0;
         return {
           id: row.id,
           challan_id: row.challan_id,
+          item_id: item.id,
+          item_code: item.item_code,
           challan_number: challan.challan_number,
           challan_date: challan.challan_date,
           receiver_name: challan.receiver_name,
           status: challan.status,
           created_by_name: challan.users?.full_name,
           item_name: item.name,
+          category_name: item.categories?.name,
           buyer_name: item.buyer_name,
           style_name: item.style_name,
           order_number: item.order_number,
@@ -159,12 +180,28 @@ const ChallansRepo = {
           size: item.size,
           color: item.color,
           order_quantity: item.order_quantity,
+          unit_price: item.unit_price,
+          currency: item.currency,
           shipped_quantity: row.quantity,
           unit: row.unit,
           total_shipped,
           balance: (item.order_quantity || 0) - total_shipped
         };
       });
+
+      if (filters.search) {
+        const s = filters.search.toLowerCase();
+        result = result.filter(r => 
+          r.challan_number?.toLowerCase().includes(s) ||
+          r.receiver_name?.toLowerCase().includes(s) ||
+          r.item_name?.toLowerCase().includes(s) ||
+          r.style_name?.toLowerCase().includes(s) ||
+          r.order_number?.toLowerCase().includes(s) ||
+          r.purchase_no?.toLowerCase().includes(s)
+        );
+      }
+
+      return result;
     }
 
 
@@ -172,6 +209,7 @@ const ChallansRepo = {
     if (filters.status) { where.push('c.status = ?'); params.push(filters.status); }
     if (filters.dateFrom) { where.push('c.challan_date >= ?'); params.push(filters.dateFrom); }
     if (filters.dateTo) { where.push('c.challan_date <= ?'); params.push(filters.dateTo + 'T23:59:59.999Z'); }
+    if (filters.receiverName) { where.push('c.receiver_name LIKE ?'); params.push(`%${filters.receiverName}%`); }
     if (filters.buyerName) { where.push('i.buyer_name = ?'); params.push(filters.buyerName); }
     if (filters.styleName) { where.push('i.style_name = ?'); params.push(filters.styleName); }
     if (filters.orderNumber) { where.push('i.order_number = ?'); params.push(filters.orderNumber); }
@@ -195,14 +233,16 @@ const ChallansRepo = {
         ci.id as id, ci.challan_id, ci.quantity as shipped_quantity, ci.unit as unit,
         c.challan_number as challan_number, c.challan_date as challan_date, c.receiver_name as receiver_name, c.status as status,
         u.full_name as created_by_name,
-        i.name as item_name, i.style_name as style_name, i.order_number as order_number, i.purchase_no as purchase_no, i.order_quantity as order_quantity, i.size as size, i.color as color, i.buyer_name as buyer_name,
+        i.name as item_name, i.id as item_id, i.item_code as item_code, i.style_name as style_name, i.order_number as order_number, i.purchase_no as purchase_no, i.order_quantity as order_quantity, i.size as size, i.color as color, i.buyer_name as buyer_name, i.unit_price as unit_price, i.currency as currency,
+        cat.name as category_name,
         (SELECT COALESCE(SUM(ci2.quantity), 0) FROM challan_items ci2 JOIN challans c2 ON ci2.challan_id = c2.id WHERE ci2.item_id = i.id AND c2.status = 'ACTIVE') as total_shipped
       FROM challan_items ci
       JOIN challans c ON ci.challan_id = c.id
       JOIN items i ON ci.item_id = i.id
+      LEFT JOIN categories cat ON i.category_id = cat.id
       LEFT JOIN users u ON c.created_by = u.id
       ${w}
-      ORDER BY c.challan_date DESC LIMIT 1000
+      ORDER BY c.challan_date DESC LIMIT ${Number(limitCount)}
     `;
     const results = dbPrepare(sql).all(...params);
     return results.map(r => ({

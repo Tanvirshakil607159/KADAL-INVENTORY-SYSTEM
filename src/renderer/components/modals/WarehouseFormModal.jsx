@@ -13,7 +13,7 @@ export default function WarehouseFormModal({ isOpen, onClose, warehouse = null }
   });
 
   useEffect(() => {
-    if (warehouse) {
+    if (warehouse && warehouse.id) {
       setFormData({
         code: warehouse.code || '',
         name: warehouse.name || '',
@@ -21,22 +21,34 @@ export default function WarehouseFormModal({ isOpen, onClose, warehouse = null }
         description: warehouse.description || '',
         isActive: warehouse.is_active ?? true,
       });
+    } else if (isOpen) {
+      window.kadal.warehouses.getNextCode()
+        .then(res => {
+          if (res.success) {
+            setFormData(f => ({ ...f, code: res.data }));
+          } else {
+            console.error('[WMS] Failed to get next code:', res.error);
+          }
+        })
+        .catch(err => {
+          console.error('[WMS] IPC error getting next code:', err);
+        });
     }
-  }, [warehouse]);
+  }, [warehouse, isOpen]);
 
   if (!isOpen) return null;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!formData.code || !formData.name) {
-      addToast('error', 'Code and Name are required');
+    if (!formData.name) {
+      addToast('error', 'Warehouse Name is required');
       return;
     }
 
     try {
       setLoading(true);
       const dataToSave = {
-        code: formData.code,
+        code: formData.code || '',
         name: formData.name,
         location: formData.location,
         description: formData.description,
@@ -44,14 +56,14 @@ export default function WarehouseFormModal({ isOpen, onClose, warehouse = null }
       };
 
       let res;
-      if (warehouse) {
+      if (warehouse && warehouse.id) {
         res = await window.kadal.warehouses.update(warehouse.id, dataToSave);
       } else {
         res = await window.kadal.warehouses.create(dataToSave);
       }
 
       if (res.success || res.id) {
-        addToast('success', warehouse ? 'Warehouse updated' : 'Warehouse created');
+        addToast('success', (warehouse && warehouse.id) ? 'Warehouse updated' : 'Warehouse created');
         onClose();
       } else {
         addToast('error', res.error || 'Failed to save warehouse');
@@ -68,7 +80,7 @@ export default function WarehouseFormModal({ isOpen, onClose, warehouse = null }
       <div className="modal" style={{ maxWidth: '480px' }}>
         <div className="modal-header">
           <h2 className="modal-title">
-            {warehouse ? 'Edit Warehouse' : 'Add Warehouse'}
+            {(warehouse && warehouse.id) ? 'Edit Warehouse' : 'Add Warehouse'}
           </h2>
           <button onClick={onClose} className="btn-control btn-close" title="Close">
             <X size={14} />
@@ -78,13 +90,13 @@ export default function WarehouseFormModal({ isOpen, onClose, warehouse = null }
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column' }}>
           <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
             <div className="form-group">
-              <label className="form-label">Warehouse Code *</label>
+              <label className="form-label">Warehouse Code</label>
               <input
                 type="text"
                 value={formData.code}
-                onChange={e => setFormData({ ...formData, code: e.target.value.toUpperCase() })}
                 className="form-input"
-                placeholder="e.g. WH-01"
+                placeholder="Generating..."
+                disabled
                 required
               />
             </div>

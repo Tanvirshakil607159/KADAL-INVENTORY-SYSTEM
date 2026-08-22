@@ -1,5 +1,38 @@
 import { getSupabase } from './supabase-client';
 
+// Canonical buyer names — the "correct" format for each known buyer
+const CANONICAL_BUYERS = [
+  'REGATTA', 'INTERSPORTS', 'REEBOK', 'UMBRO', 'SPORTISIMO',
+  'TEXTISS SAS', 'MEXICO DC', 'DARE2B', 'RAW GROUP',
+  'PWT BRANDS', 'XCEL BASPOKED LTD',
+];
+
+// Known typos/aliases that map to canonical names
+const BUYER_ALIASES = {
+  'SPROTISIMO': 'SPORTISIMO',
+};
+
+/**
+ * Normalize a buyer name to its canonical format.
+ * Matching: exact (case-insensitive), alias/typo, prefix match, or fallback to UPPERCASE.
+ */
+function normalizeBuyerName(input) {
+  if (!input || typeof input !== 'string') return input;
+  const trimmed = input.trim();
+  if (!trimmed) return trimmed;
+  const upper = trimmed.toUpperCase();
+  const exactMatch = CANONICAL_BUYERS.find(b => b === upper);
+  if (exactMatch) return exactMatch;
+  if (BUYER_ALIASES[upper]) return BUYER_ALIASES[upper];
+  const sortedBuyers = [...CANONICAL_BUYERS].sort((a, b) => b.length - a.length);
+  for (const canonical of sortedBuyers) {
+    if (upper.startsWith(canonical + ' ') || upper.startsWith(canonical + '-')) {
+      return canonical;
+    }
+  }
+  return upper;
+}
+
 export async function fetchAll(query, pageSize = 1000) {
   let allData = [];
   let page = 0;
@@ -49,7 +82,7 @@ export const inventoryApi = {
         current_stock: data.openingStock || 0,
         min_stock_level: data.minStockLevel || 0,
         notes: data.notes || null,
-        buyer_name: data.buyerName || null,
+        buyer_name: data.buyerName ? normalizeBuyerName(data.buyerName) : null,
         style_name: data.styleName || null,
         purchase_no: data.purchaseNo || null,
         order_number: data.orderNumber || null,
@@ -124,7 +157,7 @@ export const inventoryApi = {
         supplier_id: data.supplierId || null,
         min_stock_level: data.minStockLevel || 0,
         notes: data.notes || null,
-        buyer_name: data.buyerName || null,
+        buyer_name: data.buyerName ? normalizeBuyerName(data.buyerName) : null,
         style_name: data.styleName || null,
         purchase_no: data.purchaseNo || null,
         order_number: data.orderNumber || null,

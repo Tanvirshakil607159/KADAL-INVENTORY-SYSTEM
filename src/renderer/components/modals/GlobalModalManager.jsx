@@ -9,6 +9,8 @@ import ChallanBrowserModal from './ChallanBrowserModal';
 import IssueBrowserModal from './IssueBrowserModal';
 import ProductionEntryModal from './ProductionEntryModal';
 import BarcodeModal from './BarcodeModal';
+import TargetProductBrowserModal from './TargetProductBrowserModal';
+import RecipientFormModal from './RecipientFormModal';
 
 export default function GlobalModalManager() {
   const { modal } = useStore();
@@ -24,6 +26,8 @@ export default function GlobalModalManager() {
       return <UserFormModal data={modal.data} onSaved={modal.data.onSaved} />;
     case 'SUPPLIER_FORM':
       return <SupplierFormModal data={modal.data} onSaved={modal.data.onSaved} />;
+    case 'RECIPIENT_FORM':
+      return <RecipientFormModal data={modal.data} onSaved={modal.data.onSaved} />;
     case 'APPROVAL_REVIEW':
       return <ApprovalReviewModal data={modal.data} onSaved={modal.data.onSaved} />;
     case 'CHALLAN_BROWSER':
@@ -34,6 +38,8 @@ export default function GlobalModalManager() {
       return <ProductionEntryModal data={modal.data} onSaved={modal.data.onSaved} />;
     case 'BARCODE':
       return <BarcodeModal isOpen={true} onClose={() => useStore.getState().closeModal()} item={modal.data} />;
+    case 'TARGET_PRODUCT_BROWSER':
+      return <TargetProductBrowserModal data={modal.data} />;
     default:
       return null;
   }

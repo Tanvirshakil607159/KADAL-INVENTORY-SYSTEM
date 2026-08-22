@@ -86,6 +86,7 @@ const IssueService = {
         items: data.items,
         isReturnable: data.isReturnable,
         producedItemId: data.producedItemId,
+        producedItemIds: data.producedItemIds,
       });
     } catch (err) {
       // Rollback all stock updates if issue creation fails

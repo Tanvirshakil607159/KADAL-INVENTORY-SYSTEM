@@ -5,12 +5,11 @@ echo ============================================================
 echo.
 echo This will automatically:
 echo 1. Increment the system version
-echo 2. Build the latest code
-echo 3. Upload to GitHub for all other users
-echo 4. Save the installer to the 'installers' folder
+echo 2. Commit your local changes
+echo 3. Push a new release tag to GitHub
+echo 4. Trigger GitHub Actions to automatically build and release
 echo.
-echo [System] Forcing full release...
-set GH_RELEASE_TYPE=release
+echo [System] Starting update push...
 
 node scripts/publish-update.js
 

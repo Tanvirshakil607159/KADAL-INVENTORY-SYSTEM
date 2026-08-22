@@ -1,10 +1,11 @@
-const { dbPrepare, saveDatabase, getSupabase, isCloudEnabled } = require('../connection');
+const { dbPrepare, saveDatabase, getSupabase, isCloudEnabled, initSupabase } = require('../connection');
 
 const GLOBAL_KEYS = [
   'company_name', 'company_logo', 'company_address', 'company_phone', 'company_email',
   'challan_prefix', 'low_stock_threshold', 
   'require_challan_approval', 'require_inventory_approval', 'require_gate_pass_approval',
-  'allow_challan_to_issue', 'allow_inventory_to_produce', 'public_web_url', 'barcode_format'
+  'allow_challan_to_issue', 'allow_inventory_to_produce', 'public_web_url', 'barcode_format',
+  'requisition_prefix', 'require_requisition_approval',
 ];
 
 const SettingsRepo = {
@@ -62,6 +63,11 @@ const SettingsRepo = {
   async setBulk(settings) {
     for (const [key, value] of Object.entries(settings)) {
       await this.set(key, value);
+    }
+    if ('supabase_url' in settings || 'supabase_key' in settings) {
+      initSupabase();
+      const AuthService = require('../../services/auth-service');
+      AuthService.logout();
     }
   },
 };

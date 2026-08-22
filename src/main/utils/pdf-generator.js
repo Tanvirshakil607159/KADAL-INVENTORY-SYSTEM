@@ -110,8 +110,8 @@ const PdfGenerator = {
 
     if (barcodeSvg) {
       const isQR = format === 'QR';
-      const containerWidth = isQR ? 110 : 180;
-      const fitDimensions = isQR ? [110, 110] : [180, 45];
+      const containerWidth = 170; // Set width to align with text above
+      const fitDimensions = isQR ? [70, 70] : [170, 45]; // Make QR smaller
       const marginVal = isQR ? [0, 4, 0, 0] : [0, 8, 0, 0];
 
       rightStack.push({
@@ -119,9 +119,9 @@ const PdfGenerator = {
           widths: [containerWidth],
           body: [
             isQR
-              ? [{ image: barcodeSvg, fit: fitDimensions, alignment: 'center', link: verificationUrl }]
-              : [{ svg: barcodeSvg, fit: fitDimensions, alignment: 'center', link: verificationUrl }],
-            [{ text: challan.challan_number, alignment: 'center', fontSize: 10, bold: true, color: '#6366f1', margin: [0, 3, 0, 0], link: verificationUrl, noWrap: true }]
+              ? [{ image: barcodeSvg, fit: fitDimensions, alignment: 'right', link: verificationUrl }]
+              : [{ svg: barcodeSvg, fit: fitDimensions, alignment: 'right', link: verificationUrl }],
+            [{ text: isQR ? 'Scan to Verify' : challan.challan_number, alignment: 'right', fontSize: 10, bold: true, color: '#000', margin: [0, 3, 0, 0], link: verificationUrl, noWrap: true }]
           ]
         },
         layout: {
@@ -171,7 +171,7 @@ const PdfGenerator = {
             },
           ],
         },
-        { canvas: [{ type: 'line', x1: 0, y1: 5, x2: 515, y2: 5, lineWidth: 1.5, lineColor: '#6366f1' }] },
+        { canvas: [{ type: 'line', x1: 0, y1: 5, x2: 515, y2: 5, lineWidth: 1.5, lineColor: '#000' }] },
 
         // Receiver Info
         { text: '', margin: [0, 15, 0, 0] },
@@ -223,15 +223,15 @@ const PdfGenerator = {
             if (c === 0) totalRow.push({ text: '', colSpan: colCount - 2 });
             else totalRow.push({});
           }
-          totalRow.push({ text: challan.items.reduce((s, i) => s + i.quantity, 0).toString(), style: 'tableCell', alignment: 'right', bold: true, fillColor: '#f0f0ff' });
-          totalRow.push({ text: 'Total', style: 'tableCell', bold: true, fillColor: '#f0f0ff' });
+          totalRow.push({ text: challan.items.reduce((s, i) => s + i.quantity, 0).toString(), style: 'tableCell', alignment: 'right', bold: true, fillColor: null });
+          totalRow.push({ text: 'Total', style: 'tableCell', bold: true, fillColor: null });
 
           return {
             table: { headerRows: 1, widths, body: [headers, ...rows, totalRow] },
             layout: {
               hLineWidth: () => 0.5, vLineWidth: () => 0.5,
               hLineColor: () => '#ddd', vLineColor: () => '#ddd',
-              fillColor: (rowIndex) => rowIndex === 0 ? '#6366f1' : null,
+              fillColor: () => null,
             },
           };
         })(),
@@ -268,17 +268,17 @@ const PdfGenerator = {
       styles: {
         companyName: { fontSize: 18, bold: true, color: '#1a1a2e' },
         companyInfo: { fontSize: 9, color: '#666', margin: [0, 2, 0, 0] },
-        challanTitle: { fontSize: 16, bold: true, color: '#6366f1' },
+        challanTitle: { fontSize: 16, bold: true, color: '#000' },
         challanNumber: { fontSize: 11, margin: [0, 4, 0, 0], color: '#333' },
         challanDate: { fontSize: 10, color: '#666', margin: [0, 2, 0, 0] },
-        statusActive: { fontSize: 10, color: '#10b981', bold: true, margin: [0, 2, 0, 0] },
-        statusCancelled: { fontSize: 10, color: '#ef4444', bold: true, margin: [0, 2, 0, 0] },
+        statusActive: { fontSize: 10, color: '#000', bold: true, margin: [0, 2, 0, 0] },
+        statusCancelled: { fontSize: 10, color: '#000', bold: true, margin: [0, 2, 0, 0] },
         label: { fontSize: 9, color: '#666', margin: [0, 2, 0, 0] },
         value: { fontSize: 10, color: '#333' },
-        tableHeader: { fontSize: 9, bold: true, color: '#fff', margin: [4, 6, 4, 6] },
+        tableHeader: { fontSize: 9, bold: true, color: '#000', margin: [4, 6, 4, 6] },
         tableCell: { fontSize: 8, margin: [4, 5, 4, 5], color: '#333' },
         notes: { fontSize: 9, color: '#555', italics: true, margin: [0, 4, 0, 0] },
-        cancelledBanner: { fontSize: 12, bold: true, color: '#fff', fillColor: '#ef4444', alignment: 'center', margin: [10, 10, 10, 10] },
+        cancelledBanner: { fontSize: 12, bold: true, color: '#000', alignment: 'center', margin: [10, 10, 10, 10] },
       },
       footer: (currentPage, pageCount) => ({
         columns: [
@@ -331,7 +331,7 @@ const PdfGenerator = {
             },
           ],
         },
-        { canvas: [{ type: 'line', x1: 0, y1: 5, x2: 515, y2: 5, lineWidth: 1.5, lineColor: '#6366f1' }] },
+        { canvas: [{ type: 'line', x1: 0, y1: 5, x2: 515, y2: 5, lineWidth: 1.5, lineColor: '#000' }] },
 
         // Consolidation Info
         { text: '', margin: [0, 20, 0, 0] },
@@ -370,7 +370,7 @@ const PdfGenerator = {
           layout: {
             hLineWidth: () => 0.5, vLineWidth: () => 0.5,
             hLineColor: () => '#ddd', vLineColor: () => '#ddd',
-            fillColor: (rowIndex) => rowIndex === 0 ? '#6366f1' : null,
+            fillColor: () => null,
           }
         },
 
@@ -387,13 +387,13 @@ const PdfGenerator = {
       styles: {
         companyName: { fontSize: 18, bold: true, color: '#1a1a2e' },
         companyInfo: { fontSize: 9, color: '#666', margin: [0, 2, 0, 0] },
-        challanTitle: { fontSize: 20, bold: true, color: '#6366f1' },
+        challanTitle: { fontSize: 20, bold: true, color: '#000' },
         challanNumber: { fontSize: 11, margin: [0, 4, 0, 0], color: '#333', bold: true },
         challanDate: { fontSize: 10, color: '#666', margin: [0, 2, 0, 0] },
         label: { fontSize: 10, color: '#666', textTransform: 'uppercase' },
         value: { fontSize: 12, color: '#333' },
-        sectionTitle: { fontSize: 12, bold: true, color: '#6366f1', border: [0, 0, 0, 1] },
-        tableHeader: { fontSize: 10, bold: true, color: '#fff', margin: [4, 6, 4, 6] },
+        sectionTitle: { fontSize: 12, bold: true, color: '#000', border: [0, 0, 0, 1] },
+        tableHeader: { fontSize: 10, bold: true, color: '#000', margin: [4, 6, 4, 6] },
         tableCell: { fontSize: 10, margin: [4, 5, 4, 5], color: '#333' },
       },
       footer: (currentPage, pageCount) => ({
@@ -409,15 +409,25 @@ const PdfGenerator = {
 
   async generateReportPdf(title, columns, data, settings = {}, options = {}) {
     const companyName = settings.company_name || 'KA Design Accessories LTD';
+    const isDeliveryReport = !!options?.deliverySummary;
+    const isLandscape = options.orientation ? options.orientation === 'landscape' : columns.length > 5;
+
+    // Delivery reports: force portrait with tighter margins and smaller fonts
+    const pageMargins = isDeliveryReport ? [20, 30, 20, 40] : (options.pageMargins || [30, 40, 30, 50]);
+    const headerFontSize = isDeliveryReport ? 7 : 8;
+    const cellFontSize = isDeliveryReport ? 7 : 8;
+    const cellPadding = isDeliveryReport ? 2 : 3;
+    const cellVPadding = isDeliveryReport ? 3 : 4;
+    const pageWidth = isDeliveryReport ? 555 : (isLandscape ? 760 : 535);
 
     const docDefinition = {
       pageSize: 'A4',
-      pageOrientation: columns.length > 5 ? 'landscape' : 'portrait',
-      pageMargins: [30, 40, 30, 50],
+      pageOrientation: isDeliveryReport ? 'portrait' : (isLandscape ? 'landscape' : 'portrait'),
+      pageMargins: pageMargins,
       background: (currentPage, pageSize) => {
         const logo = getLogoBase64();
         if (!logo) return null;
-        const width = columns.length > 5 ? 500 : 400;
+        const width = isLandscape ? 500 : 400;
         return {
           image: logo,
           width: width,
@@ -431,19 +441,20 @@ const PdfGenerator = {
         { text: title, style: 'reportTitle' },
         { text: `Generated: ${new Date().toLocaleString('en-GB')}`, style: 'dateInfo' },
         ...(options?.subtitles ? options.subtitles.map(st => ({ text: st, style: 'subtitleInfo' })) : []),
-        { canvas: [{ type: 'line', x1: 0, y1: 5, x2: columns.length > 5 ? 760 : 535, y2: 5, lineWidth: 1, lineColor: '#6366f1' }] },
-        { text: '', margin: [0, 10, 0, 0] },
+        { canvas: [{ type: 'line', x1: 0, y1: 5, x2: pageWidth, y2: 5, lineWidth: 1, lineColor: '#000' }] },
+        { text: '', margin: [0, 8, 0, 0] },
         {
           table: {
             headerRows: 1,
             widths: columns.map(c => c.width || '*'),
             body: [
               columns.map(c => ({ text: c.label, style: 'tableHeader' })),
-              ...data.map(row => columns.map(c => ({
-                text: String(c.format ? c.format(row[c.key], row) : (row[c.key] ?? '')),
+              ...data.map((row, idx) => columns.map(c => ({
+                text: String(c.format ? c.format(row[c.key], row, idx) : (row[c.key] ?? '')),
                 style: 'tableCell',
                 alignment: c.align || 'left',
               }))),
+              ...(options?.footerRow ? [options.footerRow] : []),
             ],
           },
           layout: {
@@ -451,24 +462,80 @@ const PdfGenerator = {
             vLineWidth: () => 0.5,
             hLineColor: () => '#ddd',
             vLineColor: () => '#ddd',
-            fillColor: (rowIndex) => rowIndex === 0 ? '#6366f1' : (rowIndex % 2 === 0 ? '#fafafa' : null),
+            fillColor: (rowIndex) => (rowIndex % 2 === 0 ? '#fafafa' : null),
+            paddingLeft: () => cellPadding,
+            paddingRight: () => cellPadding,
+            paddingTop: () => cellVPadding,
+            paddingBottom: () => cellVPadding,
           },
         },
         { text: `Total Records: ${data.length}`, style: 'summary', margin: [0, 10, 0, 0] },
+
+        // Delivery summary (buyer-wise breakdown) — only for dailyDelivery / monthlyReport
+        ...(options?.deliverySummary && options.deliverySummary.buyerMap && options.deliverySummary.buyerMap.length > 0 ? (() => {
+          const ds = options.deliverySummary;
+          const fmtBDT = (v) => `৳${Number(v || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
+          const fmtUSD = (v) => `$${Number(v || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
+          const buyerRows = ds.buyerMap.map(([buyer, s]) => {
+            let valText = '';
+            if (s.bdt > 0) valText += `BDT: ${fmtBDT(s.bdt)}`;
+            if (s.usd > 0) valText += (valText ? '  |  ' : '') + `USD: ${fmtUSD(s.usd)}`;
+            return [
+              { text: buyer, style: 'tableCell', bold: true },
+              { text: `${s.count}`, style: 'tableCell', alignment: 'right' },
+              { text: `${s.qty.toLocaleString()}`, style: 'tableCell', alignment: 'right' },
+              { text: valText, style: 'tableCell', alignment: 'right', bold: true },
+            ];
+          });
+          // Grand total row
+          let grandValText = `BDT: ${fmtBDT(ds.totalBDT)}`;
+          if (ds.totalUSD > 0) grandValText += `  |  USD: ${fmtUSD(ds.totalUSD)}`;
+          buyerRows.push([
+            { text: 'GRAND TOTAL', style: 'tableCell', bold: true, fillColor: '#f0f0f0' },
+            { text: `${data.length}`, style: 'tableCell', alignment: 'right', bold: true, fillColor: '#f0f0f0' },
+            { text: `${ds.totalQty.toLocaleString()}`, style: 'tableCell', alignment: 'right', bold: true, fillColor: '#f0f0f0' },
+            { text: grandValText, style: 'tableCell', alignment: 'right', bold: true, fillColor: '#f0f0f0' },
+          ]);
+
+          return [
+            { text: '', margin: [0, 15, 0, 0] },
+            { text: 'BUYER-WISE SUMMARY', style: 'subtitleInfo', bold: true, margin: [0, 0, 0, 5] },
+            {
+              table: {
+                headerRows: 1,
+                widths: ['*', 50, 70, 'auto'],
+                body: [
+                  [
+                    { text: 'Buyer', style: 'tableHeader' },
+                    { text: 'Items', style: 'tableHeader', alignment: 'right' },
+                    { text: 'Qty', style: 'tableHeader', alignment: 'right' },
+                    { text: 'Total Value', style: 'tableHeader', alignment: 'right' },
+                  ],
+                  ...buyerRows,
+                ],
+              },
+              layout: {
+                hLineWidth: () => 0.5, vLineWidth: () => 0.5,
+                hLineColor: () => '#ddd', vLineColor: () => '#ddd',
+                fillColor: (rowIndex) => (rowIndex % 2 === 0 ? '#fafafa' : null),
+              },
+            },
+          ];
+        })() : []),
       ],
       styles: {
         companyName: { fontSize: 14, bold: true, color: '#1a1a2e' },
-        reportTitle: { fontSize: 16, bold: true, color: '#6366f1', margin: [0, 5, 0, 0] },
+        reportTitle: { fontSize: isDeliveryReport ? 14 : 16, bold: true, color: '#000', margin: [0, 5, 0, 0] },
         dateInfo: { fontSize: 8, color: '#999', margin: [0, 3, 0, 5] },
-        subtitleInfo: { fontSize: 10, bold: true, color: '#333', margin: [0, 2, 0, 2] },
-        tableHeader: { fontSize: 8, bold: true, color: '#fff', margin: [3, 5, 3, 5] },
-        tableCell: { fontSize: 8, margin: [3, 4, 3, 4], color: '#333' },
+        subtitleInfo: { fontSize: isDeliveryReport ? 8 : 10, bold: true, color: '#333', margin: [0, 1, 0, 1] },
+        tableHeader: { fontSize: headerFontSize, bold: true, color: '#000', margin: [cellPadding, cellVPadding, cellPadding, cellVPadding] },
+        tableCell: { fontSize: cellFontSize, margin: [cellPadding, cellVPadding, cellPadding, cellVPadding], color: '#333' },
         summary: { fontSize: 9, color: '#666', italics: true },
       },
       footer: (currentPage, pageCount) => ({
         columns: [
-          { text: 'KADAL Inventory System', fontSize: 7, color: '#999', margin: [30, 0, 0, 0] },
-          { text: `Page ${currentPage} of ${pageCount}`, fontSize: 7, color: '#999', alignment: 'right', margin: [0, 0, 30, 0] },
+          { text: 'KADAL Inventory System', fontSize: 7, color: '#999', margin: [20, 0, 0, 0] },
+          { text: `Page ${currentPage} of ${pageCount}`, fontSize: 7, color: '#999', alignment: 'right', margin: [0, 0, 20, 0] },
         ],
       }),
     };
@@ -480,6 +547,38 @@ const PdfGenerator = {
     const companyName = settings.company_name || 'KA Design Accessories LTD';
     const companyAddress = settings.company_address || '';
     const companyPhone = settings.company_phone || '';
+
+    const isFactory = issue.issue_type === 'FACTORY';
+    const isReturnable = issue.is_returnable === true || issue.is_returnable === 1;
+    const documentTitle = isFactory ? 'ISSUE PAPER: Factory' : 'ISSUE PAPER: Employee';
+
+    const prodItemsList = (issue.produced_items && issue.produced_items.length > 0)
+      ? issue.produced_items
+      : (issue.produced_item ? [issue.produced_item] : []);
+    const hasProducedItem = prodItemsList.length > 0;
+    
+    let producedItemVal = '..........................................................................................';
+    let orderStylePoVal = '..........................................................................................';
+    let orderQtyVal = '........................................';
+    let unitVal = '........................................';
+    let colorSizeVal = '..........................................................................................';
+
+    if (hasProducedItem) {
+      producedItemVal = prodItemsList.map(p => `[${p.item_code || '-'}] ${p.name || '-'}`).join(', ');
+
+      orderStylePoVal = prodItemsList.map(p => {
+        const spoParts = [
+          p.order_number ? `Ord: ${p.order_number}` : '',
+          p.style_name ? `Sty: ${p.style_name}` : '',
+          p.purchase_no ? `PO: ${p.purchase_no}` : ''
+        ].filter(Boolean);
+        return spoParts.join(' / ') || '-';
+      }).join('; ');
+
+      orderQtyVal = prodItemsList.map(p => p.order_quantity !== undefined && p.order_quantity !== null ? Number(p.order_quantity).toLocaleString() : '-').join(', ');
+      unitVal = prodItemsList.map(p => p.unit || '-').join(', ');
+      colorSizeVal = prodItemsList.map(p => [p.color, p.size].filter(Boolean).join(' / ') || '-').join('; ');
+    }
 
     const docDefinition = {
       pageSize: 'A4',
@@ -502,129 +601,302 @@ const PdfGenerator = {
               width: '*',
               stack: [
                 settings.company_logo ? { image: settings.company_logo, fit: [350, 180], margin: [0, 0, 0, 5] } : { text: companyName, style: 'companyName' },
-                companyAddress ? { text: companyAddress, style: 'companyInfo', bold: true } : {},
-                companyPhone ? { text: `Phone: ${companyPhone}`, style: 'companyInfo', bold: true } : {},
+                companyAddress ? { text: companyAddress, style: 'companyInfo' } : {},
+                companyPhone ? { text: `Phone: ${companyPhone}`, style: 'companyInfo' } : {},
               ],
             },
             {
               width: 'auto',
               stack: [
-                { text: 'ISSUE PAPER', style: 'challanTitle' },
-                { text: `No: ${issue.issue_id}`, style: 'challanNumber' },
+                { text: documentTitle, style: 'challanTitle' },
+                { text: `Issue No: ${issue.issue_id}`, style: 'challanNumber' },
                 { text: `Date: ${new Date(issue.issue_date).toLocaleDateString('en-GB')}`, style: 'challanDate' },
-                { text: `Type: ${issue.issue_type}`, style: 'value', bold: true, color: '#6366f1' },
+                { text: `Type: ${issue.issue_type}`, style: 'value', bold: true, color: '#000' },
               ],
               alignment: 'right',
             },
           ],
         },
-        { canvas: [{ type: 'line', x1: 0, y1: 5, x2: 515, y2: 5, lineWidth: 1.5, lineColor: '#6366f1' }] },
+        { canvas: [{ type: 'line', x1: 0, y1: 5, x2: 515, y2: 5, lineWidth: 1.5, lineColor: '#000' }] },
 
         // Recipient Info
-        { text: '', margin: [0, 15, 0, 0] },
-        {
-          table: {
-            widths: ['auto', '*'],
-            body: [
-              [{ text: 'Issued To:', style: 'label' }, { text: issue.recipient_name, style: 'value', bold: true }],
-              [{ text: 'Expected Return:', style: 'label' }, { text: issue.expected_return_date ? new Date(issue.expected_return_date).toLocaleDateString('en-GB') : '-', style: 'value' }],
-              [{ text: 'Status:', style: 'label' }, { text: issue.status, style: 'value', color: issue.status === 'RETURNED' ? '#10b981' : '#f59e0b', bold: true }],
-            ],
-          },
-          layout: 'noBorders',
-        },
+        { text: '', margin: [0, 10, 0, 0] },
+        (() => {
+          if (isFactory) {
+            return {
+              columns: [
+                {
+                  width: '*',
+                  stack: [
+                    { text: 'Issued To (Factory / Section)', style: 'label' },
+                    { text: issue.recipient_name, style: 'value', bold: true, fontSize: 11, margin: [0, 2, 0, 0] }
+                  ]
+                },
+                {
+                  width: 'auto',
+                  stack: [
+                    { text: 'Status', style: 'label', alignment: 'right' },
+                    { text: issue.status, style: 'value', color: issue.status === 'RETURNED' ? '#000' : issue.status === 'PARTIAL' ? '#000' : '#000', bold: true, alignment: 'right', margin: [0, 2, 0, 0] }
+                  ]
+                }
+              ]
+            };
+          } else {
+            return {
+              columns: [
+                {
+                  width: '*',
+                  stack: [
+                    { text: 'Issued To (Employee)', style: 'label' },
+                    { text: issue.recipient_name, style: 'value', bold: true, fontSize: 11, margin: [0, 2, 0, 0] }
+                  ]
+                },
+                {
+                  width: '*',
+                  stack: [
+                    { text: 'Category', style: 'label' },
+                    { text: isReturnable ? 'Returnable' : 'Non-Returnable', style: 'value', bold: true, color: isReturnable ? '#000' : '#64748b', margin: [0, 2, 0, 0] }
+                  ]
+                },
+                ...(isReturnable ? [
+                  {
+                    width: '*',
+                    stack: [
+                      { text: 'Expected Return Date', style: 'label' },
+                      { text: issue.expected_return_date ? new Date(issue.expected_return_date).toLocaleDateString('en-GB') : '-', style: 'value', margin: [0, 2, 0, 0] }
+                    ]
+                  }
+                ] : []),
+                {
+                  width: 'auto',
+                  stack: [
+                    { text: 'Status', style: 'label', alignment: 'right' },
+                    { text: issue.status, style: 'value', color: issue.status === 'RETURNED' ? '#000' : issue.status === 'PARTIAL' ? '#000' : '#000', bold: true, alignment: 'right', margin: [0, 2, 0, 0] }
+                  ]
+                }
+              ]
+            };
+          }
+        })(),
 
-        // Production & Order Information (if available)
-        ...(issue.produced_item ? [
+        // Production & Order Information (Factory only) — each item in its own row
+        ...(isFactory ? [
           { text: 'PRODUCTION & ORDER INFORMATION', style: 'sectionHeader', margin: [0, 15, 0, 5] },
           {
             table: {
-              widths: ['*', '*', 'auto', 'auto'],
+              headerRows: 1,
+              widths: [20, '*', 65, 100, 45, 60, 35],
               body: [
                 [
+                  { text: '#', style: 'tableHeader', alignment: 'center' },
                   { text: 'Produced Item', style: 'tableHeader' },
-                  { text: 'Order No. / Style / Purchase No.', style: 'tableHeader' },
+                  { text: 'Buyer', style: 'tableHeader' },
+                  { text: 'Order / Style / PO', style: 'tableHeader' },
                   { text: 'Order Qty', style: 'tableHeader', alignment: 'right' },
-                  { text: 'Specs (Color/Size)', style: 'tableHeader' }
+                  { text: 'Color / Size', style: 'tableHeader' },
+                  { text: 'Unit', style: 'tableHeader', alignment: 'center' },
                 ],
-                [
-                  { text: `[${issue.produced_item.item_code}]\n${issue.produced_item.name}`, style: 'tableCell', bold: true },
-                  { text: [issue.produced_item.order_number, issue.produced_item.style_name, issue.produced_item.purchase_no].filter(Boolean).join(' / ') || '-', style: 'tableCell' },
-                  { text: `${issue.produced_item.order_quantity.toLocaleString()} ${issue.produced_item.unit}`, style: 'tableCell', alignment: 'right', bold: true },
-                  { text: [issue.produced_item.color, issue.produced_item.size].filter(Boolean).join(' / ') || '-', style: 'tableCell' }
-                ]
+                ...(hasProducedItem ? prodItemsList.map((p, idx) => {
+                  const spoParts = [
+                    p.order_number ? `Ord: ${p.order_number}` : '',
+                    p.style_name ? `Sty: ${p.style_name}` : '',
+                    p.purchase_no ? `PO: ${p.purchase_no}` : ''
+                  ].filter(Boolean);
+                  const spoStr = spoParts.join(' / ') || '-';
+                  const csStr = [p.color, p.size].filter(Boolean).join(' / ') || '-';
+                  return [
+                    { text: idx + 1, style: 'tableCell', alignment: 'center' },
+                    { text: `[${p.item_code || '-'}] ${p.name || '-'}`, style: 'tableCell', bold: true },
+                    { text: p.buyer_name || '-', style: 'tableCell' },
+                    { text: spoStr, style: 'tableCell', fontSize: 8 },
+                    { text: p.order_quantity !== undefined && p.order_quantity !== null ? Number(p.order_quantity).toLocaleString() : '-', style: 'tableCell', alignment: 'right' },
+                    { text: csStr, style: 'tableCell' },
+                    { text: p.unit || '-', style: 'tableCell', alignment: 'center' },
+                  ];
+                }) : [[
+                  { text: '-', style: 'tableCell', alignment: 'center', colSpan: 7 }, {}, {}, {}, {}, {}, {}
+                ]])
               ]
             },
             layout: {
-              hLineWidth: () => 0.5, vLineWidth: () => 0.5,
-              hLineColor: () => '#ddd', vLineColor: () => '#ddd',
-              fillColor: (rowIndex) => rowIndex === 0 ? '#4f46e5' : null,
-            }
+              hLineWidth: () => 0.5,
+              vLineWidth: () => 0.5,
+              hLineColor: () => '#cbd5e1',
+              vLineColor: () => '#cbd5e1',
+              fillColor: (rowIndex) => rowIndex === 0 ? '#f1f5f9' : (rowIndex % 2 === 0 ? '#fafafa' : null),
+            },
+            margin: [0, 0, 0, 15]
           }
         ] : []),
 
-        // Material Details (Issued Items)
-        { text: 'MATERIAL DETAILS (ISSUED ITEMS)', style: 'sectionHeader', margin: [0, 15, 0, 5] },
-        (() => {
-          const headers = [
-            { text: '#', style: 'tableHeader' },
-            { text: 'Issue Item', style: 'tableHeader' },
-            { text: 'Color', style: 'tableHeader' },
-            { text: 'Issued Qty', style: 'tableHeader', alignment: 'right' },
-            { text: 'Unit', style: 'tableHeader' },
-            { text: 'Returned Qty', style: 'tableHeader', alignment: 'right' },
-          ];
-          const widths = [25, '*', 100, 80, 50, 80];
-
-          const rows = (issue.items || []).map((item, idx) => {
-            return [
-              { text: idx + 1, style: 'tableCell' },
-              { text: item.item_name || '-', style: 'tableCell', bold: true },
-              { text: item.color || '-', style: 'tableCell' },
-              { text: item.quantity.toString(), style: 'tableCell', alignment: 'right', bold: true },
-              { text: item.unit || '-', style: 'tableCell' },
-              { text: (item.returned_quantity || 0).toString(), style: 'tableCell', alignment: 'right' },
-            ];
-          });
-
-          return {
-            table: { headerRows: 1, widths, body: [headers, ...rows] },
-            layout: {
-              hLineWidth: () => 0.5, vLineWidth: () => 0.5,
-              hLineColor: () => '#ddd', vLineColor: () => '#ddd',
-              fillColor: (rowIndex) => rowIndex === 0 ? '#6366f1' : null,
-            },
-          };
-        })(),
-
-        // Remarks
-        issue.remarks ? { text: '', margin: [0, 15, 0, 0] } : {},
-        issue.remarks ? { text: 'Remarks:', style: 'label' } : {},
-        issue.remarks ? { text: issue.remarks, style: 'notes' } : {},
-
-        // Sign-off / Approvals
-        { text: '', margin: [0, 60, 0, 0] },
+        // Material Details + Production Table + Signatures — keep on same page
         {
-          columns: [
-            { width: '*', stack: [{ canvas: [{ type: 'line', x1: 0, y1: 0, x2: 110, y2: 0, lineWidth: 1 }] }, { text: 'Receiver', margin: [0, 5, 0, 0], fontSize: 9, color: '#555', bold: true }] },
-            { width: '*', stack: [{ canvas: [{ type: 'line', x1: 0, y1: 0, x2: 110, y2: 0, lineWidth: 1 }] }, { text: 'Issued by', margin: [0, 5, 0, 0], fontSize: 9, color: '#555', bold: true }] },
-            { width: '*', stack: [{ canvas: [{ type: 'line', x1: 0, y1: 0, x2: 110, y2: 0, lineWidth: 1 }] }, { text: 'Order by', margin: [0, 5, 0, 0], fontSize: 9, color: '#555', bold: true }] },
-            { width: '*', stack: [{ canvas: [{ type: 'line', x1: 0, y1: 0, x2: 110, y2: 0, lineWidth: 1 }] }, { text: 'Approved by', margin: [0, 5, 0, 0], fontSize: 9, color: '#555', bold: true }], alignment: 'right' },
-          ],
+          unbreakable: true,
+          stack: [
+            // Material Details (Issued Items)
+            { text: 'MATERIAL DETAILS', style: 'sectionHeader', margin: [0, 10, 0, 5] },
+            (() => {
+              const headers = isFactory ? [
+                { text: '#', style: 'tableHeader', alignment: 'center' },
+                { text: 'Issue Item', style: 'tableHeader' },
+                { text: 'Style/PO/Order', style: 'tableHeader' },
+                { text: 'Size/Color', style: 'tableHeader' },
+                { text: 'Unit', style: 'tableHeader', alignment: 'center' },
+                { text: 'Issued Qty', style: 'tableHeader', alignment: 'right' },
+              ] : [
+                { text: '#', style: 'tableHeader', alignment: 'center' },
+                { text: 'Issue Item', style: 'tableHeader' },
+                { text: 'Style/PO/Order', style: 'tableHeader' },
+                { text: 'Size/Color', style: 'tableHeader' },
+                { text: 'Unit', style: 'tableHeader', alignment: 'center' },
+                { text: 'Issued Qty', style: 'tableHeader', alignment: 'right' },
+                { text: 'Returned Qty', style: 'tableHeader', alignment: 'right' },
+              ];
+
+              const widths = isFactory ? [25, '*', 90, 80, 40, 70] : [25, '*', 80, 70, 40, 60, 60];
+
+              const items = issue.items || [];
+              const rows = items.map((item, idx) => {
+                const spo = [item.style_no || item.style_name, item.purchase_no, item.order_number].filter(Boolean).join(' / ') || '-';
+                const sc = [item.size, item.color].filter(Boolean).join(' / ') || '-';
+
+                return isFactory ? [
+                  { text: idx + 1, style: 'tableCell', alignment: 'center' },
+                  { text: item.item_name || '-', style: 'tableCell', bold: true },
+                  { text: spo, style: 'tableCell', fontSize: 8 },
+                  { text: sc, style: 'tableCell' },
+                  { text: item.unit || '-', style: 'tableCell', alignment: 'center' },
+                  { text: item.quantity.toString(), style: 'tableCell', alignment: 'right', bold: true },
+                ] : [
+                  { text: idx + 1, style: 'tableCell', alignment: 'center' },
+                  { text: item.item_name || '-', style: 'tableCell', bold: true },
+                  { text: spo, style: 'tableCell', fontSize: 8 },
+                  { text: sc, style: 'tableCell' },
+                  { text: item.unit || '-', style: 'tableCell', alignment: 'center' },
+                  { text: item.quantity.toString(), style: 'tableCell', alignment: 'right', bold: true },
+                  { text: (item.returned_quantity || 0).toString(), style: 'tableCell', alignment: 'right' },
+                ];
+              });
+
+              if (rows.length === 0) {
+                rows.push(isFactory ? [
+                  { text: '-', style: 'tableCell', alignment: 'center' },
+                  { text: 'No items issued', style: 'tableCell', colSpan: 5 },
+                  {}, {}, {}, {}
+                ] : [
+                  { text: '-', style: 'tableCell', alignment: 'center' },
+                  { text: 'No items issued', style: 'tableCell', colSpan: 6 },
+                  {}, {}, {}, {}, {}
+                ]);
+              }
+
+              return {
+                table: { headerRows: 1, widths, body: [headers, ...rows] },
+                layout: {
+                  hLineWidth: () => 0.5, vLineWidth: () => 0.5,
+                  hLineColor: () => '#cbd5e1', vLineColor: () => '#cbd5e1',
+                  fillColor: (rowIndex) => (rowIndex % 2 === 1 && rowIndex <= items.length ? '#f8fafc' : null),
+                },
+              };
+            })(),
+
+            // Delivery / Production Table (Factory only)
+            ...(isFactory ? [
+              { text: '', margin: [0, 15, 0, 0] },
+              {
+                table: {
+                  headerRows: 1,
+                  widths: ['*', '*', '*'],
+                  body: [
+                    [
+                      { text: 'Production Date', style: 'tableHeader', alignment: 'center' },
+                      { text: 'Produce QTY', style: 'tableHeader', alignment: 'center' },
+                      { text: 'Sign', style: 'tableHeader', alignment: 'center' },
+                    ],
+                    [ { text: '\n', margin: [0, 5, 0, 5] }, {}, {} ],
+                    [ { text: '\n', margin: [0, 5, 0, 5] }, {}, {} ],
+                    [ { text: '\n', margin: [0, 5, 0, 5] }, {}, {} ],
+                    [ { text: '\n', margin: [0, 5, 0, 5] }, {}, {} ],
+                    [ { text: '\n', margin: [0, 5, 0, 5] }, {}, {} ]
+                  ]
+                },
+                layout: {
+                  hLineWidth: () => 0.5, vLineWidth: () => 0.5,
+                  hLineColor: () => '#cbd5e1', vLineColor: () => '#cbd5e1',
+                  fillColor: () => null,
+                }
+              }
+            ] : []),
+
+            // Sign-off / Approvals
+            { text: '', margin: [0, 30, 0, 0] },
+            {
+              table: {
+                widths: ['*', '*', '*', '*'],
+                body: [
+                  [
+                    { text: '\n\n', fontSize: 12 },
+                    { text: '\n\n', fontSize: 12 },
+                    { text: '\n\n', fontSize: 12 },
+                    { text: '\n\n', fontSize: 12 }
+                  ],
+                  [
+                    {
+                      stack: [
+                        { text: 'Receiver', style: 'sigLabel', alignment: 'center' },
+                        { text: '(Sign & Date)', style: 'sigSub', alignment: 'center' }
+                      ]
+                    },
+                    {
+                      stack: [
+                        { text: 'Issued by', style: 'sigLabel', alignment: 'center' },
+                        { text: '(Store Incharge)', style: 'sigSub', alignment: 'center' }
+                      ]
+                    },
+                    {
+                      stack: [
+                        { text: 'Order by', style: 'sigLabel', alignment: 'center' },
+                        { text: '(Merchandiser)', style: 'sigSub', alignment: 'center' }
+                      ]
+                    },
+                    {
+                      stack: [
+                        { text: 'Approved by', style: 'sigLabel', alignment: 'center' },
+                        { text: '(Authorized Signature)', style: 'sigSub', alignment: 'center' }
+                      ]
+                    }
+                  ]
+                ]
+              },
+              layout: {
+                hLineWidth: (i) => i === 1 ? 0.8 : 0,
+                vLineWidth: () => 0,
+                hLineColor: () => '#cbd5e1',
+                paddingLeft: () => 10,
+                paddingRight: () => 10,
+                paddingTop: () => 4,
+                paddingBottom: () => 4
+              }
+            },
+          ]
         },
       ],
       styles: {
-        companyName: { fontSize: 18, bold: true, color: '#1a1a2e' },
-        companyInfo: { fontSize: 9, color: '#666', margin: [0, 2, 0, 0] },
-        challanTitle: { fontSize: 20, bold: true, color: '#6366f1' },
-        challanNumber: { fontSize: 11, margin: [0, 4, 0, 0], color: '#333', bold: true },
-        challanDate: { fontSize: 10, color: '#666', margin: [0, 2, 0, 0] },
-        label: { fontSize: 9, color: '#666', margin: [0, 2, 0, 0] },
-        value: { fontSize: 10, color: '#333' },
-        tableHeader: { fontSize: 9, bold: true, color: '#fff', margin: [4, 6, 4, 6] },
-        tableCell: { fontSize: 8, margin: [4, 5, 4, 5], color: '#333' },
-        notes: { fontSize: 9, color: '#555', italics: true, margin: [0, 4, 0, 0] },
-        sectionHeader: { fontSize: 11, bold: true, color: '#4f46e5', margin: [0, 15, 0, 5], letterSpacing: 0.5 },
+        companyName: { fontSize: 18, bold: true, color: '#000' },
+        companyInfo: { fontSize: 9, color: '#64748b', margin: [0, 2, 0, 0] },
+        challanTitle: { fontSize: 20, bold: true, color: '#000' },
+        challanNumber: { fontSize: 11, margin: [0, 4, 0, 0], color: '#000', bold: true },
+        challanDate: { fontSize: 10, color: '#64748b', margin: [0, 2, 0, 0] },
+        label: { fontSize: 9, color: '#64748b', bold: true, margin: [0, 2, 0, 0] },
+        value: { fontSize: 10, color: '#000' },
+        tableHeader: { fontSize: 9, bold: true, color: '#000', margin: [4, 6, 4, 6] },
+        tableCell: { fontSize: 8, margin: [4, 5, 4, 5], color: '#000' },
+        notes: { fontSize: 9, color: '#475569', italics: true, margin: [0, 4, 0, 0] },
+        sectionHeader: { fontSize: 11, bold: true, color: '#000', margin: [0, 15, 0, 5], letterSpacing: 0.5 },
+        gridLabel: { fontSize: 9, bold: true, color: '#475569', margin: [4, 5, 4, 5] },
+        gridValue: { fontSize: 9, color: '#000', margin: [4, 5, 4, 5] },
+        sigLabel: { fontSize: 9, bold: true, color: '#334155', margin: [0, 4, 0, 0] },
+        sigSub: { fontSize: 8, color: '#64748b' }
       },
       footer: (currentPage, pageCount) => ({
         columns: [
@@ -635,6 +907,162 @@ const PdfGenerator = {
     };
 
     return this._generateAndSave(docDefinition, `issue-${issue.issue_id}`);
+  },
+
+  async generateRequisitionPdf(req, settings = {}) {
+    const companyName = settings.company_name || 'KA Design Accessories LTD';
+    const companyAddress = settings.company_address || '';
+    const companyPhone = settings.company_phone || '';
+
+    const statusColors = {
+      PENDING: '#000',
+      APPROVED: '#000',
+      FULFILLED: '#000',
+      REJECTED: '#000',
+      CANCELLED: '#64748b',
+    };
+    const statusColor = statusColors[req.status] || '#000';
+
+    const docDefinition = {
+      pageSize: 'A4',
+      pageMargins: [40, 40, 40, 60],
+      background: (currentPage, pageSize) => {
+        const logo = getLogoBase64();
+        if (!logo) return null;
+        return { image: logo, width: 400, opacity: 0.05, absolutePosition: { x: (pageSize.width - 400) / 2, y: (pageSize.height - 400) / 2 } };
+      },
+      content: [
+        // Header
+        {
+          columns: [
+            {
+              width: '*',
+              stack: [
+                settings.company_logo ? { image: settings.company_logo, fit: [350, 180], margin: [0, 0, 0, 5] } : { text: companyName, style: 'companyName' },
+                companyAddress ? { text: companyAddress, style: 'companyInfo' } : {},
+                companyPhone ? { text: `Phone: ${companyPhone}`, style: 'companyInfo' } : {},
+              ],
+            },
+            {
+              width: 'auto',
+              stack: [
+                { text: 'MATERIAL REQUISITION', style: 'docTitle' },
+                { text: `Req No: ${req.requisition_no}`, style: 'docNumber' },
+                { text: `Date: ${new Date(req.requisition_date).toLocaleDateString('en-GB')}`, style: 'docDate' },
+                { text: `Status: ${req.status}`, color: statusColor, bold: true, fontSize: 10, margin: [0, 2, 0, 0] },
+              ],
+              alignment: 'right',
+            },
+          ],
+        },
+        { canvas: [{ type: 'line', x1: 0, y1: 5, x2: 515, y2: 5, lineWidth: 1.5, lineColor: '#000' }] },
+
+        // Requester / Dept / Purpose info
+        { text: '', margin: [0, 10, 0, 0] },
+        {
+          table: {
+            widths: ['auto', '*', 'auto', '*'],
+            body: [
+              [
+                { text: 'Requester:', style: 'gridLabel' },
+                { text: req.requester_name || '-', style: 'gridValue' },
+                { text: 'Department:', style: 'gridLabel' },
+                { text: req.department || '-', style: 'gridValue' },
+              ],
+              [
+                { text: 'Recipient:', style: 'gridLabel' },
+                { text: req.recipient_name || '-', style: 'gridValue' },
+                { text: 'Purpose:', style: 'gridLabel' },
+                { text: req.purpose || '-', style: 'gridValue' },
+              ],
+              ...(req.notes ? [[
+                { text: 'Notes:', style: 'gridLabel' },
+                { text: req.notes, style: 'gridValue', colSpan: 3 }, {}, {},
+              ]] : []),
+            ],
+          },
+          layout: {
+            hLineWidth: () => 0.5, vLineWidth: () => 0.5,
+            hLineColor: () => '#e2e8f0', vLineColor: () => '#e2e8f0',
+            fillColor: (row, node, col) => (col === 0 || col === 2) ? '#f8fafc' : null,
+          },
+          margin: [0, 0, 0, 15],
+        },
+
+        // Items Table
+        { text: 'REQUESTED MATERIALS', style: 'sectionHeader' },
+        (() => {
+          const headers = [
+            { text: '#', style: 'tableHeader', alignment: 'center' },
+            { text: 'Item', style: 'tableHeader' },
+            { text: 'Style / PO / Order', style: 'tableHeader' },
+            { text: 'Size / Color', style: 'tableHeader' },
+            { text: 'Unit', style: 'tableHeader', alignment: 'center' },
+            { text: 'Req. Qty', style: 'tableHeader', alignment: 'right' },
+            { text: 'Apv. Qty', style: 'tableHeader', alignment: 'right' },
+            { text: 'Issued Qty', style: 'tableHeader', alignment: 'right' },
+          ];
+          const widths = [22, '*', 90, 75, 35, 45, 45, 50];
+          const items = req.items || [];
+          const rows = items.map((item, idx) => {
+            const spo = [item.style_name, item.purchase_no, item.order_number].filter(Boolean).filter(v => v !== '-').join(' / ') || '-';
+            const sc = [item.size, item.color].filter(Boolean).filter(v => v !== '-').join(' / ') || '-';
+            return [
+              { text: idx + 1, style: 'tableCell', alignment: 'center' },
+              { text: `${item.item_name || '-'}\n${item.item_code || ''}`, style: 'tableCell', bold: true, fontSize: 8 },
+              { text: spo, style: 'tableCell', fontSize: 7 },
+              { text: sc, style: 'tableCell', fontSize: 8 },
+              { text: item.item_unit || '-', style: 'tableCell', alignment: 'center' },
+              { text: (item.requested_quantity || 0).toString(), style: 'tableCell', alignment: 'right', bold: true },
+              { text: (item.approved_quantity || 0).toString(), style: 'tableCell', alignment: 'right' },
+              { text: (item.issued_quantity || 0).toString(), style: 'tableCell', alignment: 'right' },
+            ];
+          });
+          if (rows.length === 0) {
+            rows.push([{ text: 'No items', colSpan: 8, alignment: 'center', style: 'tableCell' }, {}, {}, {}, {}, {}, {}, {}]);
+          }
+          return {
+            table: { headerRows: 1, widths, body: [headers, ...rows] },
+            layout: {
+              hLineWidth: () => 0.5, vLineWidth: () => 0.5,
+              hLineColor: () => '#cbd5e1', vLineColor: () => '#cbd5e1',
+              fillColor: (rowIndex) => (rowIndex % 2 === 0 ? '#f8fafc' : null),
+            },
+          };
+        })(),
+
+        // Signatures
+        { text: '', margin: [0, 40, 0, 0] },
+        {
+          columns: [
+            { width: '*', stack: [{ canvas: [{ type: 'line', x1: 0, y1: 0, x2: 110, y2: 0, lineWidth: 1 }] }, { text: 'Requested By', margin: [0, 5, 0, 0], fontSize: 9, color: '#666' }] },
+            { width: '*', stack: [{ canvas: [{ type: 'line', x1: 0, y1: 0, x2: 110, y2: 0, lineWidth: 1 }] }, { text: 'Approved By', margin: [0, 5, 0, 0], fontSize: 9, color: '#666' }] },
+            { width: '*', stack: [{ canvas: [{ type: 'line', x1: 0, y1: 0, x2: 110, y2: 0, lineWidth: 1 }] }, { text: 'Store Incharge', margin: [0, 5, 0, 0], fontSize: 9, color: '#666' }] },
+            { width: '*', stack: [{ canvas: [{ type: 'line', x1: 0, y1: 0, x2: 110, y2: 0, lineWidth: 1 }] }, { text: 'Authorized Signature', margin: [0, 5, 0, 0], fontSize: 9, color: '#666' }], alignment: 'right' },
+          ],
+        },
+      ],
+      styles: {
+        companyName: { fontSize: 18, bold: true, color: '#1a1a2e' },
+        companyInfo: { fontSize: 9, color: '#666', margin: [0, 2, 0, 0] },
+        docTitle: { fontSize: 16, bold: true, color: '#000' },
+        docNumber: { fontSize: 11, margin: [0, 4, 0, 0], color: '#333', bold: true },
+        docDate: { fontSize: 10, color: '#666', margin: [0, 2, 0, 0] },
+        sectionHeader: { fontSize: 10, bold: true, color: '#000', margin: [0, 0, 0, 5] },
+        gridLabel: { fontSize: 9, bold: true, color: '#64748b', margin: [4, 5, 4, 5] },
+        gridValue: { fontSize: 9, color: '#000', margin: [4, 5, 4, 5] },
+        tableHeader: { fontSize: 8, bold: true, color: '#000', margin: [4, 5, 4, 5] },
+        tableCell: { fontSize: 8, margin: [4, 4, 4, 4], color: '#333' },
+      },
+      footer: (currentPage, pageCount) => ({
+        columns: [
+          { text: `Generated by KADAL Inventory System`, fontSize: 7, color: '#999', margin: [40, 0, 0, 0] },
+          { text: `Page ${currentPage} of ${pageCount}`, fontSize: 7, color: '#999', alignment: 'right', margin: [0, 0, 40, 0] },
+        ],
+      }),
+    };
+
+    return this._generateAndSave(docDefinition, `requisition-${req.requisition_no}`);
   },
 
   async _generateAndSave(docDefinition, filename) {

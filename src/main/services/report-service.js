@@ -3,6 +3,23 @@ const ItemsRepo = require('../database/repositories/items');
 const StockTransactionsRepo = require('../database/repositories/stock-transactions');
 const ChallansRepo = require('../database/repositories/challans');
 
+// Helper to paginate Supabase queries
+async function fetchAllSupabase(queryBuilder, pageSize = 1000) {
+  let allData = [];
+  let page = 0;
+  while (true) {
+    const from = page * pageSize;
+    const to = from + pageSize - 1;
+    const { data, error } = await queryBuilder.range(from, to);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    allData = allData.concat(data);
+    if (data.length < pageSize) break;
+    page++;
+  }
+  return allData;
+}
+
 const ReportService = {
   async stockReport(filters = {}) { return await ItemsRepo.getAll(filters); },
   
@@ -17,6 +34,235 @@ const ReportService = {
   },
   async detailedChallanHistory(filters = {}) {
     return await this.challanHistory(filters);
+  },
+
+  // ==================== AUDIT REPORT ====================
+  // Option B: Audit report as of a cutoff date (defaults to 30.06.2026)
+  // Calculates historical stock by reversing post-cutoff transactions
+  async auditReport(filters = {}) {
+    const cutoffDate = filters.cutoffDate || new Date().toISOString().split('T')[0];
+    const cutoffTimestamp = cutoffDate + 'T23:59:59.999Z';
+
+    let rawMaterials = [];
+    let finishedGoods = [];
+    let workingProcess = [];
+
+    if (isCloudEnabled()) {
+      const supabase = getSupabase();
+
+      // 1. Fetch all active items with supplier info
+      const allItems = await fetchAllSupabase(
+        supabase.from('items')
+          .select('*, categories(name), suppliers(name)')
+          .eq('is_active', true)
+          .order('name')
+          .order('id')
+      );
+
+      // 2. Fetch post-cutoff transactions to reverse them
+      const postCutoffTxs = await fetchAllSupabase(
+        supabase.from('stock_transactions')
+          .select('item_id, type, quantity')
+          .gt('created_at', cutoffTimestamp)
+          .order('id')
+      );
+
+      // Build adjustment map: how much to adjust each item's current_stock
+      const adjustmentMap = {};
+      for (const tx of postCutoffTxs) {
+        const itemId = Number(tx.item_id);
+        if (!adjustmentMap[itemId]) adjustmentMap[itemId] = 0;
+        // Reverse: subtract IN, add back OUT
+        if (tx.type === 'IN') adjustmentMap[itemId] -= (tx.quantity || 0);
+        if (tx.type === 'OUT') adjustmentMap[itemId] += (tx.quantity || 0);
+      }
+
+      const mapped = allItems.map(i => {
+        const adjustment = adjustmentMap[Number(i.id)] || 0;
+        const stockAtCutoff = (i.current_stock || 0) + adjustment;
+        return {
+          ...i,
+          category_name: i.categories?.name || '',
+          supplier_name: i.suppliers?.name || '',
+          current_stock: stockAtCutoff,
+        };
+      });
+
+      // Raw Material = source_type 'SOURCE' with stock > 0 at cutoff
+      rawMaterials = mapped
+        .filter(i => (i.source_type || 'SOURCE') === 'SOURCE' && (i.current_stock || 0) > 0)
+        .map(i => ({
+          ...i,
+          total_value: (i.current_stock || 0) * (i.unit_price || 0),
+        }));
+
+      // Finished Goods = source_type 'PRODUCTION' with stock > 0 at cutoff
+      finishedGoods = mapped
+        .filter(i => i.source_type === 'PRODUCTION' && (i.current_stock || 0) > 0)
+        .map(i => ({
+          ...i,
+          total_value: (i.current_stock || 0) * (i.unit_price || 0),
+        }));
+
+      // 3. Working Process In Hand — outstanding factory-issued items as of cutoff
+      const issueItems = await fetchAllSupabase(
+        supabase.from('issue_items')
+          .select(`
+            *, 
+            issues (issue_id, issue_type, recipient_name, issue_date, status),
+            items (name, item_code, unit, unit_price, currency, style_name, purchase_no, order_number, size, color, buyer_name)
+          `)
+          .order('id')
+      );
+
+      // Fetch return/consumption logs after cutoff to reverse them for WIP
+      // We use issue_items' updated_at or rely on issue_date for filtering
+      workingProcess = issueItems
+        .filter(r => r.issues?.issue_type === 'FACTORY')
+        .filter(r => {
+          // Only include issues made on or before cutoff date
+          const issueDate = r.issues?.issue_date;
+          if (!issueDate) return true;
+          return issueDate <= cutoffTimestamp;
+        })
+        .map(r => {
+          const outstanding = (r.quantity || 0) - (r.returned_quantity || 0) - (r.damage_quantity || 0) - (r.rejected_quantity || 0) - (r.consumed_quantity || 0);
+          return {
+            issue_id: r.issues?.issue_id,
+            recipient_name: r.issues?.recipient_name,
+            issue_date: r.issues?.issue_date,
+            issue_status: r.issues?.status,
+            item_name: r.items?.name,
+            item_code: r.items?.item_code,
+            unit: r.unit || r.items?.unit || 'pcs',
+            unit_price: r.items?.unit_price || 0,
+            currency: r.items?.currency || 'BDT',
+            style_name: r.style_no || r.items?.style_name || '',
+            purchase_no: r.purchase_no || r.items?.purchase_no || '',
+            order_number: r.order_number || r.items?.order_number || '',
+            size: r.items?.size || '',
+            color: r.items?.color || '',
+            buyer_name: r.items?.buyer_name || '',
+            issued_qty: r.quantity || 0,
+            consumed_qty: r.consumed_quantity || 0,
+            returned_qty: r.returned_quantity || 0,
+            damaged_qty: r.damage_quantity || 0,
+            rejected_qty: r.rejected_quantity || 0,
+            outstanding: outstanding,
+            outstanding_value: outstanding * (r.items?.unit_price || 0),
+          };
+        })
+        .filter(r => r.outstanding > 0);
+
+    } else {
+      // ---- Local SQLite fallback ----
+      // Calculate stock at cutoff: current_stock - (IN after cutoff) + (OUT after cutoff)
+
+      // Raw Material
+      rawMaterials = dbPrepare(`
+        SELECT i.*, c.name as category_name, s.name as supplier_name,
+          (i.current_stock 
+            - COALESCE((SELECT SUM(st.quantity) FROM stock_transactions st WHERE st.item_id = i.id AND st.type = 'IN' AND st.created_at > ?), 0)
+            + COALESCE((SELECT SUM(st.quantity) FROM stock_transactions st WHERE st.item_id = i.id AND st.type = 'OUT' AND st.created_at > ?), 0)
+          ) as current_stock,
+          (
+            (i.current_stock 
+              - COALESCE((SELECT SUM(st.quantity) FROM stock_transactions st WHERE st.item_id = i.id AND st.type = 'IN' AND st.created_at > ?), 0)
+              + COALESCE((SELECT SUM(st.quantity) FROM stock_transactions st WHERE st.item_id = i.id AND st.type = 'OUT' AND st.created_at > ?), 0)
+            ) * COALESCE(i.unit_price, 0)
+          ) as total_value
+        FROM items i
+        LEFT JOIN categories c ON i.category_id = c.id
+        LEFT JOIN suppliers s ON i.supplier_id = s.id
+        WHERE i.is_active = 1 AND COALESCE(i.source_type, 'SOURCE') = 'SOURCE'
+        AND (i.current_stock 
+            - COALESCE((SELECT SUM(st.quantity) FROM stock_transactions st WHERE st.item_id = i.id AND st.type = 'IN' AND st.created_at > ?), 0)
+            + COALESCE((SELECT SUM(st.quantity) FROM stock_transactions st WHERE st.item_id = i.id AND st.type = 'OUT' AND st.created_at > ?), 0)
+        ) > 0
+        ORDER BY i.name
+      `).all(cutoffTimestamp, cutoffTimestamp, cutoffTimestamp, cutoffTimestamp, cutoffTimestamp, cutoffTimestamp);
+
+      // Finished Goods
+      finishedGoods = dbPrepare(`
+        SELECT i.*, c.name as category_name, s.name as supplier_name,
+          (i.current_stock 
+            - COALESCE((SELECT SUM(st.quantity) FROM stock_transactions st WHERE st.item_id = i.id AND st.type = 'IN' AND st.created_at > ?), 0)
+            + COALESCE((SELECT SUM(st.quantity) FROM stock_transactions st WHERE st.item_id = i.id AND st.type = 'OUT' AND st.created_at > ?), 0)
+          ) as current_stock,
+          (
+            (i.current_stock 
+              - COALESCE((SELECT SUM(st.quantity) FROM stock_transactions st WHERE st.item_id = i.id AND st.type = 'IN' AND st.created_at > ?), 0)
+              + COALESCE((SELECT SUM(st.quantity) FROM stock_transactions st WHERE st.item_id = i.id AND st.type = 'OUT' AND st.created_at > ?), 0)
+            ) * COALESCE(i.unit_price, 0)
+          ) as total_value
+        FROM items i
+        LEFT JOIN categories c ON i.category_id = c.id
+        LEFT JOIN suppliers s ON i.supplier_id = s.id
+        WHERE i.is_active = 1 AND i.source_type = 'PRODUCTION'
+        AND (i.current_stock 
+            - COALESCE((SELECT SUM(st.quantity) FROM stock_transactions st WHERE st.item_id = i.id AND st.type = 'IN' AND st.created_at > ?), 0)
+            + COALESCE((SELECT SUM(st.quantity) FROM stock_transactions st WHERE st.item_id = i.id AND st.type = 'OUT' AND st.created_at > ?), 0)
+        ) > 0
+        ORDER BY i.name
+      `).all(cutoffTimestamp, cutoffTimestamp, cutoffTimestamp, cutoffTimestamp, cutoffTimestamp, cutoffTimestamp);
+
+      // Working Process In Hand — only issues on or before cutoff
+      workingProcess = dbPrepare(`
+        SELECT 
+          ii.quantity as issued_qty,
+          COALESCE(ii.consumed_quantity, 0) as consumed_qty,
+          COALESCE(ii.returned_quantity, 0) as returned_qty,
+          COALESCE(ii.damage_quantity, 0) as damaged_qty,
+          COALESCE(ii.rejected_quantity, 0) as rejected_qty,
+          (ii.quantity - COALESCE(ii.returned_quantity,0) - COALESCE(ii.damage_quantity,0) - COALESCE(ii.rejected_quantity,0) - COALESCE(ii.consumed_quantity,0)) as outstanding,
+          iss.issue_id, iss.recipient_name, iss.issue_date, iss.status as issue_status,
+          it.name as item_name, it.item_code, COALESCE(ii.unit, it.unit) as unit,
+          it.unit_price, it.currency,
+          COALESCE(NULLIF(ii.style_no, ''), it.style_name) as style_name,
+          COALESCE(NULLIF(ii.purchase_no, ''), it.purchase_no) as purchase_no,
+          COALESCE(NULLIF(ii.order_number, ''), it.order_number) as order_number,
+          it.size, it.color, it.buyer_name,
+          ((ii.quantity - COALESCE(ii.returned_quantity,0) - COALESCE(ii.damage_quantity,0) - COALESCE(ii.rejected_quantity,0) - COALESCE(ii.consumed_quantity,0)) * COALESCE(it.unit_price, 0)) as outstanding_value
+        FROM issue_items ii
+        JOIN issues iss ON ii.issue_id = iss.id
+        JOIN items it ON ii.item_id = it.id
+        WHERE iss.issue_type = 'FACTORY'
+        AND iss.issue_date <= ?
+        AND (ii.quantity - COALESCE(ii.returned_quantity,0) - COALESCE(ii.damage_quantity,0) - COALESCE(ii.rejected_quantity,0) - COALESCE(ii.consumed_quantity,0)) > 0
+        ORDER BY iss.issue_date DESC
+      `).all(cutoffTimestamp);
+    }
+
+    // Compute summaries
+    const computeSummary = (items, stockKey = 'current_stock', valueKey = 'total_value') => {
+      let totalQty = 0, totalBDT = 0, totalUSD = 0, itemCount = items.length;
+      items.forEach(i => {
+        totalQty += Number(i[stockKey] || 0);
+        const val = Number(i[valueKey] || 0);
+        if ((i.currency || 'BDT') === 'USD') totalUSD += val;
+        else totalBDT += val;
+      });
+      return { itemCount, totalQty, totalBDT, totalUSD };
+    };
+
+    const rawSummary = computeSummary(rawMaterials);
+    const fgSummary = computeSummary(finishedGoods);
+    const wipSummary = computeSummary(workingProcess, 'outstanding', 'outstanding_value');
+
+    return {
+      rawMaterials,
+      finishedGoods,
+      workingProcess,
+      cutoffDate,
+      summary: {
+        raw: rawSummary,
+        finished: fgSummary,
+        wip: wipSummary,
+        grandTotalBDT: rawSummary.totalBDT + fgSummary.totalBDT + wipSummary.totalBDT,
+        grandTotalUSD: rawSummary.totalUSD + fgSummary.totalUSD + wipSummary.totalUSD,
+      },
+      generatedAt: new Date().toISOString(),
+    };
   },
 
   

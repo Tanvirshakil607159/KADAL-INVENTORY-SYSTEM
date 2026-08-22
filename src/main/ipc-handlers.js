@@ -30,7 +30,10 @@ const RecipientsRepo = require('./database/repositories/recipients');
 const IssuesRepo = require('./database/repositories/issues');
 const ProductionRepo = require('./database/repositories/production');
 const WarehousesRepo = require('./database/repositories/warehouses');
+const WarehouseBinsRepo = require('./database/repositories/warehouse-bins');
 const WarehouseService = require('./services/warehouse-service');
+const RequisitionService = require('./services/requisition-service');
+const RequisitionsRepo = require('./database/repositories/requisitions');
 function wrapHandler(fn) {
   return async (event, ...args) => {
     try {
@@ -358,7 +361,8 @@ function registerIpcHandlers() {
   const reportChannels = [
     'reports:stockReport', 'reports:movementReport', 'reports:lowStockReport',
     'reports:challanHistory', 'reports:detailedChallanHistory',
-    'reports:dailySummary', 'reports:monthlySummary', 'reports:exportExcel', 'reports:exportPdf'
+    'reports:dailySummary', 'reports:monthlySummary', 'reports:exportExcel', 'reports:exportPdf',
+    'reports:auditReport'
   ];
   
   reportChannels.forEach(channel => ipcMain.removeHandler(channel));
@@ -372,16 +376,116 @@ function registerIpcHandlers() {
   ipcMain.handle('reports:dailySummary', wrapHandler((date) => ReportService.dailySummary(date)));
   ipcMain.handle('reports:monthlySummary', wrapHandler((year, month) => ReportService.monthlySummary(year, month)));
 
+  ipcMain.handle('reports:auditReport', wrapHandler((filters) => ReportService.auditReport(filters)));
+
+  // Helper: compute delivery summary for dailyDelivery / monthlyReport / itemDeliverySummary / categoryDeliverySummary
+  function buildDeliverySummary(data, type) {
+    const totalItems = data.length;
+    const totalQty = data.reduce((s, r) => s + (Number(r.shipped_quantity) || Number(r.total_delivered) || 0), 0);
+    let totalBDT = 0;
+    let totalUSD = 0;
+
+    if (type === 'categoryDeliverySummary') {
+      totalBDT = data.reduce((s, r) => s + (Number(r.total_value_bdt) || 0), 0);
+      totalUSD = data.reduce((s, r) => s + (Number(r.total_value_usd) || 0), 0);
+    } else {
+      totalBDT = data.filter(r => (r.currency || 'BDT') !== 'USD').reduce((s, r) => s + ((Number(r.shipped_quantity) || Number(r.total_delivered) || 0) * (Number(r.unit_price) || 0)), 0);
+      totalUSD = data.filter(r => r.currency === 'USD').reduce((s, r) => s + ((Number(r.shipped_quantity) || Number(r.total_delivered) || 0) * (Number(r.unit_price) || 0)), 0);
+    }
+
+    const buyerMap = {};
+    if (type !== 'itemDeliverySummary' && type !== 'categoryDeliverySummary') {
+      data.forEach(r => {
+        const buyer = r.buyer_name || 'N/A';
+        if (!buyerMap[buyer]) buyerMap[buyer] = { qty: 0, bdt: 0, usd: 0, count: 0 };
+        buyerMap[buyer].count++;
+        const qty = Number(r.shipped_quantity) || Number(r.total_delivered) || 0;
+        buyerMap[buyer].qty += qty;
+        if (r.currency === 'USD') buyerMap[buyer].usd += qty * (Number(r.unit_price) || 0);
+        else buyerMap[buyer].bdt += qty * (Number(r.unit_price) || 0);
+      });
+    }
+
+    const fmtBDT = (v) => `৳${Number(v || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
+    const fmtUSD = (v) => `$${Number(v || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
+
+    const subtitles = [];
+    if (type === 'categoryDeliverySummary') {
+      const sumUnique = data.reduce((s, r) => s + (r.unique_items || 0), 0);
+      subtitles.push(`Total Categories: ${totalItems}    |    Total Unique Items: ${sumUnique.toLocaleString()}    |    Total Delivery Qty: ${totalQty.toLocaleString()}`);
+    } else {
+      subtitles.push(`Total Items: ${totalItems}    |    Total Delivery Qty: ${totalQty.toLocaleString()}`);
+    }
+    let valueLine = `Total Value (BDT): ${fmtBDT(totalBDT)}`;
+    if (totalUSD > 0) valueLine += `    |    Total Value (USD): ${fmtUSD(totalUSD)}`;
+    subtitles.push(valueLine);
+    subtitles.push('');
+
+    let buyerEntries = [];
+    if (type !== 'itemDeliverySummary' && type !== 'categoryDeliverySummary') {
+      buyerEntries = Object.entries(buyerMap).sort((a, b) => (b[1].bdt + b[1].usd) - (a[1].bdt + a[1].usd));
+      subtitles.push('BUYER-WISE SUMMARY:');
+      buyerEntries.forEach(([buyer, s]) => {
+        let line = `${buyer}: ${s.count} items, Qty: ${s.qty.toLocaleString()}`;
+        if (s.bdt > 0) line += ` — BDT: ${fmtBDT(s.bdt)}`;
+        if (s.usd > 0) line += ` — USD: ${fmtUSD(s.usd)}`;
+        subtitles.push(line);
+      });
+    }
+
+    return { subtitles, totalQty, totalBDT, totalUSD, buyerMap: buyerEntries };
+  }
+
   ipcMain.handle('reports:exportExcel', wrapHandler(async (type, data, options) => {
     const settings = SettingsRepo.getAll();
     const columns = getReportColumns(type);
-    return ExcelGenerator.generateReport(getReportTitle(type), columns, data, settings, options);
+    const excelOptions = { ...options };
+    if (type === 'dailyDelivery' || type === 'monthlyReport' || type === 'itemDeliverySummary' || type === 'categoryDeliverySummary') {
+      const summary = buildDeliverySummary(data, type);
+      excelOptions.subtitles = [...(excelOptions.subtitles || []), ...summary.subtitles];
+      
+      if (type === 'categoryDeliverySummary') {
+        const sumUnique = data.reduce((s, r) => s + (r.unique_items || 0), 0);
+        const fmtBDT = (v) => `৳${Number(v || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
+        const fmtUSD = (v) => `$${Number(v || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
+        excelOptions.footerRow = [
+          { text: 'Grand Total:', colSpan: 2, alignment: 'right', bold: true, fillColor: '#f0f0f0' },
+          {},
+          { text: sumUnique.toLocaleString(), alignment: 'center', bold: true, fillColor: '#f0f0f0' },
+          { text: summary.totalQty.toLocaleString(), alignment: 'right', bold: true, fillColor: '#f0f0f0' },
+          { text: summary.totalBDT > 0 ? fmtBDT(summary.totalBDT) : '-', alignment: 'right', bold: true, fillColor: '#f0f0f0' },
+          { text: summary.totalUSD > 0 ? fmtUSD(summary.totalUSD) : '-', alignment: 'right', bold: true, fillColor: '#f0f0f0' }
+        ];
+      }
+    }
+    return ExcelGenerator.generateReport(getReportTitle(type), columns, data, settings, excelOptions);
   }));
 
   ipcMain.handle('reports:exportPdf', wrapHandler(async (type, data, options) => {
     const settings = SettingsRepo.getAll();
     const columns = getReportColumns(type);
-    return PdfGenerator.generateReportPdf(getReportTitle(type), columns, data, settings, options);
+    const pdfOptions = { ...options };
+    if (type === 'dailyDelivery' || type === 'monthlyReport' || type === 'itemDeliverySummary' || type === 'categoryDeliverySummary') {
+      pdfOptions.orientation = 'portrait';
+      const summary = buildDeliverySummary(data, type);
+      pdfOptions.subtitles = [...(pdfOptions.subtitles || []), ...summary.subtitles];
+      pdfOptions.deliverySummary = summary;
+      
+      if (type === 'categoryDeliverySummary') {
+        const sumUnique = data.reduce((s, r) => s + (r.unique_items || 0), 0);
+        const fmtBDT = (v) => `৳${Number(v || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
+        const fmtUSD = (v) => `$${Number(v || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
+        pdfOptions.footerRow = [
+          { text: 'Grand Total:', colSpan: 2, alignment: 'right', bold: true, fillColor: '#f0f0f0' },
+          {},
+          { text: sumUnique.toLocaleString(), alignment: 'center', bold: true, fillColor: '#f0f0f0' },
+          { text: summary.totalQty.toLocaleString(), alignment: 'right', bold: true, fillColor: '#f0f0f0' },
+          { text: summary.totalBDT > 0 ? fmtBDT(summary.totalBDT) : '-', alignment: 'right', bold: true, fillColor: '#f0f0f0' },
+          { text: summary.totalUSD > 0 ? fmtUSD(summary.totalUSD) : '-', alignment: 'right', bold: true, fillColor: '#f0f0f0' }
+        ];
+      }
+    }
+    return PdfGenerator.generateReportPdf(getReportTitle(type), columns, data, settings, pdfOptions);
   }));
 
   ipcMain.handle('gatePass:clearHistory', wrapHandler(async () => {
@@ -513,6 +617,14 @@ function registerIpcHandlers() {
     return ImportService.downloadTemplate();
   }));
 
+  ipcMain.handle('import:downloadProductionTemplate', wrapHandler(async () => {
+    return ImportService.downloadProductionTemplate();
+  }));
+
+  ipcMain.handle('import:importProductionItems', wrapHandler(async (rows) => {
+    return await ImportService.importProductionItems(rows);
+  }));
+
   // ==================== AUDIT ====================
   ipcMain.handle('audit:getLogs', wrapHandler((filters) => {
     return AuditLogsRepo.getAll(filters);
@@ -555,6 +667,23 @@ function registerIpcHandlers() {
     return WarehouseService.transferStock(data, user);
   }));
 
+  ipcMain.handle('warehouses:getNextCode', wrapHandler(() => {
+    return WarehousesRepo.getNextCode();
+  }));
+
+  // ==================== ZONES & BINS ====================
+  ipcMain.handle('warehouseZones:getByWarehouse', wrapHandler((warehouseId) => WarehouseBinsRepo.getZonesByWarehouse(warehouseId)));
+  ipcMain.handle('warehouseZones:create', wrapHandler((data) => WarehouseBinsRepo.createZone(data)));
+  ipcMain.handle('warehouseZones:delete', wrapHandler((id) => WarehouseBinsRepo.deleteZone(id)));
+
+  ipcMain.handle('warehouseBins:getByZone', wrapHandler((zoneId) => WarehouseBinsRepo.getBinsByZone(zoneId)));
+  ipcMain.handle('warehouseBins:getByWarehouse', wrapHandler((warehouseId) => WarehouseBinsRepo.getBinsByWarehouse(warehouseId)));
+  ipcMain.handle('warehouseBins:create', wrapHandler((data) => WarehouseBinsRepo.createBin(data)));
+  ipcMain.handle('warehouseBins:delete', wrapHandler((id) => WarehouseBinsRepo.deleteBin(id)));
+
+  ipcMain.handle('binStock:getByBin', wrapHandler((binId) => WarehouseBinsRepo.getBinStock(binId)));
+  ipcMain.handle('binStock:adjust', wrapHandler((binId, itemId, delta) => WarehouseBinsRepo.adjustBinStock(binId, itemId, delta)));
+
   // ==================== AUTO UPDATE ====================
   ipcMain.handle('system:checkUpdate', wrapHandler(async () => {
 
@@ -574,6 +703,43 @@ function registerIpcHandlers() {
 
   ipcMain.handle('system:getVersion', wrapHandler(() => {
     return app.getVersion();
+  }));
+
+  ipcMain.handle('system:getCurrentDbPath', wrapHandler(() => {
+    const { getDbPath } = require('./database/connection');
+    return getDbPath();
+  }));
+
+  ipcMain.handle('system:selectDatabase', wrapHandler(async () => {
+    const { dialog, app } = require('electron');
+    const { setCustomDbPath } = require('./database/connection');
+    const result = await dialog.showOpenDialog({
+      title: 'Select Database File',
+      properties: ['openFile'],
+      filters: [{ name: 'SQLite Database', extensions: ['db', 'sqlite', 'sqlite3'] }]
+    });
+    if (!result.canceled && result.filePaths.length > 0) {
+      setCustomDbPath(result.filePaths[0]);
+      app.relaunch();
+      app.exit(0);
+    }
+    return { success: true };
+  }));
+
+  ipcMain.handle('system:createDatabase', wrapHandler(async () => {
+    const { dialog, app } = require('electron');
+    const { setCustomDbPath } = require('./database/connection');
+    const result = await dialog.showSaveDialog({
+      title: 'Create New Database File',
+      defaultPath: 'kadal_new.db',
+      filters: [{ name: 'SQLite Database', extensions: ['db'] }]
+    });
+    if (!result.canceled && result.filePath) {
+      setCustomDbPath(result.filePath);
+      app.relaunch();
+      app.exit(0);
+    }
+    return { success: true };
   }));
 
   // ==================== RECIPIENTS ====================
@@ -599,11 +765,12 @@ function registerIpcHandlers() {
   ipcMain.handle('issues:exportExcel', wrapHandler(async (id) => {
     const issue = await IssueService.getById(id);
     const settings = await SettingsRepo.getAll();
+    const isFactory = issue.issue_type === 'FACTORY';
     const columns = [
       { label: 'Issue Item', key: 'item_name' },
       { label: 'Color', key: 'color' },
       { label: 'Issued Qty', key: 'quantity', align: 'right' },
-      { label: 'Returned Qty', key: 'returned_quantity', align: 'right' },
+      ...(!isFactory ? [{ label: 'Returned Qty', key: 'returned_quantity', align: 'right' }] : []),
       { label: 'Unit', key: 'unit' }
     ];
     const subtitles = [
@@ -612,12 +779,18 @@ function registerIpcHandlers() {
       `Recipient: ${issue.recipient_name} (${issue.issue_type})`
     ];
 
-    if (issue.produced_item) {
+    const prodItems = (issue.produced_items && issue.produced_items.length > 0)
+      ? issue.produced_items
+      : (issue.produced_item ? [issue.produced_item] : []);
+
+    if (isFactory && prodItems.length > 0) {
       subtitles.push(`--- PRODUCTION & ORDER INFORMATION ---`);
-      subtitles.push(`Produced Item: [${issue.produced_item.item_code}] ${issue.produced_item.name}`);
-      subtitles.push(`Order No. / Style / Purchase No.: ${[issue.produced_item.order_number, issue.produced_item.style_name, issue.produced_item.purchase_no].filter(Boolean).join(' / ') || '-'}`);
-      subtitles.push(`Order Qty: ${issue.produced_item.order_quantity.toLocaleString()} ${issue.produced_item.unit}`);
-      subtitles.push(`Specs (Color/Size): ${[issue.produced_item.color, issue.produced_item.size].filter(Boolean).join(' / ') || '-'}`);
+      prodItems.forEach((pItem, idx) => {
+        subtitles.push(`Target Product #${idx + 1}: [${pItem.item_code || '-'}] ${pItem.name || '-'}`);
+        subtitles.push(`Order No. / Style / Purchase No.: ${[pItem.order_number, pItem.style_name, pItem.purchase_no].filter(Boolean).join(' / ') || '-'}`);
+        subtitles.push(`Order Qty: ${(pItem.order_quantity || 0).toLocaleString()} ${pItem.unit || 'pcs'}`);
+        subtitles.push(`Specs (Color/Size): ${[pItem.color, pItem.size].filter(Boolean).join(' / ') || '-'}`);
+      });
     }
 
     const signatures = ['Receiver', 'Issued by', 'Order by', 'Approved by'];
@@ -640,7 +813,51 @@ function registerIpcHandlers() {
   // ==================== PRODUCTION ====================
   ipcMain.handle('production:getAll', wrapHandler((filters) => ProductionRepo.getAll(filters)));
   ipcMain.handle('production:create', wrapHandler((data) => ProductionRepo.create(data)));
+  ipcMain.handle('production:createBatch', wrapHandler((data) => ProductionRepo.createBatch(data)));
   ipcMain.handle('production:delete', wrapHandler((id) => ProductionRepo.delete(id)));
+
+  // ==================== REQUISITIONS ====================
+  ipcMain.handle('requisitions:getAll', wrapHandler((filters) => RequisitionService.getAll(filters)));
+  ipcMain.handle('requisitions:getById', wrapHandler((id) => RequisitionService.getById(id)));
+  ipcMain.handle('requisitions:create', wrapHandler((data) => RequisitionService.create(data)));
+  ipcMain.handle('requisitions:approve', wrapHandler((id, notes) => RequisitionService.approve(id, notes)));
+  ipcMain.handle('requisitions:reject', wrapHandler((id, notes) => RequisitionService.reject(id, notes)));
+  ipcMain.handle('requisitions:cancel', wrapHandler((id, notes) => RequisitionService.cancel(id, notes)));
+  ipcMain.handle('requisitions:fulfill', wrapHandler((id) => RequisitionService.fulfill(id)));
+  ipcMain.handle('requisitions:delete', wrapHandler((id) => RequisitionService.deleteRequisition(id)));
+  ipcMain.handle('requisitions:getNextNumber', wrapHandler(() => RequisitionService.getNextNumber()));
+  ipcMain.handle('requisitions:getFieldSuggestions', wrapHandler((field, query) => RequisitionService.getFieldSuggestions(field, query)));
+
+  ipcMain.handle('requisitions:exportPdf', wrapHandler(async (id) => {
+    const req = await RequisitionService.getById(id);
+    if (!req) throw new Error('Requisition not found');
+    const settingsData = await SettingsRepo.getAll();
+    return PdfGenerator.generateRequisitionPdf(req, settingsData);
+  }));
+
+  ipcMain.handle('requisitions:exportExcel', wrapHandler(async (id) => {
+    const req = await RequisitionService.getById(id);
+    if (!req) throw new Error('Requisition not found');
+    const settingsData = await SettingsRepo.getAll();
+    const columns = [
+      { key: 'item_code', label: 'Item Code', width: 60 },
+      { key: 'item_name', label: 'Item Name', width: '*' },
+      { key: 'style_name', label: 'Style', width: 60, format: (v) => v || '-' },
+      { key: 'size', label: 'Size', width: 40, format: (v) => v || '-' },
+      { key: 'color', label: 'Color', width: 40, format: (v) => v || '-' },
+      { key: 'buyer_name', label: 'Buyer', width: 65, format: (v) => v || '-' },
+      { key: 'requested_quantity', label: 'Requested Qty', width: 55, align: 'right' },
+      { key: 'approved_quantity', label: 'Approved Qty', width: 55, align: 'right' },
+      { key: 'issued_quantity', label: 'Issued Qty', width: 55, align: 'right' },
+      { key: 'item_unit', label: 'Unit', width: 40 },
+    ];
+    const subtitles = [
+      `Requisition No: ${req.requisition_no}`,
+      `Requester: ${req.requester_name || '-'} | Dept: ${req.department || '-'}`,
+      `Status: ${req.status} | Date: ${new Date(req.requisition_date).toLocaleDateString('en-GB')}`,
+    ];
+    return ExcelGenerator.generateReport(`Requisition-${req.requisition_no}`, columns, req.items || [], settingsData, { subtitles });
+  }));
 
   console.log('[IPC] All handlers registered');
 }
@@ -667,8 +884,10 @@ function getReportColumns(type) {
         { key: 'style_purchase_order', label: 'Style / Purchase / Order', width: 120, format: (v, r) => `${r.style_name || '-'} / ${r.purchase_no || '-'} / ${r.order_number || '-'}` },
         { key: 'size_color', label: 'Size / Color', width: 80, format: (v, r) => [r.size, r.color].filter(Boolean).join(' / ') || '-' },
         { key: 'buyer_name', label: 'Buyer', width: 80 },
+        { key: 'order_quantity', label: 'Order Qty', width: 60, align: 'right', format: (v, r) => r.order_quantity || 0 },
         { key: 'total_in', label: 'Total IN', width: 60, align: 'right' },
         { key: 'total_out', label: 'Total OUT', width: 60, align: 'right' },
+        { key: 'balance', label: 'Balance', width: 60, align: 'right', format: (v, r) => r.balance ?? 0 },
         { key: 'current_stock', label: 'Current Stock', width: 70, align: 'right' },
         { key: 'unit', label: 'Unit', width: 40 },
       ];
@@ -696,8 +915,48 @@ function getReportColumns(type) {
         { key: 'balance', label: 'Balance', width: 45, align: 'right', format: (v, r) => r.balance ?? 0 },
         { key: 'status', label: 'Status', width: 45 },
       ];
-
-
+    case 'itemChallan':
+      return [
+        { key: 'item_name', label: 'Item Details', width: 110, format: (v, r) => `${r.item_name || '-'}\n${r.item_code || '-'}` },
+        { key: 'style_order_purchase', label: 'Style / Order / Purchase', width: 120, format: (v, r) => `${r.style_name || '-'}\n${r.order_number || '-'} / ${r.purchase_no || '-'}` },
+        { key: 'buyer_name', label: 'Buyer', width: 65, format: (v, r) => r.buyer_name || '-' },
+        { key: 'challan_number', label: 'Challan No', width: 65 },
+        { key: 'challan_date', label: 'Date', width: 55, format: (v) => v ? new Date(v).toLocaleDateString('en-GB') : '' },
+        { key: 'receiver_name', label: 'Receiver', width: 75 },
+        { key: 'order_quantity', label: 'Order Qty', width: 45, align: 'right', format: (v, r) => r.order_quantity ?? 0 },
+        { key: 'shipped_quantity', label: 'Shipped', width: 45, align: 'right', format: (v, r) => r.shipped_quantity ?? 0 },
+        { key: 'status', label: 'Status', width: 45 },
+      ];
+    case 'dailyDelivery':
+    case 'monthlyReport':
+      return [
+        { key: 'sl_no', label: 'SL', width: 25, format: (v, r, i) => i + 1 },
+        { key: 'item_name', label: 'Item Details', width: '*', format: (v, r) => `${r.item_name || '-'}\n${[r.size, r.color].filter(Boolean).join(' / ') || '-'}` },
+        { key: 'buyer_name', label: 'Buyer', width: 55, format: (v, r) => r.buyer_name || '-' },
+        { key: 'style_name', label: 'Style', width: 60, format: (v, r) => r.style_name || '-' },
+        { key: 'shipped_quantity', label: 'Del. Qty', width: 40, align: 'right', format: (v, r) => r.shipped_quantity ?? 0 },
+        { key: 'unit_price', label: 'Unit Price', width: 55, align: 'right', format: (v, r) => `${r.currency === 'USD' ? '$' : '৳'}${Number(r.unit_price || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}` },
+        { key: 'total_value', label: 'Total Value', width: 60, align: 'right', format: (v, r) => `${r.currency === 'USD' ? '$' : '৳'}${Number((r.shipped_quantity || 0) * (r.unit_price || 0)).toLocaleString(undefined, { minimumFractionDigits: 2 })}` },
+        { key: 'challan_number', label: 'Challan No.', width: 55 },
+      ];
+    case 'itemDeliverySummary':
+      return [
+        { key: 'sl_no', label: 'SL', width: 25, format: (v, r, i) => i + 1 },
+        { key: 'item_name', label: 'Item Details', width: '*', format: (v, r) => `${r.item_name || '-'}\n${r.item_code || '-'}\n${[r.size, r.color].filter(Boolean).join(' / ') || '-'}` },
+        { key: 'total_delivered', label: 'Total Delivered', width: 60, align: 'right', format: (v, r) => r.total_delivered ?? 0 },
+        { key: 'unit_price', label: 'Unit Price', width: 60, align: 'right', format: (v, r) => `${r.currency === 'USD' ? '$' : '৳'}${Number(r.unit_price || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}` },
+        { key: 'total_value', label: 'Total Value', width: 70, align: 'right', format: (v, r) => `${r.currency === 'USD' ? '$' : '৳'}${Number((r.total_delivered || 0) * (r.unit_price || 0)).toLocaleString(undefined, { minimumFractionDigits: 2 })}` },
+        { key: 'challan_numbers', label: 'Challans', width: 100, format: (v, r) => (r.challan_numbers || []).join(', ') },
+      ];
+    case 'categoryDeliverySummary':
+      return [
+        { key: 'sl_no', label: 'SL', width: 30, format: (v, r, i) => i + 1 },
+        { key: 'category_name', label: 'Category Name', width: '*', format: (v, r) => r.category_name || '-' },
+        { key: 'unique_items', label: 'Unique Items', width: 65, align: 'center', format: (v, r) => r.unique_items || 0 },
+        { key: 'total_delivered', label: 'Total Delivered', width: 75, align: 'right', format: (v, r) => r.total_delivered ?? 0 },
+        { key: 'total_value_bdt', label: 'Total Value (BDT)', width: 85, align: 'right', format: (v, r) => r.total_value_bdt > 0 ? `৳${Number(r.total_value_bdt).toLocaleString(undefined, { minimumFractionDigits: 2 })}` : '-' },
+        { key: 'total_value_usd', label: 'Total Value (USD)', width: 85, align: 'right', format: (v, r) => r.total_value_usd > 0 ? `$${Number(r.total_value_usd).toLocaleString(undefined, { minimumFractionDigits: 2 })}` : '-' },
+      ];
 
     case 'movementDetail':
       return [
@@ -736,20 +995,16 @@ function getReportColumns(type) {
       ];
     case 'factoryProductionReport':
       return [
-        { key: 'created_at', label: 'Batch Date', width: 50, format: (v) => v ? new Date(v).toLocaleDateString('en-GB') : '' },
-        { key: 'id', label: 'Production ID', width: 55, format: (v) => `PRD-${v}` },
-        { key: 'issue_id', label: 'Issue ID', width: 55 },
-        { key: 'recipient_name', label: 'Factory', width: 70 },
+        { key: 'created_at', label: 'Date', width: 45, format: (v) => v ? new Date(v).toLocaleDateString('en-GB') : '' },
+        { key: 'id', label: 'Production / Issue ID', width: 70, format: (v, r) => `PRD-${r.id}\n${r.issue_id}` },
+        { key: 'recipient_name', label: 'Factory', width: 65 },
         { key: 'product_name', label: 'Produced Item', width: 80 },
         { key: 'product_code', label: 'Code', width: 50 },
-        { key: 'style_name', label: 'Style', width: 60, format: (v) => v || '-' },
-        { key: 'purchase_no', label: 'Purchase No', width: 60, format: (v) => v || '-' },
-        { key: 'order_number', label: 'Order No', width: 60, format: (v) => v || '-' },
-        { key: 'size', label: 'Size', width: 40, format: (v) => v || '-' },
-        { key: 'color', label: 'Color', width: 40, format: (v) => v || '-' },
-        { key: 'buyer_name', label: 'Buyer', width: 65, format: (v) => v || '-' },
-        { key: 'production_quantity', label: 'Produced Qty', width: 40, align: 'right' },
-        { key: 'wastage_quantity', label: 'Wastage Qty', width: 40, align: 'right', format: (v) => v || 0 },
+        { key: 'style_name', label: 'Style / Purchase / Order No', width: 90, format: (v, r) => `${r.style_name || '-'}\n${r.purchase_no || '-'} / ${r.order_number || '-'}` },
+        { key: 'size', label: 'Size / Color', width: 50, format: (v, r) => `${r.size || '-'} / ${r.color || '-'}` },
+        { key: 'buyer_name', label: 'Buyer', width: 60, format: (v) => v || '-' },
+        { key: 'production_quantity', label: 'Produced Qty', width: 45, align: 'right' },
+        { key: 'wastage_quantity', label: 'Wastage', width: 45, align: 'right', format: (v) => v || 0 },
         { key: 'unit', label: 'Unit', width: 35, format: (v) => v || 'pcs' },
       ];
     case 'returnReport':
@@ -788,6 +1043,58 @@ function getReportColumns(type) {
         { key: 'outstanding', label: 'Outstanding', width: 55, align: 'right' },
         { key: 'status', label: 'Status', width: 45 },
       ];
+    case 'requisitionReport':
+      return [
+        { key: 'requisition_no', label: 'Req. No', width: 65 },
+        { key: 'requisition_date', label: 'Date', width: 55, format: (v) => v ? new Date(v).toLocaleDateString('en-GB') : '' },
+        { key: 'requester_name', label: 'Requester', width: 80 },
+        { key: 'department', label: 'Department', width: 70, format: (v) => v || '-' },
+        { key: 'recipient_name', label: 'Recipient', width: 80, format: (v) => v || '-' },
+        { key: 'purpose', label: 'Purpose', width: 80, format: (v) => v || '-' },
+        { key: 'item_count', label: 'Items', width: 40, align: 'right' },
+        { key: 'total_requested', label: 'Total Requested', width: 65, align: 'right' },
+        { key: 'status', label: 'Status', width: 55 },
+      ];
+    case 'auditRawMaterial':
+      return [
+        { key: 'item_code', label: 'Item Code', width: 65 },
+        { key: 'name', label: 'Item Name', width: '*' },
+        { key: 'style_purchase_order', label: 'Style / Purchase / Order', width: 110, format: (v, r) => `${r.style_name || '-'} / ${r.purchase_no || '-'} / ${r.order_number || '-'}` },
+        { key: 'size_color', label: 'Size / Color', width: 70, format: (v, r) => [r.size, r.color].filter(Boolean).join(' / ') || '-' },
+        { key: 'buyer_name', label: 'Buyer', width: 70, format: (v) => v || '-' },
+        { key: 'supplier_name', label: 'Supplier', width: 70, format: (v) => v || '-' },
+        { key: 'current_stock', label: 'Stock In Hand', width: 55, align: 'right' },
+        { key: 'unit', label: 'Unit', width: 35 },
+        { key: 'unit_price', label: 'Unit Price', width: 55, align: 'right', format: (v, r) => `${r.currency === 'USD' ? '$' : '৳'}${Number(v || 0).toFixed(2)}` },
+        { key: 'total_value', label: 'Total Value', width: 65, align: 'right', format: (v, r) => `${r.currency === 'USD' ? '$' : '৳'}${Number(v || 0).toFixed(2)}` },
+      ];
+    case 'auditFinishedGoods':
+      return [
+        { key: 'item_code', label: 'Item Code', width: 65 },
+        { key: 'name', label: 'Item Name', width: '*' },
+        { key: 'style_purchase_order', label: 'Style / Purchase / Order', width: 110, format: (v, r) => `${r.style_name || '-'} / ${r.purchase_no || '-'} / ${r.order_number || '-'}` },
+        { key: 'size_color', label: 'Size / Color', width: 70, format: (v, r) => [r.size, r.color].filter(Boolean).join(' / ') || '-' },
+        { key: 'buyer_name', label: 'Buyer', width: 70, format: (v) => v || '-' },
+        { key: 'current_stock', label: 'Stock In Hand', width: 55, align: 'right' },
+        { key: 'unit', label: 'Unit', width: 35 },
+        { key: 'unit_price', label: 'Unit Price', width: 55, align: 'right', format: (v, r) => `${r.currency === 'USD' ? '$' : '৳'}${Number(v || 0).toFixed(2)}` },
+        { key: 'total_value', label: 'Total Value', width: 65, align: 'right', format: (v, r) => `${r.currency === 'USD' ? '$' : '৳'}${Number(v || 0).toFixed(2)}` },
+      ];
+    case 'auditWorkingProcess':
+      return [
+        { key: 'issue_id', label: 'Issue ID', width: 55 },
+        { key: 'recipient_name', label: 'Factory', width: 70 },
+        { key: 'item_name_code', label: 'Item / Code', width: 100, format: (v, r) => `${r.item_name || '-'} (${r.item_code || '-'})` },
+        { key: 'style_purchase_order', label: 'Style / Purchase / Order', width: 100, format: (v, r) => `${r.style_name || '-'} / ${r.purchase_no || '-'} / ${r.order_number || '-'}` },
+        { key: 'buyer_name', label: 'Buyer', width: 65, format: (v) => v || '-' },
+        { key: 'issued_qty', label: 'Issued', width: 40, align: 'right' },
+        { key: 'consumed_qty', label: 'Consumed', width: 45, align: 'right' },
+        { key: 'returned_qty', label: 'Returned', width: 45, align: 'right' },
+        { key: 'outstanding', label: 'Outstanding', width: 50, align: 'right' },
+        { key: 'unit', label: 'Unit', width: 35 },
+        { key: 'unit_price', label: 'Unit Price', width: 55, align: 'right', format: (v, r) => `${r.currency === 'USD' ? '$' : '৳'}${Number(v || 0).toFixed(2)}` },
+        { key: 'outstanding_value', label: 'Outstanding Value', width: 65, align: 'right', format: (v, r) => `${r.currency === 'USD' ? '$' : '৳'}${Number(v || 0).toFixed(2)}` },
+      ];
     default:
       return [];
   }
@@ -799,12 +1106,21 @@ function getReportTitle(type) {
     case 'movement': return 'Stock Movement Report';
     case 'lowStock': return 'Low Stock Alert Report';
     case 'challan': return 'Challan History Report';
+    case 'itemChallan': return 'Item Wise Challan Report';
+    case 'dailyDelivery': return 'Daily Delivery Report';
+    case 'itemDeliverySummary': return 'Item Wise Delivery Summary';
+    case 'categoryDeliverySummary': return 'Category Wise Delivery Summary';
+    case 'monthlyReport': return 'Monthly Report';
     case 'movementDetail': return 'Item Stock Movement Details';
     case 'issueReport': return 'Issue Report';
     case 'returnReport': return 'Return Report';
     case 'employeeOutstanding': return 'Employee Outstanding Report';
     case 'issueReturnSummary': return 'Issue vs Return Summary';
     case 'factoryProductionReport': return 'Factory Production Report';
+    case 'requisitionReport': return 'Requisition Report';
+    case 'auditRawMaterial': return 'Audit Report - Raw Material In Hand';
+    case 'auditFinishedGoods': return 'Audit Report - Finished Goods In Hand';
+    case 'auditWorkingProcess': return 'Audit Report - Working Process In Hand';
     default: return 'Report';
   }
 }

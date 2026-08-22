@@ -1,0 +1,28 @@
+# Electron main process (not needed for web)
+src/main/
+src/preload/
+
+# Build outputs & installers
+release/
+installers/
+exports/
+.firebase/
+
+# Debug & scratch scripts
+*.bat
+check_*.js
+debug_*.js
+scratch_*.js
+inspect_*.js
+print_*.js
+find-*.js
+fix_*.js
+seed_*.js
+test_*.js
+
+# SQL migration files
+*.sql
+
+# Git
+.git/
+.github/

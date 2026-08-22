@@ -59,7 +59,7 @@ function IssueEntryTab({ addToast, user }) {
   const [selectedDetailIssue, setSelectedDetailIssue] = useState(null);
   const [associatedProduction, setAssociatedProduction] = useState([]);
   const [loadingDetails, setLoadingDetails] = useState(false);
-  const [producedProduct, setProducedProduct] = useState(null);
+  const [producedProducts, setProducedProducts] = useState([]);
   const [searchProductQuery, setSearchProductQuery] = useState('');
 
   useEffect(() => {
@@ -106,10 +106,14 @@ function IssueEntryTab({ addToast, user }) {
 
   const removeItem = (idx) => setIssueItems(issueItems.filter((_, i) => i !== idx));
 
+  const removeProducedProduct = (id) => {
+    setProducedProducts(producedProducts.filter(p => p.id !== id));
+  };
+
   const handleSubmit = async () => {
     if (!issueForm.recipientId) return addToast('error', 'Select a recipient');
-    if (issueForm.issueType === 'FACTORY' && !producedProduct) {
-      return addToast('error', 'Select the target finished product to be produced');
+    if (issueForm.issueType === 'FACTORY' && producedProducts.length === 0) {
+      return addToast('error', 'Select at least one target finished product to be produced');
     }
     if (issueItems.length === 0) return addToast('error', 'Add at least one item');
     for (const item of issueItems) {
@@ -122,13 +126,14 @@ function IssueEntryTab({ addToast, user }) {
         issueType: issueForm.issueType, recipientId: issueForm.recipientId, recipientName: issueForm.recipientName,
         issueDate: issueForm.issueDate, expectedReturnDate: !isReturnable ? null : issueForm.expectedReturnDate, remarks: issueForm.remarks,
         isReturnable: isReturnable,
-        producedItemId: producedProduct?.id,
+        producedItemId: producedProducts[0]?.id,
+        producedItemIds: producedProducts.map(p => p.id),
         items: issueItems.map(i => ({ itemId: i.itemId, quantity: Number(i.quantity), unit: i.unit, styleNo: i.styleNo, orderNumber: i.orderNumber, purchaseNo: i.purchaseNo, notes: i.notes })),
       });
       if (res?.success) { 
         addToast('success', `Issue ${res.data.issueId} created!`); 
         clearIssue(); 
-        setProducedProduct(null);
+        setProducedProducts([]);
         setSearchProductQuery('');
         setIsReturnable(true);
         setShowForm(false); 
@@ -154,7 +159,7 @@ function IssueEntryTab({ addToast, user }) {
       <div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <h3 style={{ margin: 0 }}>New Issue — <span style={{ color: 'var(--accent)' }}>{nextId}</span></h3>
-          <button className="btn btn-outline" onClick={() => { setShowForm(false); clearIssue(); setIsReturnable(true); }}>Cancel</button>
+          <button className="btn btn-outline" onClick={() => { setShowForm(false); clearIssue(); setProducedProducts([]); setIsReturnable(true); }}>Cancel</button>
         </div>
         <div className="card" style={{ padding: 20, marginBottom: 16 }}>
           <div style={{ display: 'grid', gridTemplateColumns: issueForm.issueType === 'EMPLOYEE' ? '1fr 1fr 1fr 1fr' : '1fr 1fr 1fr', gap: 16 }}>
@@ -192,70 +197,61 @@ function IssueEntryTab({ addToast, user }) {
             </div>
           </div>
 
-          {/* TARGET PRODUCT SEARCH & SELECT FOR FACTORY ISSUES */}
+          {/* TARGET PRODUCTS SEARCH & SELECT FOR FACTORY ISSUES */}
           {issueForm.issueType === 'FACTORY' && (
-            <div style={{ position: 'relative', marginTop: 12, borderTop: '1px dashed var(--border)', paddingTop: 12 }}>
-              <label className="form-label" style={{ fontWeight: 600 }}>Target Finished Product to be Produced *</label>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <input 
-                  type="text" 
-                  className="form-input" 
-                  placeholder="Type item name or code to search expected finished product..."
-                  value={searchProductQuery}
-                  onChange={e => setSearchProductQuery(e.target.value)}
-                />
-                {producedProduct && (
-                  <button 
-                    type="button" 
-                    className="btn btn-outline btn-sm" 
-                    onClick={() => { setProducedProduct(null); setSearchProductQuery(''); }}
-                  >
-                    Clear Selection
-                  </button>
-                )}
-              </div>
-
-              {producedProduct ? (
-                <div style={{ marginTop: 8, padding: 12, border: '1px solid var(--accent)', background: 'rgba(var(--accent-rgb), 0.05)', borderRadius: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div>
-                    <div style={{ fontWeight: 600, color: 'var(--accent)' }}>{producedProduct.name}</div>
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Code: {producedProduct.item_code} | Current Stock: {producedProduct.current_stock || producedProduct.currentStock || 0} {producedProduct.unit}</div>
-                  </div>
-                  <div style={{ fontSize: 11 }} className="badge badge-info">Target Product Linked</div>
-                </div>
-              ) : searchProductQuery.trim() !== '' && (
-                <div style={{ 
-                  position: 'absolute', zIndex: 10, width: '100%', 
-                  background: 'var(--bg-card)', border: '1px solid var(--border)', 
-                  borderRadius: 6, marginTop: 4, maxHeight: 180, overflowY: 'auto',
-                  boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
-                }}>
-                  {allItems.filter(item => 
-                    item.name.toLowerCase().includes(searchProductQuery.toLowerCase()) ||
-                    item.item_code.toLowerCase().includes(searchProductQuery.toLowerCase())
-                  ).slice(0, 10).map(item => (
-                    <div 
-                      key={item.id}
-                      onClick={() => {
-                        setProducedProduct(item);
-                        setSearchProductQuery(item.name);
-                      }}
-                      style={{ 
-                        padding: '10px 12px', cursor: 'pointer', borderBottom: '1px solid var(--border)',
-                        display: 'flex', justifyContent: 'space-between', fontSize: 13,
-                        transition: 'background 0.2s'
-                      }}
-                      onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-muted)'}
-                      onMouseLeave={e => e.currentTarget.style.background = 'none'}
+            <div style={{ marginTop: 12, borderTop: '1px dashed var(--border)', paddingTop: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <label className="form-label" style={{ fontWeight: 600, margin: 0 }}>Target Finished Product(s) to be Produced * ({producedProducts.length})</label>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {producedProducts.length > 0 && (
+                    <button 
+                      type="button" 
+                      className="btn btn-ghost btn-sm" 
+                      onClick={() => setProducedProducts([])}
+                      style={{ color: 'var(--danger)', fontSize: 11 }}
                     >
+                      <Trash2 size={12} /> Clear All
+                    </button>
+                  )}
+                  <button 
+                    type="button"
+                    className="btn btn-outline btn-sm" 
+                    onClick={() => openModal('TARGET_PRODUCT_BROWSER', { 
+                      items: allItems, 
+                      onSelect: (item) => { 
+                        setProducedProducts(prev => {
+                          if (prev.some(p => p.id === item.id)) return prev;
+                          return [...prev, item];
+                        }); 
+                      } 
+                    })}
+                  >
+                    <Search size={14} /> Add Target Product
+                  </button>
+                </div>
+              </div>
+              {producedProducts.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {producedProducts.map((pProduct, pIdx) => (
+                    <div key={pProduct.id || pIdx} style={{ padding: '8px 12px', border: '1px solid var(--accent)', background: 'rgba(var(--accent-rgb), 0.05)', borderRadius: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <div>
-                        <strong>{item.name}</strong> 
-                        <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 6 }}>({item.item_code})</span>
+                        <div style={{ fontWeight: 600, color: 'var(--accent)', fontSize: 13 }}>{pProduct.name}</div>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Code: {pProduct.item_code} | Current Stock: {pProduct.current_stock || pProduct.currentStock || 0} {pProduct.unit} {pProduct.order_quantity != null && pProduct.order_quantity > 0 ? `| Order Qty: ${pProduct.order_quantity} ` : ''}{pProduct.style_name ? `| Style: ${pProduct.style_name}` : ''}</div>
                       </div>
-                      <span style={{ color: 'var(--accent)' }}>{item.current_stock || item.currentStock || 0} {item.unit}</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontSize: 11 }} className="badge badge-info">Target #{pIdx + 1}</span>
+                        <button type="button" className="btn btn-ghost btn-icon btn-sm" onClick={() => removeProducedProduct(pProduct.id)} title="Remove Product">
+                          <Trash2 size={13} color="var(--danger)" />
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
+              ) : (
+                <p className="text-muted" style={{ textAlign: 'center', padding: 16, margin: 0 }}>
+                  <Package size={18} style={{marginBottom: 4}} /><br/>
+                  Click "Add Target Product" to search and select one or multiple finished products to produce
+                </p>
               )}
             </div>
           )}
@@ -274,7 +270,7 @@ function IssueEntryTab({ addToast, user }) {
             <div className="table-wrapper"><table className="data-table"><thead><tr><th>Item</th><th>Buyer</th><th>Style / Order</th><th style={{textAlign:'right'}}>Stock</th><th style={{textAlign:'right',width:90}}>Qty *</th><th>Unit</th><th>Notes</th><th></th></tr></thead>
               <tbody>{issueItems.map((item, idx) => (
                 <tr key={idx}>
-                  <td><div style={{fontWeight:600}}>{item.name}</div><div style={{fontSize:11,color:'var(--text-muted)'}}>{item.itemCode}{item.size ? ` | ${item.size}` : ''}{item.color ? ` | ${item.color}` : ''}</div></td>
+                  <td><div style={{fontWeight:600}}>{item.name}</div><div style={{fontSize:11,color:'var(--text-muted)'}}>{item.itemCode}{item.orderQuantity != null && item.orderQuantity > 0 ? ` | Order Qty: ${item.orderQuantity}` : ''}{item.size ? ` | Size: ${item.size}` : ''}{item.color ? ` | Color: ${item.color}` : ''}</div></td>
                   <td style={{fontSize:12}}>{item.buyerName || '-'}</td>
                   <td style={{fontSize:12}}>{item.styleNo || '-'} / {item.orderNumber || '-'}</td>
                   <td className="text-right text-mono fw-bold" style={{color: item.currentStock <= 5 ? 'var(--danger)' : 'var(--success)'}}>{item.currentStock}</td>
@@ -351,13 +347,21 @@ function IssueEntryTab({ addToast, user }) {
             padding: 24, background: 'var(--bg-card)', border: '1px solid var(--border)',
             position: 'relative', boxShadow: '0 8px 32px rgba(0,0,0,0.4)'
           }}>
-            <button 
-              className="btn btn-outline btn-sm" 
-              style={{ position: 'absolute', top: 20, right: 20 }}
-              onClick={() => setSelectedDetailIssue(null)}
-            >
-              Close
-            </button>
+            <div style={{ position: 'absolute', top: 20, right: 20, display: 'flex', gap: 8 }}>
+              <button 
+                className="btn btn-primary btn-sm" 
+                onClick={() => window.kadal.issues.exportPdf(selectedDetailIssue.id)}
+                title="Print PDF Issue Paper"
+              >
+                <FileText size={14} style={{ marginRight: 4 }} /> Print PDF
+              </button>
+              <button 
+                className="btn btn-outline btn-sm" 
+                onClick={() => setSelectedDetailIssue(null)}
+              >
+                Close
+              </button>
+            </div>
 
             <h3 style={{ marginTop: 0, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 10 }}>
               <Eye size={20} color="var(--accent)" /> Issue Details — <span style={{ color: 'var(--accent)' }}>{selectedDetailIssue.issue_id}</span>
@@ -373,17 +377,21 @@ function IssueEntryTab({ addToast, user }) {
               <div><strong>Category:</strong> {selectedDetailIssue.issue_type === 'EMPLOYEE' ? (selectedDetailIssue.is_returnable ? 'Returnable' : 'Non-Returnable') : 'N/A'}</div>
               <div><strong>Expected Return:</strong> {selectedDetailIssue.expected_return_date ? new Date(selectedDetailIssue.expected_return_date).toLocaleDateString('en-GB') : 'N/A'}</div>
               <div><strong>Remarks:</strong> {selectedDetailIssue.remarks || 'None'}</div>
-              {selectedDetailIssue.produced_item_id && (
+              {(selectedDetailIssue.produced_items?.length > 0 || selectedDetailIssue.produced_item || selectedDetailIssue.produced_item_id) && (
                 <div style={{ gridColumn: 'span 3', borderTop: '1px solid var(--border)', paddingTop: 10, marginTop: 4 }}>
-                  <strong>Target Finished Product to Produce:</strong>{' '}
-                  <span style={{ color: 'var(--accent)', fontWeight: 600 }}>
-                    {allItems.find(it => it.id === selectedDetailIssue.produced_item_id)?.name || `Item ID: ${selectedDetailIssue.produced_item_id}`}
-                  </span>{' '}
-                  {allItems.find(it => it.id === selectedDetailIssue.produced_item_id)?.item_code && (
-                    <span style={{ color: 'var(--text-muted)' }}>
-                      ({allItems.find(it => it.id === selectedDetailIssue.produced_item_id)?.item_code})
-                    </span>
-                  )}
+                  <strong>Target Finished Product(s) to Produce:</strong>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
+                    {(selectedDetailIssue.produced_items && selectedDetailIssue.produced_items.length > 0
+                      ? selectedDetailIssue.produced_items
+                      : [selectedDetailIssue.produced_item || allItems.find(it => it.id === selectedDetailIssue.produced_item_id)]
+                    ).filter(Boolean).map((pItem, pIdx) => (
+                      <div key={pItem.id || pIdx} className="badge badge-info" style={{ padding: '6px 10px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{ fontWeight: 600 }}>{pItem.name}</span>
+                        {pItem.item_code && <span style={{ opacity: 0.85 }}>({pItem.item_code})</span>}
+                        {pItem.style_name && <span style={{ opacity: 0.85 }}>| Style: {pItem.style_name}</span>}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>

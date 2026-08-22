@@ -3,11 +3,12 @@ import useStore from '../../store/useStore';
 import SuggestionInput from '../ui/SuggestionInput';
 
 export default function ItemFormModal({ data, onSaved }) {
-  const { addToast, closeModal, setModalMinimized, modal, categories, suppliers, units } = useStore();
+  const { addToast, closeModal, setModalMinimized, modal, categories, suppliers, units, user } = useStore();
   const { item, buyers, distinctValues } = data;
   const isMinimized = modal?.isMinimized;
   
-  const dv = distinctValues || { names: [], colors: [], sizes: [], styles: [], purchases: [], orders: [] };
+  const [buyersList, setBuyersList] = useState(buyers || []);
+  const [dvList, setDvList] = useState(distinctValues || { names: [], colors: [], sizes: [], styles: [], purchases: [], orders: [], notes: [] });
   const [form, setForm] = useState({
     itemCode: item?.itemCode || item?.item_code || '', 
     name: item?.name || '', 
@@ -37,7 +38,17 @@ export default function ItemFormModal({ data, onSaved }) {
         if (res.success) setForm(f => ({ ...f, itemCode: res.data }));
       });
     }
-  }, [item]);
+    if (!buyers) {
+      window.kadal.buyers.getAll().then(res => {
+        if (res.success) setBuyersList(res.data);
+      });
+    }
+    if (!distinctValues) {
+      window.kadal.items.getDistinctValues().then(res => {
+        if (res.success) setDvList(res.data);
+      });
+    }
+  }, [item, buyers, distinctValues]);
 
   const isFilled = (val) => {
     if (val === null || val === undefined) return false;
@@ -55,7 +66,7 @@ export default function ItemFormModal({ data, onSaved }) {
     ];
     
     // Only require openingStock for new items that are SOURCE type
-    if ((!item || data.isNewItem) && form.sourceType !== 'PRODUCTION') {
+    if ((!item || data.isNewItem) && form.sourceType !== 'PRODUCTION' && user?.roleName !== 'Merchandiser') {
       requiredFields.push('openingStock');
     }
 
@@ -151,7 +162,7 @@ export default function ItemFormModal({ data, onSaved }) {
               label="Item Name"
               value={form.name}
               onChange={v => set('name', v)}
-              suggestions={dv.names}
+              suggestions={dvList.names}
               placeholder="e.g. Metal Button 20mm"
               error={errors.name}
               required
@@ -169,7 +180,7 @@ export default function ItemFormModal({ data, onSaved }) {
               label="Size"
               value={form.size}
               onChange={v => set('size', v)}
-              suggestions={dv.sizes}
+              suggestions={dvList.sizes}
               placeholder="e.g. 20mm"
               error={errors.size}
               required
@@ -178,7 +189,7 @@ export default function ItemFormModal({ data, onSaved }) {
               label="Color"
               value={form.color}
               onChange={v => set('color', v)}
-              suggestions={dv.colors}
+              suggestions={dvList.colors}
               placeholder="e.g. Gold"
               error={errors.color}
               required
@@ -189,14 +200,14 @@ export default function ItemFormModal({ data, onSaved }) {
               <label className="form-label">Buyer Name *</label>
               <select className={`form-select ${errors.buyerName ? 'error' : (isFilled(form.buyerName) ? 'filled' : '')}`} value={form.buyerName} onChange={e => set('buyerName', e.target.value)}>
                 <option value="">Select Buyer...</option>
-                {buyers?.map(b => <option key={b.id} value={b.name}>{b.name}</option>)}
+                {buyersList?.map(b => <option key={b.id} value={b.name}>{b.name}</option>)}
               </select>
             </div>
             <SuggestionInput
               label="Style Name"
               value={form.styleName}
               onChange={v => set('styleName', v)}
-              suggestions={dv.styles}
+              suggestions={dvList.styles}
               placeholder="Style Name"
               error={errors.styleName}
               required
@@ -205,7 +216,7 @@ export default function ItemFormModal({ data, onSaved }) {
               label="Purchase No"
               value={form.purchaseNo}
               onChange={v => set('purchaseNo', v)}
-              suggestions={dv.purchases}
+              suggestions={dvList.purchases}
               placeholder="Purchase No"
               error={errors.purchaseNo}
               required
@@ -216,7 +227,7 @@ export default function ItemFormModal({ data, onSaved }) {
               label="Order Number"
               value={form.orderNumber}
               onChange={v => set('orderNumber', v)}
-              suggestions={dv.orders}
+              suggestions={dvList.orders}
               placeholder="Order Number"
               error={errors.orderNumber}
               required
@@ -262,7 +273,7 @@ export default function ItemFormModal({ data, onSaved }) {
               />
             </div>
           </div>
-          {form.sourceType !== 'PRODUCTION' && (!item || data.isNewItem) && (
+          {form.sourceType !== 'PRODUCTION' && (!item || data.isNewItem) && user?.roleName !== 'Merchandiser' && (
             <div className="form-group" style={{ marginBottom: 16 }}>
               <label className="form-label">Opening Stock *</label>
               <input 
@@ -274,6 +285,12 @@ export default function ItemFormModal({ data, onSaved }) {
                 onWheel={(e) => e.target.blur()}
               />
             </div>
+          )}
+          {user?.roleName === 'Merchandiser' && (!item || data.isNewItem) && (
+             <div className="form-group" style={{ marginBottom: 16 }}>
+               <label className="form-label">Opening Stock</label>
+               <input className="form-input" disabled value="Updated by Inventory" />
+             </div>
           )}
           <div className="form-row-2">
             <div className="form-group">
@@ -297,10 +314,14 @@ export default function ItemFormModal({ data, onSaved }) {
                 />
               </div>
             </div>
-            <div className="form-group">
-              <label className="form-label">Notes</label>
-              <textarea className={`form-textarea ${isFilled(form.notes) ? 'filled' : ''}`} value={form.notes} onChange={e => set('notes', e.target.value)} placeholder="Optional notes..." rows={2}></textarea>
-            </div>
+            <SuggestionInput
+              label="Notes"
+              value={form.notes}
+              onChange={v => set('notes', v)}
+              suggestions={dvList.notes}
+              placeholder="Optional notes..."
+              error={errors.notes}
+            />
           </div>
         </div>
         <div className="modal-footer">

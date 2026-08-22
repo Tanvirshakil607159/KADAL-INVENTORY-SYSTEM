@@ -1,5 +1,31 @@
 const { dbPrepare, getSupabase, isCloudEnabled } = require('../connection');
 
+function extractProdIds(record) {
+  let prodIds = [];
+  if (record.produced_item_ids) {
+    try {
+      const parsed = typeof record.produced_item_ids === 'string' ? JSON.parse(record.produced_item_ids) : record.produced_item_ids;
+      if (Array.isArray(parsed)) prodIds = parsed.map(Number).filter(Boolean);
+    } catch (e) {}
+  }
+  if (prodIds.length === 0 && record.remarks) {
+    const match = String(record.remarks).match(/\[PRODUCED_ITEM_IDS:([0-9,]+)\]/);
+    if (match && match[1]) {
+      prodIds = match[1].split(',').map(Number).filter(Boolean);
+    }
+  }
+  if (prodIds.length === 0 && record.produced_item_id) {
+    prodIds = [Number(record.produced_item_id)];
+  }
+  return prodIds;
+}
+
+function cleanRemarks(remarks) {
+  if (!remarks) return null;
+  const clean = String(remarks).replace(/\[PRODUCED_ITEM_IDS:[^\]]+\]/g, '').trim();
+  return clean || null;
+}
+
 const IssuesRepo = {
   // ==================== Issues ====================
   async getAll(filters = {}) {
@@ -25,6 +51,7 @@ const IssuesRepo = {
       if (error) throw error;
       return data.map(r => ({
         ...r,
+        remarks: cleanRemarks(r.remarks),
         created_by_name: r.users?.full_name,
         item_count: (r.issue_items || []).length,
         total_quantity: (r.issue_items || []).reduce((s, i) => s + i.quantity, 0),
@@ -43,7 +70,7 @@ const IssuesRepo = {
     }
     const w = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
 
-    return dbPrepare(`
+    const rows = dbPrepare(`
       SELECT iss.*, u.full_name as created_by_name,
         (SELECT COUNT(*) FROM issue_items ii WHERE ii.issue_id = iss.id) as item_count,
         (SELECT COALESCE(SUM(ii.quantity), 0) FROM issue_items ii WHERE ii.issue_id = iss.id) as total_quantity
@@ -52,6 +79,11 @@ const IssuesRepo = {
       ${w}
       ORDER BY iss.created_at DESC
     `).all(...params);
+
+    return rows.map(r => ({
+      ...r,
+      remarks: cleanRemarks(r.remarks)
+    }));
   },
 
   async getById(id) {
@@ -65,7 +97,7 @@ const IssuesRepo = {
 
       if (iss) {
         const { data: items, error: iErr } = await supabase.from('issue_items').select(`
-          *, items (name, item_code, unit, current_stock, buyer_name, size, color, style_name, purchase_no, order_number)
+          *, items (name, item_code, unit, current_stock, buyer_name, size, color, style_name, purchase_no, order_number, order_quantity)
         `).eq('issue_id', id);
         if (iErr) throw iErr;
         iss.items = items.map(i => ({
@@ -80,16 +112,26 @@ const IssuesRepo = {
           style_no: i.style_no || i.items?.style_name || '-',
           purchase_no: i.purchase_no || i.items?.purchase_no || '-',
           order_number: i.order_number || i.items?.order_number || '-',
+          order_quantity: i.items?.order_quantity,
         }));
         iss.created_by_name = iss.users?.full_name;
 
-        if (iss.produced_item_id) {
-          const { data: prodItem } = await supabase.from('items')
-            .select('name, item_code, style_name, purchase_no, order_number, order_quantity, unit, color, size, buyer_name')
-            .eq('id', iss.produced_item_id)
-            .maybeSingle();
-          if (prodItem) {
-            iss.produced_item = {
+        // Fetch produced target products (single or multiple)
+        const prodIds = extractProdIds(iss);
+        // Preserve raw remarks with tags for frontend fallback before cleaning
+        const rawRemarks = iss.remarks;
+        iss.remarks = cleanRemarks(iss.remarks);
+
+        // Always initialize produced_items
+        iss.produced_items = [];
+
+        if (prodIds.length > 0) {
+          const { data: prodItems } = await supabase.from('items')
+            .select('id, name, item_code, style_name, purchase_no, order_number, order_quantity, unit, color, size, buyer_name, current_stock')
+            .in('id', prodIds);
+          if (prodItems && prodItems.length > 0) {
+            iss.produced_items = prodItems.map(prodItem => ({
+              id: prodItem.id,
               name: prodItem.name,
               item_code: prodItem.item_code,
               style_name: prodItem.style_name,
@@ -100,9 +142,14 @@ const IssuesRepo = {
               color: prodItem.color,
               size: prodItem.size,
               buyer_name: prodItem.buyer_name,
-            };
+              current_stock: prodItem.current_stock ?? 0,
+            }));
+            iss.produced_item = iss.produced_items[0];
           }
         }
+
+        // Preserve raw_remarks for frontend fallback extraction
+        iss._raw_remarks = rawRemarks;
       }
       return iss;
     }
@@ -116,7 +163,7 @@ const IssuesRepo = {
     if (iss) {
       iss.items = dbPrepare(`
         SELECT ii.*, it.name as item_name, it.item_code, it.unit as item_unit, it.current_stock,
-          it.buyer_name, it.size, it.color,
+          it.buyer_name, it.size, it.color, it.order_quantity,
           COALESCE(NULLIF(ii.style_no, ''), it.style_name) as style_no,
           COALESCE(NULLIF(ii.purchase_no, ''), it.purchase_no) as purchase_no,
           COALESCE(NULLIF(ii.order_number, ''), it.order_number) as order_number
@@ -125,36 +172,80 @@ const IssuesRepo = {
         WHERE ii.issue_id = ?
       `).all(id);
 
-      if (iss.produced_item_id) {
-        iss.produced_item = dbPrepare(`
-          SELECT name, item_code, style_name, purchase_no, order_number, order_quantity, unit, color, size, buyer_name
-          FROM items WHERE id = ?
-        `).get(iss.produced_item_id);
+      const prodIds = extractProdIds(iss);
+      const rawRemarks = iss.remarks;
+      iss.remarks = cleanRemarks(iss.remarks);
+
+      // Always initialize produced_items
+      iss.produced_items = [];
+
+      if (prodIds.length > 0) {
+        const placeholders = prodIds.map(() => '?').join(',');
+        iss.produced_items = dbPrepare(`
+          SELECT id, name, item_code, style_name, purchase_no, order_number, order_quantity, unit, color, size, buyer_name, current_stock
+          FROM items WHERE id IN (${placeholders})
+        `).all(...prodIds);
+        if (iss.produced_items && iss.produced_items.length > 0) {
+          iss.produced_item = iss.produced_items[0];
+        }
       }
+
+      // Preserve raw_remarks for frontend fallback extraction
+      iss._raw_remarks = rawRemarks;
     }
     return iss;
   },
 
-  async create({ issueId, issueType, recipientId, recipientName, issueDate, expectedReturnDate, remarks, createdBy, items, isReturnable, producedItemId }) {
+  async create({ issueId, issueType, recipientId, recipientName, issueDate, expectedReturnDate, remarks, createdBy, items, isReturnable, producedItemId, producedItemIds }) {
     const isRet = isReturnable === undefined ? true : !!isReturnable;
     const initialStatus = !isRet ? 'RETURNED' : 'PENDING';
 
+    const prodIdsArray = Array.isArray(producedItemIds) && producedItemIds.length > 0
+      ? producedItemIds.map(Number).filter(Boolean)
+      : (producedItemId ? [Number(producedItemId)] : []);
+    const firstProdId = prodIdsArray[0] || (producedItemId ? Number(producedItemId) : null);
+    const prodIdsStr = prodIdsArray.length > 0 ? JSON.stringify(prodIdsArray) : null;
+
+    let formattedRemarks = remarks || '';
+    if (prodIdsArray.length > 0) {
+      formattedRemarks = String(formattedRemarks).replace(/\[PRODUCED_ITEM_IDS:[^\]]+\]/g, '').trim();
+      const tag = `[PRODUCED_ITEM_IDS:${prodIdsArray.join(',')}]`;
+      formattedRemarks = formattedRemarks ? `${formattedRemarks} ${tag}` : tag;
+    }
+
     if (isCloudEnabled()) {
       const supabase = getSupabase();
-      const { data: iss, error } = await supabase.from('issues').insert([{
+      const insertObj = {
         issue_id: issueId,
         issue_type: issueType,
         recipient_id: recipientId,
         recipient_name: recipientName,
         issue_date: issueDate,
         expected_return_date: expectedReturnDate || null,
-        remarks: remarks || null,
+        remarks: formattedRemarks || null,
         is_returnable: isRet,
         status: initialStatus,
         created_by: createdBy,
-        produced_item_id: producedItemId || null,
-      }]).select().single();
-      if (error) throw error;
+        produced_item_id: firstProdId,
+      };
+
+      let iss = null;
+      let error = null;
+
+      // Try inserting with produced_item_ids column if available in Supabase
+      if (prodIdsStr) {
+        const { data, error: err } = await supabase.from('issues').insert([{ ...insertObj, produced_item_ids: prodIdsStr }]).select().single();
+        if (!err && data) {
+          iss = data;
+        }
+      }
+
+      // Fallback insert without produced_item_ids column
+      if (!iss) {
+        const { data, error: err } = await supabase.from('issues').insert([insertObj]).select().single();
+        if (err) throw err;
+        iss = data;
+      }
 
       const issueItems = items.map(item => ({
         issue_id: iss.id,
@@ -171,22 +262,43 @@ const IssuesRepo = {
       return iss.id;
     }
 
-    const r = dbPrepare(`
-      INSERT INTO issues (issue_id, issue_type, recipient_id, recipient_name, issue_date, expected_return_date, remarks, is_returnable, status, created_by, produced_item_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      issueId, 
-      issueType, 
-      recipientId, 
-      recipientName, 
-      issueDate, 
-      expectedReturnDate || null, 
-      remarks || null, 
-      isRet ? 1 : 0, 
-      initialStatus, 
-      createdBy,
-      producedItemId || null
-    );
+    let r;
+    try {
+      r = dbPrepare(`
+        INSERT INTO issues (issue_id, issue_type, recipient_id, recipient_name, issue_date, expected_return_date, remarks, is_returnable, status, created_by, produced_item_id, produced_item_ids)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        issueId, 
+        issueType, 
+        recipientId, 
+        recipientName, 
+        issueDate, 
+        expectedReturnDate || null, 
+        formattedRemarks || null, 
+        isRet ? 1 : 0, 
+        initialStatus, 
+        createdBy,
+        firstProdId,
+        prodIdsStr
+      );
+    } catch (e) {
+      r = dbPrepare(`
+        INSERT INTO issues (issue_id, issue_type, recipient_id, recipient_name, issue_date, expected_return_date, remarks, is_returnable, status, created_by, produced_item_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        issueId, 
+        issueType, 
+        recipientId, 
+        recipientName, 
+        issueDate, 
+        expectedReturnDate || null, 
+        formattedRemarks || null, 
+        isRet ? 1 : 0, 
+        initialStatus, 
+        createdBy,
+        firstProdId
+      );
+    }
 
     const id = r.lastInsertRowid;
     for (const item of items) {

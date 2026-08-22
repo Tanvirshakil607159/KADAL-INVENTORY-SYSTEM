@@ -61,7 +61,7 @@ const ExcelGenerator = {
     // Data rows
     data.forEach((row, idx) => {
       const dataRow = sheet.addRow(columns.map(c => {
-        if (c.format) return c.format(row[c.key], row);
+        if (c.format) return c.format(row[c.key], row, idx);
         return row[c.key] ?? '';
       }));
 
@@ -90,6 +90,30 @@ const ExcelGenerator = {
       });
       column.width = Math.min(Math.max(maxLength + 4, 10), 40);
     });
+
+    // Footer Row
+    if (options?.footerRow) {
+      const footerCells = options.footerRow.map(cell => cell.text || '');
+      const row = sheet.addRow(footerCells);
+      options.footerRow.forEach((sourceCell, i) => {
+        const cell = row.getCell(i + 1);
+        if (sourceCell.bold) cell.font = { ...cell.font, bold: true };
+        if (sourceCell.alignment === 'right') cell.alignment = { ...cell.alignment, horizontal: 'right' };
+        if (sourceCell.alignment === 'center') cell.alignment = { ...cell.alignment, horizontal: 'center' };
+        if (sourceCell.fillColor) {
+          cell.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: 'FFEFEFEF' }
+          };
+        }
+      });
+      // Handle simple colspan for the first cell if present
+      const firstCell = options.footerRow[0];
+      if (firstCell && firstCell.colSpan > 1) {
+         sheet.mergeCells(row.number, 1, row.number, firstCell.colSpan);
+      }
+    }
 
     // Summary row
     sheet.addRow([]);

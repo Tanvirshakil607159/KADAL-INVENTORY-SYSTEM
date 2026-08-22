@@ -4,12 +4,14 @@ import useStore from '../store/useStore';
 import WarehouseFormModal from '../components/modals/WarehouseFormModal';
 import StockTransferModal from '../components/modals/StockTransferModal';
 import WarehouseStockModal from '../components/modals/WarehouseStockModal';
+import WarehouseDetail from '../components/WarehouseDetail';
 
 function WarehousePage() {
   const [warehouses, setWarehouses] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const { setLoading, addToast, showConfirm, openModal, closeModal, modal } = useStore();
   const [selectedWarehouse, setSelectedWarehouse] = useState(null);
+  const [viewDetail, setViewDetail] = useState(false);
 
   const loadWarehouses = async () => {
     try {
@@ -62,6 +64,10 @@ function WarehousePage() {
     w.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
     (w.location && w.location.toLowerCase().includes(searchTerm.toLowerCase()))
   );
+
+  if (viewDetail && selectedWarehouse) {
+    return <WarehouseDetail warehouse={selectedWarehouse} onBack={() => { setViewDetail(false); setSelectedWarehouse(null); }} />;
+  }
 
   return (
     <div>
@@ -151,7 +157,17 @@ function WarehousePage() {
                 style={{ color: 'var(--accent-hover)' }}
               >
                 <Package className="w-4 h-4" />
-                View Stock
+                Total Stock
+              </button>
+              <button
+                onClick={() => {
+                  setSelectedWarehouse(warehouse);
+                  setViewDetail(true);
+                }}
+                className="btn btn-primary btn-sm"
+              >
+                <MapPin className="w-4 h-4" />
+                Manage Layout
               </button>
             </div>
           </div>
