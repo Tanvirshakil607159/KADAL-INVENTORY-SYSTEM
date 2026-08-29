@@ -1,6 +1,6 @@
 import React from 'react';
 import useStore from '../../store/useStore';
-import { LayoutDashboard, Package, FileText, History, BarChart3, Settings, HardDrive, LogOut, CheckCircle, Send, Factory, ChevronRight, ArrowDownUp } from 'lucide-react';
+import { Home, LayoutDashboard, Package, FileText, History, BarChart3, Settings, HardDrive, LogOut, CheckCircle, Send, Factory, ChevronRight, ArrowDownUp } from 'lucide-react';
 
 const navItems = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -20,7 +20,7 @@ const navItems = [
 ];
 
 export default function Sidebar() {
-  const { currentPage, setPage, user, logout, addToast, notificationDots, clearNotificationDot } = useStore();
+  const { currentPage, setPage, user, logout, addToast, notificationDots, clearNotificationDot, setShowLanding } = useStore();
 
   const handleLogout = async () => {
     try {
@@ -64,11 +64,28 @@ export default function Sidebar() {
 
   return (
     <aside className="sidebar">
-      <div className="sidebar-brand">
+      <div className="sidebar-brand" onClick={() => setShowLanding(true)} style={{ cursor: 'pointer' }} title="Go to Home / Landing Slideshow">
         <h1>KADAL</h1>
         <p>KA Design Accessories</p>
       </div>
       <nav className="sidebar-nav">
+        <div
+          className="sidebar-nav-item"
+          onClick={() => setShowLanding(true)}
+          style={{
+            background: 'linear-gradient(135deg, rgba(212, 168, 85, 0.15), rgba(212, 168, 85, 0.05))',
+            border: '1px solid rgba(212, 168, 85, 0.3)',
+            color: '#e8c97a',
+            marginBottom: '8px',
+            fontWeight: 600,
+            borderRadius: '6px'
+          }}
+          title="Go to Home / Landing Slideshow (keeps you logged in)"
+        >
+          <Home size={16} style={{ color: '#d4a855' }} />
+          <span style={{ flex: 1 }}>Home / Showcase</span>
+          <ChevronRight size={12} style={{ opacity: 0.6 }} />
+        </div>
         {navItems.map(item => {
           const Icon = item.icon;
           const permsObj = typeof user?.permissions === 'string' ? JSON.parse(user.permissions) : (user?.permissions || {});

@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import useStore from '../store/useStore';
 import slide1 from '../assets/slide/1.png';
 import slide2 from '../assets/slide/2.png';
 import slide3 from '../assets/slide/3.png';
@@ -27,9 +28,11 @@ const slides = [
 ];
 
 export default function LandingPage({ onEnterApp }) {
+  const { isLoggedIn, user } = useStore();
   const [currentSlide, setCurrentSlide] = useState(0);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [scrolled, setScrolled] = useState(false);
+  const containerRef = useRef(null);
 
   const goToSlide = useCallback((index) => {
     if (isTransitioning) return;
@@ -53,20 +56,24 @@ export default function LandingPage({ onEnterApp }) {
   }, [nextSlide]);
 
   // Scroll listener for navbar effect
-  useEffect(() => {
-    const handleScroll = () => {
-      setScrolled(window.scrollY > 60);
-    };
-    window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, []);
+  const handleScroll = (e) => {
+    const top = e.currentTarget.scrollTop;
+    setScrolled(top > 40);
+  };
+
+  const scrollToSection = (sectionId) => {
+    const section = document.getElementById(sectionId);
+    if (section) {
+      section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
 
   return (
-    <div className="landing-page">
+    <div className="landing-page" ref={containerRef} onScroll={handleScroll}>
       {/* ─── Fixed Navigation Bar ─── */}
       <nav className={`landing-nav ${scrolled ? 'nav-scrolled' : ''}`}>
         <div className="nav-inner">
-          <div className="nav-brand">
+          <div className="nav-brand" onClick={() => scrollToSection('hero')} style={{ cursor: 'pointer' }}>
             <img src={logo} alt="KADAL" className="nav-logo" />
             <div className="nav-brand-text">
               <span className="nav-brand-name">KADAL</span>
@@ -74,11 +81,11 @@ export default function LandingPage({ onEnterApp }) {
             </div>
           </div>
           <div className="nav-links">
-            <a href="#about" className="nav-link">About</a>
-            <a href="#mission" className="nav-link">Mission</a>
-            <a href="#facility" className="nav-link">Facility</a>
-            <button className="nav-cta" onClick={onEnterApp}>
-              <span>Open App</span>
+            <button type="button" onClick={() => scrollToSection('about')} className="nav-link-btn">About</button>
+            <button type="button" onClick={() => scrollToSection('mission')} className="nav-link-btn">Mission</button>
+            <button type="button" onClick={() => scrollToSection('facility')} className="nav-link-btn">Facility</button>
+            <button className={`nav-cta ${isLoggedIn ? 'nav-cta-active' : ''}`} onClick={onEnterApp}>
+              <span>{isLoggedIn ? (user?.fullName ? `Dashboard (${user.fullName.split(' ')[0]})` : 'Back to Dashboard') : 'Open App'}</span>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M5 12h14M12 5l7 7-7 7" />
               </svg>
@@ -88,7 +95,7 @@ export default function LandingPage({ onEnterApp }) {
       </nav>
 
       {/* ─── Hero Slideshow Section ─── */}
-      <section className="landing-hero">
+      <section className="landing-hero" id="hero">
         {/* Slide Images */}
         <div className="hero-slides-container">
           {slides.map((slide, index) => (
@@ -124,7 +131,7 @@ export default function LandingPage({ onEnterApp }) {
         <div className="hero-content">
           <div className="hero-badge">
             <div className="badge-dot" />
-            <span>Established Excellence</span>
+            <span>{isLoggedIn ? `Active Session: ${user?.fullName || 'User'} (${user?.roleName || 'Member'})` : 'Established Excellence'}</span>
           </div>
 
           <h1 className="hero-title" key={`title-${currentSlide}`}>
@@ -145,17 +152,17 @@ export default function LandingPage({ onEnterApp }) {
 
           <div className="hero-actions">
             <button className="hero-btn-primary" onClick={onEnterApp}>
-              <span>Access Inventory System</span>
+              <span>{isLoggedIn ? 'Continue to Dashboard' : 'Access Inventory System'}</span>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M5 12h14M12 5l7 7-7 7" />
               </svg>
             </button>
-            <a href="#about" className="hero-btn-secondary">
+            <button type="button" onClick={() => scrollToSection('about')} className="hero-btn-secondary">
               <span>Learn More</span>
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M12 5v14M5 12l7 7 7-7" />
               </svg>
-            </a>
+            </button>
           </div>
         </div>
 
@@ -195,7 +202,7 @@ export default function LandingPage({ onEnterApp }) {
         </div>
 
         {/* Scroll indicator */}
-        <div className="scroll-indicator">
+        <div className="scroll-indicator" onClick={() => scrollToSection('about')} style={{ cursor: 'pointer' }}>
           <div className="scroll-mouse">
             <div className="scroll-wheel" />
           </div>
@@ -327,7 +334,7 @@ export default function LandingPage({ onEnterApp }) {
             <h2>Ready to Get Started?</h2>
             <p>Access the KADAL Inventory Management System to streamline your operations.</p>
             <button className="cta-button" onClick={onEnterApp}>
-              <span>Launch Inventory App</span>
+              <span>{isLoggedIn ? 'Return to Dashboard' : 'Launch Inventory App'}</span>
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M5 12h14M12 5l7 7-7 7" />
               </svg>

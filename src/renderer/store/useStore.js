@@ -17,7 +17,11 @@ const useStore = create((set, get) => ({
     set({ user: null, isLoggedIn: false });
   },
 
-  // Navigation
+  // Navigation & Landing
+  showLanding: true,
+  setShowLanding: (showLanding) => set({ showLanding }),
+  goHome: () => set({ showLanding: true }),
+  openApp: () => set({ showLanding: false }),
   currentPage: 'dashboard',
   setPage: (page) => set({ currentPage: page }),
 

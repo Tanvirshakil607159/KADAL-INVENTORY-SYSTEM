@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import useStore from '../store/useStore';
-import { Lock, User, LogIn, ShieldCheck, Eye, EyeOff, Database } from 'lucide-react';
+import { Lock, User, LogIn, ShieldCheck, Eye, EyeOff, Database, ArrowLeft } from 'lucide-react';
 import logo from '../assets/logo.png';
 
 export default function LoginPage() {
-  const { setUser, addToast } = useStore();
+  const { setUser, addToast, setShowLanding } = useStore();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -126,6 +126,31 @@ export default function LoginPage() {
 
       <div className="login-card-container">
         <div className="login-card-glass">
+          <button 
+            type="button" 
+            onClick={() => setShowLanding(true)}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: 'rgba(255,255,255,0.06)',
+              border: '1px solid rgba(255,255,255,0.12)',
+              borderRadius: '100px',
+              padding: '6px 14px',
+              color: '#e8c97a',
+              fontSize: '12px',
+              fontWeight: 500,
+              cursor: 'pointer',
+              marginBottom: '14px',
+              alignSelf: 'flex-start',
+              transition: 'all 0.2s ease'
+            }}
+            title="Return to Landing Page Slideshow"
+          >
+            <ArrowLeft size={14} />
+            <span>Back to Home</span>
+          </button>
+
           <div className="login-header">
             <div className="brand-icon-wrapper">
               <img src={logo} alt="KADAL Logo" className="brand-icon" />

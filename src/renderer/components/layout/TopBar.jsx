@@ -1,6 +1,6 @@
 import React from 'react';
 import useStore from '../../store/useStore';
-import { RotateCw } from 'lucide-react';
+import { RotateCw, Home } from 'lucide-react';
 
 const pageTitles = {
   dashboard: 'Dashboard',
@@ -20,7 +20,7 @@ const pageTitles = {
 };
 
 export default function TopBar() {
-  const { currentPage, user } = useStore();
+  const { currentPage, user, setShowLanding } = useStore();
 
   const toggleSidebar = () => {
     const sidebar = document.querySelector('.sidebar');
@@ -50,6 +50,25 @@ export default function TopBar() {
         </div>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <button 
+          className="btn-icon" 
+          onClick={() => setShowLanding(true)} 
+          title="Home / Landing Showcase"
+          style={{ 
+            color: '#e8c97a', 
+            border: '1px solid rgba(212, 168, 85, 0.4)', 
+            background: 'rgba(212, 168, 85, 0.15)',
+            borderRadius: '6px',
+            cursor: 'pointer',
+            width: 28,
+            height: 28,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <Home size={14} />
+        </button>
         <button 
           className="btn-icon" 
           onClick={handleRefresh} 
