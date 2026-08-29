@@ -1,6 +1,6 @@
 @echo off
 title KADAL Inventory System
-cd /d "D:\INVENTORY SYSTEM"
+cd /d "%~dp0"
 echo ==========================================
 echo    KA Design Accessories LTD - KADAL
 echo ==========================================

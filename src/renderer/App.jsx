@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import useStore from './store/useStore';
 import DashboardPage from './pages/DashboardPage';
 import InventoryPage from './pages/InventoryPage';
@@ -25,10 +25,15 @@ import NotificationManager from './components/common/NotificationManager';
 import UpdateProgress from './components/common/UpdateProgress';
 import GlobalModalManager from './components/modals/GlobalModalManager';
 import ChallanVerificationPage from './pages/ChallanVerificationPage';
+import LandingPage from './pages/LandingPage';
+
+// Detect if running in a browser (web) vs Electron
+const isWebBrowser = !window.electronAPI && (window.location.protocol === 'http:' || window.location.protocol === 'https:');
 
 export default function App() {
   const { currentPage, isLoggedIn, setUser } = useStore();
   const [hasCloudConfig, setHasCloudConfig] = React.useState(null);
+  const [showLanding, setShowLanding] = useState(isWebBrowser);
 
   // Parse verification challan number from path or hash
   const getVerificationChallanNumber = () => {
@@ -144,6 +149,11 @@ export default function App() {
         <ToastContainer />
       </>
     );
+  }
+
+  // Show landing page for web visitors
+  if (showLanding) {
+    return <LandingPage onEnterApp={() => setShowLanding(false)} />;
   }
 
   if (hasCloudConfig === null) return <div className="loading"><div className="spinner"></div></div>;

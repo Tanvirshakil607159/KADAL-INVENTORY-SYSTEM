@@ -29,8 +29,9 @@ try {
   
   // Push the commit and the tag to GitHub
   console.log(`[Update] Pushing to GitHub to trigger GitHub Actions...`);
-  execSync('git push origin main', { stdio: 'inherit', cwd });
+  // Push the tag FIRST to ensure the GitHub Action triggers even if main branch push fails
   execSync(`git push origin v${newVersion}`, { stdio: 'inherit', cwd });
+  execSync('git push origin main', { stdio: 'inherit', cwd });
 
   console.log(`\n[Success] Version ${newVersion} pushed to GitHub successfully!`);
   console.log(`[Success] GitHub Actions will now build and publish the release in the background.`);
