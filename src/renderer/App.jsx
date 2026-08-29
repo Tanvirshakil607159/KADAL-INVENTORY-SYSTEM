@@ -27,13 +27,11 @@ import GlobalModalManager from './components/modals/GlobalModalManager';
 import ChallanVerificationPage from './pages/ChallanVerificationPage';
 import LandingPage from './pages/LandingPage';
 
-// Detect if running in a browser (web) vs Electron
-const isWebBrowser = !window.electronAPI && (window.location.protocol === 'http:' || window.location.protocol === 'https:');
-
+// Show the landing page by default for both web and electron
 export default function App() {
   const { currentPage, isLoggedIn, setUser } = useStore();
   const [hasCloudConfig, setHasCloudConfig] = React.useState(null);
-  const [showLanding, setShowLanding] = useState(isWebBrowser);
+  const [showLanding, setShowLanding] = useState(true);
 
   // Parse verification challan number from path or hash
   const getVerificationChallanNumber = () => {
