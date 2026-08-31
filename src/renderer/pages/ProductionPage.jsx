@@ -713,9 +713,9 @@ function ProductionHistoryTab({ addToast, user }) {
                   </td>
                   <td>
                     <div style={{ fontSize: 12 }}>{item.style_name || '-'}</div>
-                    <div className="text-muted" style={{ fontSize: 10 }}>{item.purchase_no || '-'} / {item.order_number || '-'}</div>
+                    <div className="text-muted" style={{ fontSize: 10 }}>{[item.purchase_no, item.order_number].filter(Boolean).join(' / ') || '-'}</div>
                   </td>
-                  <td>{[item.size, item.color].filter(Boolean).join(' / ') || '-'}</td>
+                  <td>{[item.size?.trim(), item.color?.trim()].filter(Boolean).join(' / ') || '-'}</td>
                   <td>{item.buyer_name || '-'}</td>
                   <td className="text-right text-mono fw-bold text-success">+{item.production_quantity}</td>
                   <td className="text-right text-mono text-danger">{item.wastage_quantity || 0}</td>
@@ -919,9 +919,9 @@ function ProductionReportsTab({ addToast }) {
                     <td><strong>{item.product_name}</strong> {item.product_code && <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>({item.product_code})</span>}</td>
                     <td>
                       <div style={{ fontSize: 12 }}>{item.style_name || '-'}</div>
-                      <div className="text-muted" style={{ fontSize: 10 }}>{item.purchase_no || '-'} / {item.order_number || '-'}</div>
+                      <div className="text-muted" style={{ fontSize: 10 }}>{[item.purchase_no, item.order_number].filter(Boolean).join(' / ') || '-'}</div>
                     </td>
-                    <td>{[item.size, item.color].filter(Boolean).join(' / ') || '-'}</td>
+                    <td>{[item.size?.trim(), item.color?.trim()].filter(Boolean).join(' / ') || '-'}</td>
                     <td>{item.buyer_name || '-'}</td>
                     <td className="text-right text-mono text-success">+{item.production_quantity}</td>
                     <td className="text-right text-mono text-danger">{item.wastage_quantity || 0}</td>

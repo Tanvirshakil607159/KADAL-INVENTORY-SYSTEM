@@ -634,19 +634,61 @@ const IssuesRepo = {
       const supabase = getSupabase();
       const { data, error } = await supabase.from('factory_production').select(`
         *, issues (issue_id, recipient_name)
-      `);
+      `).order('created_at', { ascending: false });
       if (error) throw error;
-      return data.map(r => ({
-        ...r,
-        issue_id: r.issues?.issue_id,
-        recipient_name: r.issues?.recipient_name,
-      }));
+
+      // Extract distinct target product item IDs
+      const productItemIds = [...new Set((data || []).map(r => r.product_item_id).filter(Boolean))];
+      const itemsMap = {};
+
+      if (productItemIds.length > 0) {
+        const chunkSize = 500;
+        for (let i = 0; i < productItemIds.length; i += chunkSize) {
+          const chunk = productItemIds.slice(i, i + chunkSize);
+          const { data: itemsChunk, error: iErr } = await supabase
+            .from('items')
+            .select('id, item_code, name, style_name, purchase_no, order_number, size, color, buyer_name, unit')
+            .in('id', chunk);
+          if (iErr) throw iErr;
+          (itemsChunk || []).forEach(it => {
+            itemsMap[it.id] = it;
+          });
+        }
+      }
+
+      return data.map(r => {
+        const prodItem = itemsMap[r.product_item_id];
+        return {
+          ...r,
+          issue_id: r.issues?.issue_id,
+          recipient_name: r.issues?.recipient_name,
+          product_code: prodItem?.item_code || '',
+          product_name: r.product_name || prodItem?.name || '',
+          style_name: prodItem?.style_name || '',
+          purchase_no: prodItem?.purchase_no || '',
+          order_number: prodItem?.order_number || '',
+          size: prodItem?.size || '',
+          color: prodItem?.color || '',
+          buyer_name: prodItem?.buyer_name || '',
+          unit: prodItem?.unit || 'pcs'
+        };
+      });
     }
 
     return dbPrepare(`
-      SELECT fp.*, iss.issue_id, iss.recipient_name
+      SELECT fp.*, iss.issue_id, iss.recipient_name,
+        COALESCE(NULLIF(fp.product_name, ''), it.name) as product_name,
+        it.item_code as product_code,
+        it.style_name,
+        it.purchase_no,
+        it.order_number,
+        it.size,
+        it.color,
+        it.buyer_name,
+        COALESCE(NULLIF(it.unit, ''), 'pcs') as unit
       FROM factory_production fp
       JOIN issues iss ON fp.issue_id = iss.id
+      LEFT JOIN items it ON fp.product_item_id = it.id
       ORDER BY fp.created_at DESC
     `).all();
   },

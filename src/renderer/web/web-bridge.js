@@ -768,7 +768,7 @@ export const webBridge = {
     }),
   },
 
-  // Production (Mocked for web)
+  // Production (Web)
   production: {
     getAll: (filters) => wrap(async () => {
       const supabase = getSupabase();
@@ -778,21 +778,43 @@ export const webBridge = {
         issues (issue_id, recipient_name, issue_date)
       `).order('created_at', { ascending: false }));
 
-      // Fetch items separately to prevent PostgREST schema cache relationship exceptions
-      const allItems = await fetchAll(supabase.from('items').select('id, item_code, name'));
+      // Extract distinct target product item IDs
+      const productItemIds = [...new Set((data || []).map(r => r.product_item_id).filter(Boolean))];
       const itemsMap = {};
-      (allItems || []).forEach(it => {
-        itemsMap[it.id] = it;
-      });
 
-      return data.map(r => ({
-        ...r,
-        issue_id: r.issues?.issue_id,
-        recipient_name: r.issues?.recipient_name,
-        issue_date: r.issues?.issue_date,
-        product_code: itemsMap[r.product_item_id]?.item_code || '',
-        product_name: r.product_name || itemsMap[r.product_item_id]?.name || ''
-      }));
+      if (productItemIds.length > 0) {
+        const chunkSize = 500;
+        for (let i = 0; i < productItemIds.length; i += chunkSize) {
+          const chunk = productItemIds.slice(i, i + chunkSize);
+          const { data: itemsChunk, error: iErr } = await supabase
+            .from('items')
+            .select('id, item_code, name, style_name, purchase_no, order_number, size, color, buyer_name, unit')
+            .in('id', chunk);
+          if (iErr) throw iErr;
+          (itemsChunk || []).forEach(it => {
+            itemsMap[it.id] = it;
+          });
+        }
+      }
+
+      return data.map(r => {
+        const prodItem = itemsMap[r.product_item_id];
+        return {
+          ...r,
+          issue_id: r.issues?.issue_id,
+          recipient_name: r.issues?.recipient_name,
+          issue_date: r.issues?.issue_date,
+          product_code: prodItem?.item_code || '',
+          product_name: r.product_name || prodItem?.name || '',
+          style_name: prodItem?.style_name || '',
+          purchase_no: prodItem?.purchase_no || '',
+          order_number: prodItem?.order_number || '',
+          size: prodItem?.size || '',
+          color: prodItem?.color || '',
+          buyer_name: prodItem?.buyer_name || '',
+          unit: prodItem?.unit || 'pcs'
+        };
+      });
     }),
     create: (data) => wrap(async () => {
       const supabase = getSupabase();

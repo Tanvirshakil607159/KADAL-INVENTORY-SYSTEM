@@ -13,33 +13,56 @@ const ProductionRepo = {
       const { data, error } = await query;
       if (error) throw error;
 
-      // Fetch items separately to map item codes, avoiding join errors if relationship is not fully indexed in PostgREST
-      const { data: allItems } = await supabase.from('items').select('id, item_code, name, style_name, purchase_no, order_number, size, color, buyer_name, unit');
+      // Extract distinct target product item IDs
+      const productItemIds = [...new Set((data || []).map(r => r.product_item_id).filter(Boolean))];
       const itemsMap = {};
-      (allItems || []).forEach(it => {
-        itemsMap[it.id] = it;
-      });
 
-      return data.map(r => ({
-        ...r,
-        issue_id: r.issues?.issue_id,
-        recipient_name: r.issues?.recipient_name,
-        issue_date: r.issues?.issue_date,
-        product_code: itemsMap[r.product_item_id]?.item_code || '',
-        product_name: r.product_name || itemsMap[r.product_item_id]?.name || '',
-        style_name: itemsMap[r.product_item_id]?.style_name || '',
-        purchase_no: itemsMap[r.product_item_id]?.purchase_no || '',
-        order_number: itemsMap[r.product_item_id]?.order_number || '',
-        size: itemsMap[r.product_item_id]?.size || '',
-        color: itemsMap[r.product_item_id]?.color || '',
-        buyer_name: itemsMap[r.product_item_id]?.buyer_name || '',
-        unit: itemsMap[r.product_item_id]?.unit || 'pcs'
-      }));
+      if (productItemIds.length > 0) {
+        const chunkSize = 500;
+        for (let i = 0; i < productItemIds.length; i += chunkSize) {
+          const chunk = productItemIds.slice(i, i + chunkSize);
+          const { data: itemsChunk, error: iErr } = await supabase
+            .from('items')
+            .select('id, item_code, name, style_name, purchase_no, order_number, size, color, buyer_name, unit')
+            .in('id', chunk);
+          if (iErr) throw iErr;
+          (itemsChunk || []).forEach(it => {
+            itemsMap[it.id] = it;
+          });
+        }
+      }
+
+      return data.map(r => {
+        const prodItem = itemsMap[r.product_item_id];
+        return {
+          ...r,
+          issue_id: r.issues?.issue_id,
+          recipient_name: r.issues?.recipient_name,
+          issue_date: r.issues?.issue_date,
+          product_code: prodItem?.item_code || '',
+          product_name: r.product_name || prodItem?.name || '',
+          style_name: prodItem?.style_name || '',
+          purchase_no: prodItem?.purchase_no || '',
+          order_number: prodItem?.order_number || '',
+          size: prodItem?.size || '',
+          color: prodItem?.color || '',
+          buyer_name: prodItem?.buyer_name || '',
+          unit: prodItem?.unit || 'pcs'
+        };
+      });
     }
 
     return dbPrepare(`
-      SELECT fp.*, iss.issue_id, iss.recipient_name, iss.issue_date, it.name as product_name, it.item_code as product_code,
-        it.style_name, it.purchase_no, it.order_number, it.size, it.color, it.buyer_name, it.unit
+      SELECT fp.*, iss.issue_id, iss.recipient_name, iss.issue_date,
+        COALESCE(NULLIF(fp.product_name, ''), it.name) as product_name,
+        it.item_code as product_code,
+        it.style_name,
+        it.purchase_no,
+        it.order_number,
+        it.size,
+        it.color,
+        it.buyer_name,
+        COALESCE(NULLIF(it.unit, ''), 'pcs') as unit
       FROM factory_production fp
       JOIN issues iss ON fp.issue_id = iss.id
       LEFT JOIN items it ON fp.product_item_id = it.id
@@ -66,9 +89,12 @@ const ProductionRepo = {
       let buyerName = '';
       let unit = 'pcs';
       if (data.product_item_id) {
-        const { data: itemRow } = await supabase.from('items').select('item_code, name, style_name, purchase_no, order_number, size, color, buyer_name, unit').eq('id', data.product_item_id).single();
+        const { data: itemRow } = await supabase.from('items')
+          .select('item_code, name, style_name, purchase_no, order_number, size, color, buyer_name, unit')
+          .eq('id', data.product_item_id)
+          .maybeSingle();
         if (itemRow) {
-          productCode = itemRow.item_code;
+          productCode = itemRow.item_code || '';
           if (!productName) productName = itemRow.name;
           styleName = itemRow.style_name || '';
           purchaseNo = itemRow.purchase_no || '';
@@ -97,8 +123,16 @@ const ProductionRepo = {
       };
     }
     return dbPrepare(`
-      SELECT fp.*, iss.issue_id, iss.recipient_name, iss.issue_date, it.name as product_name, it.item_code as product_code,
-        it.style_name, it.purchase_no, it.order_number, it.size, it.color, it.buyer_name, it.unit
+      SELECT fp.*, iss.issue_id, iss.recipient_name, iss.issue_date,
+        COALESCE(NULLIF(fp.product_name, ''), it.name) as product_name,
+        it.item_code as product_code,
+        it.style_name,
+        it.purchase_no,
+        it.order_number,
+        it.size,
+        it.color,
+        it.buyer_name,
+        COALESCE(NULLIF(it.unit, ''), 'pcs') as unit
       FROM factory_production fp
       JOIN issues iss ON fp.issue_id = iss.id
       LEFT JOIN items it ON fp.product_item_id = it.id
