@@ -121,6 +121,7 @@ const ChallansRepo = {
       if (filters.styleName) query = query.eq('items.style_name', filters.styleName);
       if (filters.orderNumber) query = query.eq('items.order_number', filters.orderNumber);
       if (filters.purchaseNo) query = query.eq('items.purchase_no', filters.purchaseNo);
+      if (filters.categoryId) query = query.eq('items.category_id', filters.categoryId);
 
       let data = [];
       let page = 0;
@@ -214,6 +215,7 @@ const ChallansRepo = {
     if (filters.styleName) { where.push('i.style_name = ?'); params.push(filters.styleName); }
     if (filters.orderNumber) { where.push('i.order_number = ?'); params.push(filters.orderNumber); }
     if (filters.purchaseNo) { where.push('i.purchase_no = ?'); params.push(filters.purchaseNo); }
+    if (filters.categoryId) { where.push('i.category_id = ?'); params.push(filters.categoryId); }
     if (filters.search) {
       where.push('(c.challan_number LIKE ? OR c.receiver_name LIKE ? OR i.name LIKE ? OR i.style_name LIKE ? OR i.order_number LIKE ? OR i.purchase_no LIKE ?)');
       const s = `%${filters.search}%`; params.push(s, s, s, s, s, s);

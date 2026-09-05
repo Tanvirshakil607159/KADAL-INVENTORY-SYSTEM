@@ -23,7 +23,7 @@ const ProductionRepo = {
           const chunk = productItemIds.slice(i, i + chunkSize);
           const { data: itemsChunk, error: iErr } = await supabase
             .from('items')
-            .select('id, item_code, name, style_name, purchase_no, order_number, size, color, buyer_name, unit')
+            .select('id, item_code, name, style_name, purchase_no, order_number, size, color, buyer_name, unit, category_id, categories(name)')
             .in('id', chunk);
           if (iErr) throw iErr;
           (itemsChunk || []).forEach(it => {
@@ -47,7 +47,9 @@ const ProductionRepo = {
           size: prodItem?.size || '',
           color: prodItem?.color || '',
           buyer_name: prodItem?.buyer_name || '',
-          unit: prodItem?.unit || 'pcs'
+          unit: prodItem?.unit || 'pcs',
+          category_id: prodItem?.category_id || null,
+          category_name: prodItem?.categories?.name || ''
         };
       });
     }
@@ -62,10 +64,13 @@ const ProductionRepo = {
         it.size,
         it.color,
         it.buyer_name,
-        COALESCE(NULLIF(it.unit, ''), 'pcs') as unit
+        COALESCE(NULLIF(it.unit, ''), 'pcs') as unit,
+        it.category_id,
+        cat.name as category_name
       FROM factory_production fp
       JOIN issues iss ON fp.issue_id = iss.id
       LEFT JOIN items it ON fp.product_item_id = it.id
+      LEFT JOIN categories cat ON it.category_id = cat.id
       ORDER BY fp.created_at DESC
     `).all();
   },

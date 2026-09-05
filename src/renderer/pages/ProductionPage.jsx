@@ -220,6 +220,8 @@ function ProductionEntryTab({ addToast, user }) {
                 ...base,
                 ...full,
                 id: pid,
+                size: full.size || base.size || '',
+                color: full.color || base.color || '',
                 prodQty: '',
                 wastQty: '',
                 current_stock: full.current_stock ?? base.current_stock ?? 0,
@@ -433,6 +435,8 @@ function ProductionEntryTab({ addToast, user }) {
                               <div style={{ fontWeight: 600 }}>{item.item_name}</div>
                               <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
                                 Code: {item.item_code || '-'}
+                                {item.size ? ` | Size: ${item.size}` : ''}
+                                {item.color ? ` | Color: ${item.color}` : ''}
                                 {item.order_quantity != null && item.order_quantity > 0 ? ` | Order Qty: ${item.order_quantity}` : ''}
                                 {item.style_no ? ` | Style: ${item.style_no}` : ''}
                               </div>
@@ -517,7 +521,10 @@ function ProductionEntryTab({ addToast, user }) {
                         <td>
                           <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--success)' }}>{pItem.name}</div>
                           <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                            Code: {pItem.item_code || '-'} | Stock: {pItem.current_stock ?? 0} {pItem.unit || 'Pcs'}
+                            Code: {pItem.item_code || '-'}
+                            {pItem.size ? ` | Size: ${pItem.size}` : ''}
+                            {pItem.color ? ` | Color: ${pItem.color}` : ''}
+                            {` | Stock: ${pItem.current_stock ?? 0} ${pItem.unit || 'Pcs'}`}
                             {pItem.order_quantity != null && pItem.order_quantity > 0 ? ` | Order Qty: ${pItem.order_quantity}` : ''}
                             {pItem.style_name || pItem.style_no ? ` | Style: ${pItem.style_name || pItem.style_no}` : ''}
                           </div>
@@ -748,8 +755,21 @@ function ProductionReportsTab({ addToast }) {
   const [loading, setLoading] = useState(false);
   const [filterRecipient, setFilterRecipient] = useState('');
   const [filterProduct, setFilterProduct] = useState('');
+  const [filterCategory, setFilterCategory] = useState('');
+  const [categoriesList, setCategoriesList] = useState([]);
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+
+  useEffect(() => {
+    const fetchCats = async () => {
+      try {
+        const res = await window.kadal.categories.getAll();
+        if (res?.success) setCategoriesList(res.data);
+        else if (Array.isArray(res)) setCategoriesList(res);
+      } catch (e) {}
+    };
+    fetchCats();
+  }, []);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -781,6 +801,10 @@ function ProductionReportsTab({ addToast }) {
       result = result.filter(r => r.product_name.toLowerCase().includes(filterProduct.toLowerCase()) || (r.product_code && r.product_code.toLowerCase().includes(filterProduct.toLowerCase())));
     }
 
+    if (filterCategory) {
+      result = result.filter(r => String(r.category_id) === String(filterCategory) || r.category_name === filterCategory);
+    }
+
     if (dateFrom) {
       const from = new Date(dateFrom);
       result = result.filter(r => new Date(r.created_at) >= from);
@@ -792,7 +816,7 @@ function ProductionReportsTab({ addToast }) {
     }
 
     setFiltered(result);
-  }, [history, filterRecipient, filterProduct, dateFrom, dateTo]);
+  }, [history, filterRecipient, filterProduct, filterCategory, dateFrom, dateTo]);
 
   // Aggregate statistics
   const totalProduction = filtered.reduce((sum, r) => sum + r.production_quantity, 0);
@@ -816,7 +840,7 @@ function ProductionReportsTab({ addToast }) {
       {/* TOP: Filtering Controls */}
       <div className="card" style={{ padding: 20 }}>
         <h4 style={{ margin: '0 0 16px 0' }}>Report Filter Controls</h4>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16 }}>
           <div>
             <label className="form-label">Factory Recipient</label>
             <input 
@@ -836,6 +860,17 @@ function ProductionReportsTab({ addToast }) {
               value={filterProduct}
               onChange={e => setFilterProduct(e.target.value)}
             />
+          </div>
+          <div>
+            <label className="form-label">Category</label>
+            <select
+              className="form-select"
+              value={filterCategory}
+              onChange={e => setFilterCategory(e.target.value)}
+            >
+              <option value="">All Categories</option>
+              {categoriesList.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
           </div>
           <div>
             <label className="form-label">From Date</label>

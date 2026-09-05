@@ -28,6 +28,8 @@ export default function ReportsPage() {
   const [orderNumber, setOrderNumber] = useState('');
   const [purchaseNo, setPurchaseNo] = useState('');
   const [buyerName, setBuyerName] = useState('');
+  const [categoryId, setCategoryId] = useState('');
+  const [categoriesList, setCategoriesList] = useState([]);
   const [status, setStatus] = useState('');
   const [receiverName, setReceiverName] = useState('');
   const [distinctValues, setDistinctValues] = useState({ styles: [], orders: [], purchases: [], buyers: [] });
@@ -98,17 +100,25 @@ export default function ReportsPage() {
         else if (Array.isArray(r)) setRecipientsList(r);
       } catch (e) { }
     };
+    const fetchCats = async () => {
+      try {
+        const c = await window.kadal.categories.getAll();
+        if (c?.success) setCategoriesList(c.data);
+        else if (Array.isArray(c)) setCategoriesList(c);
+      } catch (e) { }
+    };
     fetchDV();
     fetchRec();
+    fetchCats();
   }, []);
 
-  useEffect(() => { loadReport(); }, [activeTab, dateFrom, dateTo, search, styleName, orderNumber, purchaseNo, buyerName, auditCutoffDate, status, receiverName]);
+  useEffect(() => { loadReport(); }, [activeTab, dateFrom, dateTo, search, styleName, orderNumber, purchaseNo, buyerName, categoryId, auditCutoffDate, status, receiverName]);
 
   const loadReport = async () => {
     setLoading(true);
     try {
       let res;
-      const filters = { dateFrom, dateTo, search, styleName, orderNumber, purchaseNo, buyerName, status: status || undefined, receiverName: receiverName || undefined };
+      const filters = { dateFrom, dateTo, search, styleName, orderNumber, purchaseNo, buyerName, categoryId: categoryId || undefined, status: status || undefined, receiverName: receiverName || undefined };
       switch (activeTab) {
         case 'stock': res = await window.kadal.reports.stockReport(filters); break;
         case 'movement':
@@ -161,6 +171,13 @@ export default function ReportsPage() {
         }
 
         options.subtitles = [dateStr];
+      }
+    }
+    if (categoryId) {
+      const catName = categoriesList.find(c => String(c.id) === String(categoryId))?.name;
+      if (catName) {
+        options.subtitles = options.subtitles || [];
+        options.subtitles.push(`Category: ${catName}`);
       }
     }
     return options;
@@ -281,6 +298,10 @@ export default function ReportsPage() {
     if (sum) {
       subtitles.push(`Grand Total: ৳${Number(sum.grandTotalBDT || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}${sum.grandTotalUSD > 0 ? ` + $${Number(sum.grandTotalUSD).toLocaleString(undefined, { minimumFractionDigits: 2 })}` : ''}`);
     }
+    if (categoryId) {
+      const catName = categoriesList.find(c => String(c.id) === String(categoryId))?.name;
+      if (catName) subtitles.push(`Category: ${catName}`);
+    }
     const res = await window.kadal.reports.exportExcel(type, sectionData, { subtitles });
     if (res?.success) addToast('success', 'Excel exported');
     else addToast('error', res?.error || 'Export failed');
@@ -296,6 +317,10 @@ export default function ReportsPage() {
     ];
     if (sum) {
       subtitles.push(`Grand Total: ৳${Number(sum.grandTotalBDT || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}${sum.grandTotalUSD > 0 ? ` + $${Number(sum.grandTotalUSD).toLocaleString(undefined, { minimumFractionDigits: 2 })}` : ''}`);
+    }
+    if (categoryId) {
+      const catName = categoriesList.find(c => String(c.id) === String(categoryId))?.name;
+      if (catName) subtitles.push(`Category: ${catName}`);
     }
     const res = await window.kadal.reports.exportPdf(type, sectionData, { subtitles });
     if (res?.success) addToast('success', 'PDF exported');
@@ -1267,6 +1292,10 @@ export default function ReportsPage() {
             <select className="form-select" value={purchaseNo} onChange={e => setPurchaseNo(e.target.value)} style={{ width: 140, padding: '8px 12px', fontSize: 13 }}>
               <option value="">All Purchase No</option>
               {distinctValues.purchases.map((v, i) => <option key={i} value={v}>{v}</option>)}
+            </select>
+            <select className="form-select" value={categoryId} onChange={e => setCategoryId(e.target.value)} style={{ width: 140, padding: '8px 12px', fontSize: 13 }}>
+              <option value="">All Categories</option>
+              {categoriesList.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
             {(activeTab === 'challan' || activeTab === 'itemChallan' || activeTab === 'dailyDelivery' || activeTab === 'itemDeliverySummary' || activeTab === 'categoryDeliverySummary' || activeTab === 'monthlyReport') && (
               <>

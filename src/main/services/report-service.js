@@ -110,7 +110,7 @@ const ReportService = {
           .select(`
             *, 
             issues (issue_id, issue_type, recipient_name, issue_date, status),
-            items (name, item_code, unit, unit_price, currency, style_name, purchase_no, order_number, size, color, buyer_name)
+            items (name, item_code, unit, unit_price, currency, style_name, purchase_no, order_number, size, color, buyer_name, category_id)
           `)
           .order('id')
       );
@@ -221,7 +221,7 @@ const ReportService = {
           COALESCE(NULLIF(ii.style_no, ''), it.style_name) as style_name,
           COALESCE(NULLIF(ii.purchase_no, ''), it.purchase_no) as purchase_no,
           COALESCE(NULLIF(ii.order_number, ''), it.order_number) as order_number,
-          it.size, it.color, it.buyer_name,
+          it.size, it.color, it.buyer_name, it.category_id,
           ((ii.quantity - COALESCE(ii.returned_quantity,0) - COALESCE(ii.damage_quantity,0) - COALESCE(ii.rejected_quantity,0) - COALESCE(ii.consumed_quantity,0)) * COALESCE(it.unit_price, 0)) as outstanding_value
         FROM issue_items ii
         JOIN issues iss ON ii.issue_id = iss.id
@@ -231,6 +231,12 @@ const ReportService = {
         AND (ii.quantity - COALESCE(ii.returned_quantity,0) - COALESCE(ii.damage_quantity,0) - COALESCE(ii.rejected_quantity,0) - COALESCE(ii.consumed_quantity,0)) > 0
         ORDER BY iss.issue_date DESC
       `).all(cutoffTimestamp);
+    }
+
+    if (filters.categoryId) {
+      rawMaterials = rawMaterials.filter(i => String(i.category_id) === String(filters.categoryId));
+      finishedGoods = finishedGoods.filter(i => String(i.category_id) === String(filters.categoryId));
+      workingProcess = workingProcess.filter(r => String(r.category_id || r.items?.category_id) === String(filters.categoryId));
     }
 
     // Compute summaries

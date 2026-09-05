@@ -170,7 +170,19 @@ const InventoryService = {
       const requireApproval = SettingsRepo.get('require_inventory_approval') === 'true';
       if (requireApproval) {
         const ApprovalService = require('./approval-service');
-        return await ApprovalService.createRequest('STOCK_MOVEMENT', data);
+        const item = await ItemsRepo.getById(data.itemId);
+        const enrichedData = {
+          ...data,
+          itemName: data.itemName || item?.name,
+          itemCode: data.itemCode || item?.item_code,
+          orderNumber: data.orderNumber || item?.order_number,
+          color: data.color || item?.color,
+          size: data.size || item?.size,
+          orderQuantity: data.orderQuantity ?? item?.order_quantity,
+          currentStock: data.currentStock ?? item?.current_stock,
+          unit: data.unit || item?.unit,
+        };
+        return await ApprovalService.createRequest('STOCK_MOVEMENT', enrichedData);
       }
     }
     return await this._executeStockMovement(data);

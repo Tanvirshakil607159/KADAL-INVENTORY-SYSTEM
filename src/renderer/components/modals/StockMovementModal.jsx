@@ -47,7 +47,21 @@ export default function StockMovementModal({ data, onSaved }) {
     if (!qty || qty <= 0) { addToast('error', 'Enter a valid quantity'); return; }
     setSaving(true);
     try {
-      const res = await window.kadal.stock.addMovement({ itemId: selectedItem.id, itemName: selectedItem.name, type, quantity: qty, reference, notes });
+      const res = await window.kadal.stock.addMovement({ 
+        itemId: selectedItem.id, 
+        itemName: selectedItem.name, 
+        itemCode: selectedItem.item_code,
+        orderNumber: selectedItem.order_number,
+        color: selectedItem.color,
+        size: selectedItem.size,
+        orderQuantity: selectedItem.order_quantity,
+        currentStock: selectedItem.current_stock,
+        unit: selectedItem.unit,
+        type, 
+        quantity: qty, 
+        reference, 
+        notes 
+      });
       if (res.success && res.data?.success) {
         if (res.data.pendingApproval) {
           addToast('success', 'Stock movement submitted for Admin approval');
@@ -101,7 +115,10 @@ export default function StockMovementModal({ data, onSaved }) {
                         <div style={{ fontWeight: 600, fontSize: 13 }}>{it.name}</div>
                         <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
                           Code: <span className="text-mono" style={{ color: 'var(--accent)' }}>{it.item_code}</span>
-                          {(it.size || it.color) && ` | Size/Color: ${[it.size, it.color].filter(Boolean).join(' / ')}`}
+                          {it.order_number && ` | Order: ${it.order_number}`}
+                          {it.color && ` | Color: ${it.color}`}
+                          {it.size && ` | Size: ${it.size}`}
+                          {it.order_quantity != null && ` | Order Qty: ${it.order_quantity}`}
                         </div>
                       </div>
                       <div style={{ fontSize: 12, textAlign: 'right' }}>
@@ -126,11 +143,20 @@ export default function StockMovementModal({ data, onSaved }) {
                 )}
               </div>
               <div style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', flexWrap: 'wrap', gap: '6px 16px' }}>
-                <span>Code: <strong className="text-mono" style={{ color: 'var(--accent)' }}>{selectedItem.item_code}</strong></span>
-                {(selectedItem.size || selectedItem.color) && (
-                  <span>Size/Color: <strong>{[selectedItem.size, selectedItem.color].filter(Boolean).join(' / ')}</strong></span>
+                <span>Item Code: <strong className="text-mono" style={{ color: 'var(--accent)' }}>{selectedItem.item_code}</strong></span>
+                {selectedItem.order_number && (
+                  <span>Order No: <strong>{selectedItem.order_number}</strong></span>
                 )}
-                <span>Current Stock: <strong className="text-mono text-success">{selectedItem.current_stock} {selectedItem.unit}</strong></span>
+                {selectedItem.color && (
+                  <span>Color: <strong>{selectedItem.color}</strong></span>
+                )}
+                {selectedItem.size && (
+                  <span>Size: <strong>{selectedItem.size}</strong></span>
+                )}
+                {selectedItem.order_quantity != null && (
+                  <span>Order Qty: <strong className="text-mono">{selectedItem.order_quantity}</strong></span>
+                )}
+                <span>Stock Qty: <strong className="text-mono text-success">{selectedItem.current_stock} {selectedItem.unit}</strong></span>
               </div>
             </div>
           )}

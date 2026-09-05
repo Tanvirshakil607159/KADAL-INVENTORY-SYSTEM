@@ -144,9 +144,14 @@ export default function ApprovalsPage() {
         return (
           <div className="approval-details-rich">
             <div className="approval-data-grid">
-              {renderProperty('Item', safeData.itemName)}
-              {renderProperty('Type', safeData.type)}
-              {renderProperty('Quantity', safeData.quantity)}
+              {renderProperty('Item Name', safeData.itemName || safeData.item_name || safeData.name)}
+              {renderProperty('Item Code', safeData.itemCode || safeData.item_code)}
+              {renderProperty('Order No', safeData.orderNumber || safeData.order_number)}
+              {renderProperty('Color', safeData.color)}
+              {renderProperty('Order Qty', safeData.orderQuantity ?? safeData.order_quantity)}
+              {renderProperty('Stock Qty', safeData.currentStock ?? safeData.current_stock ?? safeData.stock_quantity)}
+              {renderProperty('Movement Type', safeData.type)}
+              {renderProperty('Movement Qty', `${safeData.quantity}${safeData.unit ? ` ${safeData.unit}` : ''}`)}
               {renderProperty('Reference', safeData.reference)}
             </div>
             {safeData.notes && (

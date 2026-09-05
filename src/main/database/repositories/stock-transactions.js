@@ -131,6 +131,7 @@ const StockTransactionsRepo = {
       if (filters.orderNumber) itemsQuery = itemsQuery.eq('order_number', filters.orderNumber);
       if (filters.purchaseNo) itemsQuery = itemsQuery.eq('purchase_no', filters.purchaseNo);
       if (filters.buyerName) itemsQuery = itemsQuery.eq('buyer_name', filters.buyerName);
+      if (filters.categoryId) itemsQuery = itemsQuery.eq('category_id', filters.categoryId);
 
       const items = await fetchAll(itemsQuery);
 
@@ -174,6 +175,7 @@ const StockTransactionsRepo = {
     if (orderNumber) { whereConditions += ' AND i.order_number = ?'; whereParams.push(orderNumber); }
     if (purchaseNo) { whereConditions += ' AND i.purchase_no = ?'; whereParams.push(purchaseNo); }
     if (filters.buyerName) { whereConditions += ' AND i.buyer_name = ?'; whereParams.push(filters.buyerName); }
+    if (filters.categoryId) { whereConditions += ' AND i.category_id = ?'; whereParams.push(filters.categoryId); }
 
     const params = [...joinParams, ...whereParams];
     return dbPrepare(`SELECT i.id, i.item_code, i.name as item_name, i.unit, i.unit_price, i.currency, i.style_name, i.purchase_no, i.order_number, i.order_quantity, i.size, i.color, i.buyer_name, COALESCE(SUM(CASE WHEN st.type = 'IN' THEN st.quantity ELSE 0 END), 0) as total_in, COALESCE(SUM(CASE WHEN st.type = 'OUT' THEN st.quantity ELSE 0 END), 0) as total_out, i.current_stock FROM items i LEFT JOIN stock_transactions st ON ${joinConditions} WHERE ${whereConditions} GROUP BY i.id ORDER BY i.name`).all(...params);

@@ -369,7 +369,7 @@ function registerIpcHandlers() {
 
   ipcMain.handle('reports:stockReport', wrapHandler((filters) => ReportService.stockReport(filters)));
   ipcMain.handle('reports:movementReport', wrapHandler((filters) => ReportService.movementReport(filters)));
-  ipcMain.handle('reports:lowStockReport', wrapHandler(() => ReportService.lowStockReport()));
+  ipcMain.handle('reports:lowStockReport', wrapHandler((filters) => ReportService.lowStockReport(filters)));
   ipcMain.handle('reports:challanHistory', wrapHandler((filters) => ReportService.challanHistory(filters)));
   ipcMain.handle('reports:detailedChallanHistory', wrapHandler((filters) => ReportService.detailedChallanHistory(filters)));
 
