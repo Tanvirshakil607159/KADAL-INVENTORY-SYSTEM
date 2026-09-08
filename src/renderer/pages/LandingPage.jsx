@@ -4,6 +4,24 @@ import slide1 from '../assets/slide/1.png';
 import slide2 from '../assets/slide/2.png';
 import slide3 from '../assets/slide/3.png';
 import logo from '../assets/logo.png';
+import threadMachines from '../assets/facility/sewing-thread-machines.jpg';
+import threadCones from '../assets/facility/sewing-thread-cones.jpg';
+import elasticMain from '../assets/facility/elastic.jpg';
+import elasticDetail from '../assets/facility/elastic-detail.jpg';
+import drawstringMain from '../assets/facility/drawstring.jpg';
+import drawstringDetail from '../assets/facility/drawstring-detail.jpg';
+import narrowTapeMain from '../assets/facility/narrow-tape.jpg';
+import narrowTapeDetail from '../assets/facility/narrow-tape-detail.jpg';
+import embroideryMain from '../assets/facility/embroidery.jpg';
+import embroideryDetail from '../assets/facility/embroidery-detail.jpg';
+import laserMain from '../assets/facility/laser-cutter.jpg';
+import laserDetail from '../assets/facility/laser-cutter-detail.jpg';
+import heatSealMain from '../assets/facility/heat-seal.jpg';
+import heatSealDetail from '../assets/facility/heat-seal-detail.jpg';
+import thermalMain from '../assets/facility/thermal-printer.jpg';
+import thermalDetail from '../assets/facility/thermal-printer-detail.jpg';
+import careLabelMain from '../assets/facility/care-label.jpg';
+import careLabelDetail from '../assets/facility/care-label-detail.jpg';
 import './LandingPage.css';
 
 const slides = [
@@ -27,6 +45,146 @@ const slides = [
   },
 ];
 
+const capabilities = [
+  {
+    id: 'sewing-thread',
+    name: 'Sewing Thread',
+    lead: 'Four YOUNGFU YF-Series winding machines, built by Ningbo Yongfu Textile Machinery Co., Ltd. to international standards.',
+    body: 'Multi-spindle operation and stable performance deliver consistent, high-volume winding with uniform tension and excellent thread strength — premium threads with minimal breakage, suitable for garments, textiles and accessories.',
+    specs: [
+      { value: '4', label: 'YF-Series Machines' },
+      { value: '5,094', label: 'Cones per Machine' },
+      { value: '350 kg', label: 'Capacity Each' },
+      { value: '380V / 50Hz', label: 'Power — 6 A' },
+    ],
+    images: [
+      { src: threadMachines, alt: 'YOUNGFU YF-Series sewing thread winding machines in operation' },
+      { src: threadCones, alt: 'Finished sewing thread cones' },
+    ],
+  },
+  {
+    id: 'elastic',
+    name: 'Elastic',
+    lead: 'Four advanced elastic machines in a range of widths and designs, crafted by DAHU DAH HEER Industrial Co. Ltd.',
+    body: 'Engineered for superior stretch, lasting durability and a flawless finish, they hold consistent high-quality results across woven and knitted elastics.',
+    specs: [
+      { value: '4', label: 'Elastic Machines' },
+      { value: '380 V', label: 'Operating Power' },
+      { value: '150', label: 'Gauge Capacity' },
+    ],
+    images: [
+      { src: elasticMain, alt: 'Elastic knitting machine on the production floor' },
+      { src: elasticDetail, alt: 'Woven and knitted elastic tapes' },
+    ],
+  },
+  {
+    id: 'drawstring',
+    name: 'Drawstring',
+    lead: 'Five versatile drawstring machines with various gauge options, plus two multicolour drawcord machines from XUXHOU HENGHUI Braiding Machine Co., Ltd.',
+    body: 'Each drawcord machine carries eight heads for intricate designs, and the line as a whole delivers reliable performance and high-quality output.',
+    specs: [
+      { value: '5', label: 'Drawstring Machines' },
+      { value: '2', label: 'Multicolour Drawcord' },
+      { value: '8', label: 'Heads per Machine' },
+    ],
+    images: [
+      { src: drawstringMain, alt: 'Braiding machines producing drawstrings' },
+      { src: drawstringDetail, alt: 'Finished drawcords in multiple colours' },
+    ],
+  },
+  {
+    id: 'narrow-tape',
+    name: 'Narrow Tape',
+    lead: 'Four narrow tape machines from KYANG THE Industrial Co. Ltd, producing grosgrain, twill, herringbone and fancy tapes.',
+    body: 'Alongside them, a Lycra tape machine with continuous dyeing handles elastic and stretchable tapes — precision and durability across diverse tape applications.',
+    specs: [
+      { value: '4', label: 'Tape Machines' },
+      { value: '12 mm', label: 'Max Gauge' },
+      { value: '1', label: 'Lycra Tape Line' },
+      { value: '10 mm', label: 'Lycra Width' },
+    ],
+    images: [
+      { src: narrowTapeMain, alt: 'Needle loom weaving narrow tape' },
+      { src: narrowTapeDetail, alt: 'Grosgrain, twill and herringbone tapes' },
+    ],
+  },
+  {
+    id: 'embroidery',
+    name: 'Embroidery',
+    lead: 'TAJIMA embroidery machines combining accuracy and versatility across both high-volume output and rapid creative experimentation.',
+    body: 'One bulk unit with twenty heads covers large-scale production, while a six-head sample unit keeps design development and prototyping quick.',
+    specs: [
+      { value: '20', label: 'Bulk Unit Heads' },
+      { value: '6', label: 'Sample Unit Heads' },
+      { value: 'TAJIMA', label: 'Manufacturer' },
+    ],
+    images: [
+      { src: embroideryMain, alt: 'TAJIMA multi-head embroidery machine' },
+      { src: embroideryDetail, alt: 'Embroidered brand logo on fabric' },
+    ],
+  },
+  {
+    id: 'laser-cutter',
+    name: 'Laser Cutter',
+    lead: 'The CK-Super 350 — a compact yet powerful unit designed to cut vinyl stickers with ease.',
+    body: 'Consistent sticker application makes it ideal for efficient production runs and professional finishing across garment decoration work.',
+    specs: [
+      { value: '70 mm', label: 'Cutting Capacity' },
+      { value: '350 W', label: 'Power Output' },
+      { value: 'CK-Super', label: 'Model 350' },
+    ],
+    images: [
+      { src: laserMain, alt: 'CK-Super 350 laser cutting unit' },
+      { src: laserDetail, alt: 'Laser-cut vinyl transfer on a garment panel' },
+    ],
+  },
+  {
+    id: 'heat-seal',
+    name: 'Heat Seal',
+    lead: 'Engineered for efficiency, this machine automates the application of heat-sealed stickers.',
+    body: 'It delivers uniform results while reducing hands-on labour — a single-unit system built for speed and accuracy in fast-paced production environments.',
+    specs: [
+      { value: '1', label: 'Single Unit' },
+      { value: 'Automated', label: 'Application' },
+      { value: 'Uniform', label: 'Seal Quality' },
+    ],
+    images: [
+      { src: heatSealMain, alt: 'Heat seal sticker application press' },
+      { src: heatSealDetail, alt: 'Heat-sealed label applied to a garment' },
+    ],
+  },
+  {
+    id: 'thermal-printer',
+    name: 'Thermal Sticker Printer',
+    lead: 'The TSC T8000 thermal sticker printer, designed for high-performance manufacturing environments.',
+    body: 'Built with durability and precision in mind, it delivers reliable, high-speed label printing for factories, warehouses and logistics operations that demand consistent output and minimal downtime.',
+    specs: [
+      { value: 'T8000', label: 'TSC Model' },
+      { value: 'High', label: 'Print Speed' },
+      { value: 'Industrial', label: 'Duty Class' },
+    ],
+    images: [
+      { src: thermalMain, alt: 'TSC T8000 thermal sticker printer' },
+      { src: thermalDetail, alt: 'Printed barcode label sheet' },
+    ],
+  },
+  {
+    id: 'care-label',
+    name: 'Care Label',
+    lead: 'A care label machine that leverages ultrasonic cutting with automatic curing.',
+    body: 'The process delivers high-quality labels with minimal material loss, supporting both productivity and sustainability across every order.',
+    specs: [
+      { value: 'Ultrasonic', label: 'Cutting Method' },
+      { value: 'Automatic', label: 'Curing Cycle' },
+      { value: 'Minimal', label: 'Material Loss' },
+    ],
+    images: [
+      { src: careLabelMain, alt: 'Ultrasonic care label cutting machine' },
+      { src: careLabelDetail, alt: 'Printed garment care labels' },
+    ],
+  },
+];
+
 export default function LandingPage({ onEnterApp }) {
   const { isLoggedIn, user } = useStore();
   const [currentSlide, setCurrentSlide] = useState(0);
@@ -43,10 +201,6 @@ export default function LandingPage({ onEnterApp }) {
 
   const nextSlide = useCallback(() => {
     goToSlide((currentSlide + 1) % slides.length);
-  }, [currentSlide, goToSlide]);
-
-  const prevSlide = useCallback(() => {
-    goToSlide((currentSlide - 1 + slides.length) % slides.length);
   }, [currentSlide, goToSlide]);
 
   // Auto-advance slides
@@ -141,11 +295,6 @@ export default function LandingPage({ onEnterApp }) {
 
         {/* Glass pane */}
         <div className="hero-content">
-          <div className="hero-badge">
-            <div className="badge-dot" />
-            <span>{isLoggedIn ? `Active Session — ${user?.fullName || 'User'}` : 'Established Excellence'}</span>
-          </div>
-
           <h1 className="hero-title" key={`title-${currentSlide}`}>
             {slides[currentSlide].title.split(' ').map((word, i) => (
               <span key={i} className="word-animate" style={{ '--word-delay': `${i * 0.08}s` }}>
@@ -178,46 +327,6 @@ export default function LandingPage({ onEnterApp }) {
           </div>
         </div>
 
-        {/* Glass control bar */}
-        <div className="hero-controls">
-          <button className="slide-arrow slide-arrow-prev" onClick={prevSlide} aria-label="Previous slide">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M15 18l-6-6 6-6" />
-            </svg>
-          </button>
-
-          <div className="slide-indicators">
-            {slides.map((_, index) => (
-              <button
-                key={index}
-                className={`slide-indicator ${index === currentSlide ? 'indicator-active' : ''}`}
-                onClick={() => goToSlide(index)}
-                aria-label={`Go to slide ${index + 1}`}
-              >
-                <div className="indicator-fill" />
-              </button>
-            ))}
-          </div>
-
-          <button className="slide-arrow slide-arrow-next" onClick={nextSlide} aria-label="Next slide">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M9 18l6-6-6-6" />
-            </svg>
-          </button>
-        </div>
-
-        <div className="hero-slide-counter">
-          <span className="counter-current">{String(currentSlide + 1).padStart(2, '0')}</span>
-          <span className="counter-separator">/</span>
-          <span className="counter-total">{String(slides.length).padStart(2, '0')}</span>
-        </div>
-
-        <div className="scroll-indicator" onClick={() => scrollToSection('about')} style={{ cursor: 'pointer' }}>
-          <div className="scroll-mouse">
-            <div className="scroll-wheel" />
-          </div>
-          <span>Scroll</span>
-        </div>
       </section>
 
       {/* ─── About ─── */}
@@ -333,6 +442,33 @@ export default function LandingPage({ onEnterApp }) {
               </div>
             ))}
           </div>
+
+          {/* ── Production capabilities ── */}
+          {capabilities.map((cap) => (
+            <article key={cap.id} className="capability-panel reveal" data-reveal>
+              <div className="capability-media">
+                <img src={cap.images[0].src} alt={cap.images[0].alt} className="capability-img capability-img-main" />
+                <img src={cap.images[1].src} alt={cap.images[1].alt} className="capability-img capability-img-inset" />
+              </div>
+
+              <div className="capability-body">
+                <span className="capability-eyebrow">Machinery &amp; Equipment</span>
+                <h3 className="capability-title">{cap.name}</h3>
+                <p className="capability-lead">{cap.lead}</p>
+                <p className="capability-text">{cap.body}</p>
+
+                <dl className="capability-specs">
+                  {cap.specs.map((spec) => (
+                    <div key={spec.label} className="capability-spec">
+                      <dt>{spec.value}</dt>
+                      <dd>{spec.label}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </div>
+            </article>
+          ))}
+
         </div>
       </section>
 
