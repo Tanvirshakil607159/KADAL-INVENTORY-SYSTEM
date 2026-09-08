@@ -55,6 +55,30 @@ export default function LandingPage({ onEnterApp }) {
     return () => clearInterval(timer);
   }, [nextSlide]);
 
+  // Reveal-on-scroll: fades content in once, then stops observing
+  useEffect(() => {
+    const root = containerRef.current;
+    if (!root) return;
+
+    const targets = root.querySelectorAll('[data-reveal]');
+    if (!('IntersectionObserver' in window)) {
+      targets.forEach(el => el.classList.add('in-view'));
+      return;
+    }
+
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('in-view');
+          observer.unobserve(entry.target);
+        }
+      });
+    }, { root, rootMargin: '0px 0px -12% 0px', threshold: 0.12 });
+
+    targets.forEach(el => observer.observe(el));
+    return () => observer.disconnect();
+  }, []);
+
   // Scroll listener for navbar effect
   const handleScroll = (e) => {
     const top = e.currentTarget.scrollTop;
@@ -70,7 +94,16 @@ export default function LandingPage({ onEnterApp }) {
 
   return (
     <div className="landing-page" ref={containerRef} onScroll={handleScroll}>
-      {/* ─── Fixed Navigation Bar ─── */}
+      {/* ─── Aurora backdrop (fixed, behind every section) ─── */}
+      <div className="aurora-field" aria-hidden="true">
+        <div className="aurora-blob aurora-a" />
+        <div className="aurora-blob aurora-b" />
+        <div className="aurora-blob aurora-c" />
+        <div className="aurora-blob aurora-d" />
+      </div>
+      <div className="aurora-grain" aria-hidden="true" />
+
+      {/* ─── Floating Glass Navigation ─── */}
       <nav className={`landing-nav ${scrolled ? 'nav-scrolled' : ''}`}>
         <div className="nav-inner">
           <div className="nav-brand" onClick={() => scrollToSection('hero')} style={{ cursor: 'pointer' }}>
@@ -94,44 +127,23 @@ export default function LandingPage({ onEnterApp }) {
         </div>
       </nav>
 
-      {/* ─── Hero Slideshow Section ─── */}
+      {/* ─── Hero ─── */}
       <section className="landing-hero" id="hero">
-        {/* Slide Images */}
         <div className="hero-slides-container">
           {slides.map((slide, index) => (
-            <div
-              key={index}
-              className={`hero-slide ${index === currentSlide ? 'slide-active' : ''}`}
-            >
-              <div
-                className="hero-slide-image"
-                style={{ backgroundImage: `url(${slide.image})` }}
-              />
+            <div key={index} className={`hero-slide ${index === currentSlide ? 'slide-active' : ''}`}>
+              <div className="hero-slide-image" style={{ backgroundImage: `url(${slide.image})` }} />
             </div>
           ))}
         </div>
 
-        {/* Dark overlay gradient */}
         <div className="hero-overlay" />
 
-        {/* Floating particles */}
-        <div className="hero-particles">
-          {[...Array(20)].map((_, i) => (
-            <div key={i} className="particle" style={{
-              '--x': `${Math.random() * 100}%`,
-              '--y': `${Math.random() * 100}%`,
-              '--delay': `${Math.random() * 8}s`,
-              '--duration': `${6 + Math.random() * 10}s`,
-              '--size': `${2 + Math.random() * 4}px`,
-            }} />
-          ))}
-        </div>
-
-        {/* Hero Content */}
+        {/* Glass pane */}
         <div className="hero-content">
           <div className="hero-badge">
             <div className="badge-dot" />
-            <span>{isLoggedIn ? `Active Session: ${user?.fullName || 'User'} (${user?.roleName || 'Member'})` : 'Established Excellence'}</span>
+            <span>{isLoggedIn ? `Active Session — ${user?.fullName || 'User'}` : 'Established Excellence'}</span>
           </div>
 
           <h1 className="hero-title" key={`title-${currentSlide}`}>
@@ -166,10 +178,10 @@ export default function LandingPage({ onEnterApp }) {
           </div>
         </div>
 
-        {/* Slide Controls */}
+        {/* Glass control bar */}
         <div className="hero-controls">
           <button className="slide-arrow slide-arrow-prev" onClick={prevSlide} aria-label="Previous slide">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M15 18l-6-6 6-6" />
             </svg>
           </button>
@@ -188,32 +200,30 @@ export default function LandingPage({ onEnterApp }) {
           </div>
 
           <button className="slide-arrow slide-arrow-next" onClick={nextSlide} aria-label="Next slide">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M9 18l6-6-6-6" />
             </svg>
           </button>
         </div>
 
-        {/* Slide counter */}
         <div className="hero-slide-counter">
           <span className="counter-current">{String(currentSlide + 1).padStart(2, '0')}</span>
           <span className="counter-separator">/</span>
           <span className="counter-total">{String(slides.length).padStart(2, '0')}</span>
         </div>
 
-        {/* Scroll indicator */}
         <div className="scroll-indicator" onClick={() => scrollToSection('about')} style={{ cursor: 'pointer' }}>
           <div className="scroll-mouse">
             <div className="scroll-wheel" />
           </div>
-          <span>Scroll to explore</span>
+          <span>Scroll</span>
         </div>
       </section>
 
-      {/* ─── About Section ─── */}
+      {/* ─── About ─── */}
       <section className="landing-section" id="about">
         <div className="section-container">
-          <div className="section-header">
+          <div className="section-header reveal" data-reveal>
             <span className="section-tag">Who We Are</span>
             <h2 className="section-title">About KA Design Accessories</h2>
             <p className="section-subtitle">
@@ -223,9 +233,9 @@ export default function LandingPage({ onEnterApp }) {
           </div>
 
           <div className="about-grid">
-            <div className="about-card">
+            <div className="about-card reveal" data-reveal style={{ transitionDelay: '0ms' }}>
               <div className="about-card-icon">
-                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M12 2L2 7l10 5 10-5-10-5z" />
                   <path d="M2 17l10 5 10-5" />
                   <path d="M2 12l10 5 10-5" />
@@ -235,9 +245,9 @@ export default function LandingPage({ onEnterApp }) {
               <p>Every product that leaves our facility passes through rigorous quality checks ensuring world-class standards.</p>
             </div>
 
-            <div className="about-card">
+            <div className="about-card reveal" data-reveal style={{ transitionDelay: '90ms' }}>
               <div className="about-card-icon">
-                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                   <circle cx="12" cy="12" r="10" />
                   <path d="M2 12h20" />
                   <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
@@ -247,9 +257,9 @@ export default function LandingPage({ onEnterApp }) {
               <p>Our products reach customers across the globe, backed by a robust supply chain and trusted logistics network.</p>
             </div>
 
-            <div className="about-card">
+            <div className="about-card reveal" data-reveal style={{ transitionDelay: '180ms' }}>
               <div className="about-card-icon">
-                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
                   <circle cx="9" cy="7" r="4" />
                   <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
@@ -263,10 +273,10 @@ export default function LandingPage({ onEnterApp }) {
         </div>
       </section>
 
-      {/* ─── Mission Section ─── */}
+      {/* ─── Mission ─── */}
       <section className="landing-section section-dark" id="mission">
         <div className="section-container">
-          <div className="mission-layout">
+          <div className="mission-layout reveal" data-reveal>
             <div className="mission-text">
               <span className="section-tag tag-light">Our Mission</span>
               <h2 className="section-title title-light">Empowering Growth Through Innovation</h2>
@@ -300,10 +310,10 @@ export default function LandingPage({ onEnterApp }) {
         </div>
       </section>
 
-      {/* ─── Facility Showcase Section ─── */}
+      {/* ─── Facility ─── */}
       <section className="landing-section" id="facility">
         <div className="section-container">
-          <div className="section-header">
+          <div className="section-header reveal" data-reveal>
             <span className="section-tag">Our Facility</span>
             <h2 className="section-title">A Tour of Excellence</h2>
             <p className="section-subtitle">
@@ -314,7 +324,7 @@ export default function LandingPage({ onEnterApp }) {
 
           <div className="facility-gallery">
             {slides.map((slide, index) => (
-              <div key={index} className="gallery-item">
+              <div key={index} className="gallery-item reveal" data-reveal style={{ transitionDelay: `${index * 90}ms` }}>
                 <img src={slide.image} alt={slide.title} />
                 <div className="gallery-overlay">
                   <h4>{slide.title}</h4>
@@ -326,11 +336,10 @@ export default function LandingPage({ onEnterApp }) {
         </div>
       </section>
 
-      {/* ─── CTA Section ─── */}
+      {/* ─── CTA ─── */}
       <section className="landing-cta">
-        <div className="cta-bg-pattern" />
         <div className="section-container">
-          <div className="cta-content">
+          <div className="cta-content reveal" data-reveal>
             <h2>Ready to Get Started?</h2>
             <p>Access the KADAL Inventory Management System to streamline your operations.</p>
             <button className="cta-button" onClick={onEnterApp}>

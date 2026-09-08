@@ -241,7 +241,7 @@ export default function ApprovalsPage() {
         );
 
       default:
-        return <pre style={{ fontSize: 11, background: '#f5f5f5', padding: 10 }}>{JSON.stringify(safeData, null, 2)}</pre>;
+        return <pre style={{ fontSize: 11, background: 'var(--bg-glass)', padding: 10, borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>{JSON.stringify(safeData, null, 2)}</pre>;
     }
   };
 

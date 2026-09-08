@@ -70,19 +70,11 @@ export default function Sidebar() {
       </div>
       <nav className="sidebar-nav">
         <div
-          className="sidebar-nav-item"
+          className="sidebar-nav-item sidebar-home-item"
           onClick={() => setShowLanding(true)}
-          style={{
-            background: 'linear-gradient(135deg, rgba(212, 168, 85, 0.15), rgba(212, 168, 85, 0.05))',
-            border: '1px solid rgba(212, 168, 85, 0.3)',
-            color: '#e8c97a',
-            marginBottom: '8px',
-            fontWeight: 600,
-            borderRadius: '6px'
-          }}
           title="Go to Home / Landing Slideshow (keeps you logged in)"
         >
-          <Home size={16} style={{ color: '#d4a855' }} />
+          <Home size={16} />
           <span style={{ flex: 1 }}>Home / Showcase</span>
           <ChevronRight size={12} style={{ opacity: 0.6 }} />
         </div>
