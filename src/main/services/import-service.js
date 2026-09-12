@@ -28,6 +28,7 @@ const HEADER_MAP = {
   orderNumber: ['order number', 'order_number', 'order no', 'order no.'],
   orderQuantity: ['order quantity', 'order qty', 'order_quantity', 'order_qty', 'booking qty', 'booking_qty'],
   currency: ['currency', 'cr', 'money', 'cur'],
+  conversionRate: ['conversion rate', 'conversion_rate', 'exchange rate', 'bdt rate', 'conversion', 'bdt/usd', 'rate bdt'],
   notes: ['notes', 'note', 'remark', 'remarks', 'comment', 'comments'],
 };
 
@@ -221,6 +222,7 @@ const ImportService = {
           orderQuantity: row.orderQuantity || 0,
           unitPrice: row.unitPrice || 0,
           currency: row.currency || 'BDT',
+          conversionRate: row.conversionRate ? Number(row.conversionRate) : null,
         });
 
         if (!res.success) throw new Error(res.error || 'Failed to create item');
@@ -285,6 +287,7 @@ const ImportService = {
           orderQuantity: row.orderQuantity || 0,
           unitPrice: row.unitPrice || 0,
           currency: row.currency || 'BDT',
+          conversionRate: row.conversionRate ? Number(row.conversionRate) : null,
           sourceType: 'PRODUCTION',
         });
 

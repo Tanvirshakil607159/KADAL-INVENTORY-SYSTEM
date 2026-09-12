@@ -299,6 +299,35 @@ export default function StockInOutPage() {
                   <span className="meta-label">Order Qty</span>
                   <span className="meta-value fw-bold" style={{ fontSize: 16 }}>{selectedItem.order_quantity || '-'} {selectedItem.order_quantity ? selectedItem.unit : ''}</span>
                 </div>
+                {(() => {
+                  const activeTiers = (selectedItem.price_tiers || []).filter(t => Number(t.quantity) > 0);
+                  const distinctPrices = [...new Set(activeTiers.map(t => Number(t.unit_price)))];
+                  const distinctRates = selectedItem.currency === 'USD' ? [...new Set(activeTiers.map(t => Number(t.conversion_rate || selectedItem.conversion_rate || 0)))] : [1];
+                  if (distinctPrices.length > 1 || distinctRates.length > 1) {
+                    return (
+                      <div className="meta-item" style={{ gridColumn: 'span 2' }}>
+                        <span className="meta-label">Stock by Price / Rate Tier</span>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
+                          {activeTiers.map((t, idx) => (
+                            <span key={idx} className="badge badge-info" style={{ fontSize: 12, padding: '3px 8px' }}>
+                              <strong>{t.quantity} {selectedItem.unit}</strong> @ {t.currency === 'USD' ? '$' : '৳'}{Number(t.unit_price || 0).toFixed(2)}
+                              {t.currency === 'USD' && t.conversion_rate ? ` (@ ৳${Number(t.conversion_rate).toFixed(2)})` : ''}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div className="meta-item">
+                      <span className="meta-label">Unit Price</span>
+                      <span className="meta-value fw-bold" style={{ color: 'var(--accent)' }}>
+                        {selectedItem.currency === 'USD' ? '$' : '৳'}{Number(selectedItem.unit_price || 0).toFixed(2)}
+                        {selectedItem.currency === 'USD' && selectedItem.conversion_rate ? ` (৳${Number(selectedItem.conversion_rate).toFixed(2)})` : ''}
+                      </span>
+                    </div>
+                  );
+                })()}
                 {selectedItem.style_name && (
                   <div className="meta-item">
                     <span className="meta-label">Style</span>
@@ -362,6 +391,7 @@ export default function StockInOutPage() {
                         <th>Date</th>
                         <th>Type</th>
                         <th className="text-right">Qty</th>
+                        <th className="text-right">Price</th>
                         <th className="text-right">Before</th>
                         <th className="text-right">After</th>
                         <th>Reference</th>
@@ -379,6 +409,9 @@ export default function StockInOutPage() {
                             </span>
                           </td>
                           <td className="text-right text-mono fw-bold">{tx.quantity}</td>
+                          <td className="text-right text-mono" style={{ fontSize: 12 }}>
+                            {tx.unit_price != null ? `${tx.currency === 'USD' ? '$' : '৳'}${Number(tx.unit_price).toFixed(2)}` : '-'}
+                          </td>
                           <td className="text-right text-mono" style={{ color: 'var(--text-muted)' }}>{tx.stock_before}</td>
                           <td className="text-right text-mono">{tx.stock_after}</td>
                           <td style={{ fontSize: 12 }}>{tx.reference || '-'}</td>

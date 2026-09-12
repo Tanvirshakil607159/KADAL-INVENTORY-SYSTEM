@@ -13,6 +13,8 @@ export default function StockMovementModal({ data, onSaved }) {
   const [searching, setSearching] = useState(false);
 
   const [quantity, setQuantity] = useState('');
+  const [unitPrice, setUnitPrice] = useState(item?.unit_price !== undefined ? item.unit_price : '');
+  const [conversionRate, setConversionRate] = useState(item?.conversion_rate !== undefined && item?.conversion_rate !== null ? item.conversion_rate : '');
   const [reference, setReference] = useState('');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
@@ -59,6 +61,11 @@ export default function StockMovementModal({ data, onSaved }) {
         unit: selectedItem.unit,
         type, 
         quantity: qty, 
+        unitPrice: unitPrice !== '' ? Number(unitPrice) : selectedItem.unit_price,
+        currency: selectedItem.currency || 'BDT',
+        conversionRate: selectedItem.currency === 'USD' 
+          ? (conversionRate !== '' ? Number(conversionRate) : (selectedItem.conversion_rate ? Number(selectedItem.conversion_rate) : null))
+          : null,
         reference, 
         notes 
       });
@@ -109,7 +116,12 @@ export default function StockMovementModal({ data, onSaved }) {
                     <div
                       key={it.id}
                       style={{ padding: '8px 12px', borderBottom: '1px solid var(--border-light)', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
-                      onClick={() => { setSelectedItem(it); setSearchResults([]); }}
+                      onClick={() => { 
+                        setSelectedItem(it); 
+                        setUnitPrice(it?.unit_price !== undefined ? it.unit_price : '');
+                        setConversionRate(it?.conversion_rate !== undefined && it?.conversion_rate !== null ? it.conversion_rate : '');
+                        setSearchResults([]); 
+                      }}
                     >
                       <div>
                         <div style={{ fontWeight: 600, fontSize: 13 }}>{it.name}</div>
@@ -157,6 +169,10 @@ export default function StockMovementModal({ data, onSaved }) {
                   <span>Order Qty: <strong className="text-mono">{selectedItem.order_quantity}</strong></span>
                 )}
                 <span>Stock Qty: <strong className="text-mono text-success">{selectedItem.current_stock} {selectedItem.unit}</strong></span>
+                <span>Unit Price: <strong className="text-mono" style={{ color: 'var(--accent)' }}>{selectedItem.currency === 'USD' ? '$' : '৳'}{Number(selectedItem.unit_price || 0).toFixed(2)}</strong></span>
+                {selectedItem.currency === 'USD' && selectedItem.conversion_rate && (
+                  <span>Rate: <strong className="text-mono">৳{Number(selectedItem.conversion_rate).toFixed(2)}</strong></span>
+                )}
               </div>
             </div>
           )}
@@ -167,6 +183,77 @@ export default function StockMovementModal({ data, onSaved }) {
                 <label className="form-label">Quantity *</label>
                 <input className="form-input" type="number" min="1" value={quantity} onChange={e => setQuantity(e.target.value)} autoFocus placeholder="Enter quantity" />
               </div>
+
+              {type === 'IN' && (
+                <>
+                  <div className="form-group">
+                    <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span>Unit Price ({selectedItem.currency === 'USD' ? 'USD $' : 'BDT ৳'})</span>
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 'normal' }}>
+                        Current: {selectedItem.currency === 'USD' ? '$' : '৳'}{Number(selectedItem.unit_price || 0).toFixed(2)}
+                      </span>
+                    </label>
+                    <input 
+                      className="form-input" 
+                      type="number" 
+                      step="0.01" 
+                      min="0" 
+                      value={unitPrice} 
+                      onChange={e => setUnitPrice(e.target.value)} 
+                      placeholder={`e.g. ${selectedItem.unit_price || 0}`} 
+                    />
+                  </div>
+
+                  {selectedItem.currency === 'USD' && (
+                    <div className="form-group">
+                      <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span>Conversion Rate (1 USD = ? BDT)</span>
+                        {selectedItem.conversion_rate ? (
+                          <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 'normal' }}>
+                            Current: ৳{Number(selectedItem.conversion_rate).toFixed(2)}
+                          </span>
+                        ) : null}
+                      </label>
+                      <input 
+                        className="form-input" 
+                        type="number" 
+                        step="0.01" 
+                        min="0" 
+                        value={conversionRate} 
+                        onChange={e => setConversionRate(e.target.value)} 
+                        placeholder={selectedItem.conversion_rate ? `e.g. ${selectedItem.conversion_rate}` : 'e.g. 120.50'} 
+                      />
+                      {conversionRate && unitPrice ? (
+                        <div style={{ fontSize: 11, marginTop: 4, color: 'var(--accent)' }}>
+                          ≈ ৳{(Number(unitPrice) * Number(conversionRate)).toFixed(2)} BDT per unit
+                        </div>
+                      ) : null}
+                    </div>
+                  )}
+
+                  <div style={{ fontSize: 11, marginTop: -6, marginBottom: 12, minHeight: 16 }}>
+                    {(() => {
+                      const isSamePrice = Number(unitPrice) === Number(selectedItem.unit_price);
+                      const isSameRate = selectedItem.currency !== 'USD' || 
+                        (conversionRate === '' && !selectedItem.conversion_rate) || 
+                        Number(conversionRate) === Number(selectedItem.conversion_rate);
+
+                      if (isSamePrice && isSameRate) {
+                        return (
+                          <span style={{ color: 'var(--text-muted)' }}>
+                            ✓ Same price & rate — will merge into one stock tier.
+                          </span>
+                        );
+                      }
+                      return (
+                        <span style={{ color: 'var(--accent)', fontWeight: 500 }}>
+                          ★ Different {selectedItem.currency === 'USD' && !isSameRate ? 'rate / price' : 'price'} — will track separately from previous stock.
+                        </span>
+                      );
+                    })()}
+                  </div>
+                </>
+              )}
               <div className="form-group">
                 <label className="form-label">Reference</label>
                 <input className="form-input" list="stock-reference-list" value={reference} onChange={e => { setReference(e.target.value); fetchSuggestions('reference', e.target.value); }} onFocus={() => fetchSuggestions('reference', reference)} placeholder="e.g. PO-12345, Manual adjustment" autoComplete="off" />

@@ -872,9 +872,10 @@ function getReportColumns(type) {
         { key: 'style_purchase_order', label: 'Style / Purchase / Order', width: 120, format: (v, r) => `${r.style_name || '-'} / ${r.purchase_no || '-'} / ${r.order_number || '-'}` },
         { key: 'size_color', label: 'Size / Color', width: 80, format: (v, r) => [r.size, r.color].filter(Boolean).join(' / ') || '-' },
         { key: 'buyer_name', label: 'Buyer', width: 80 },
-        { key: 'unit_price', label: 'Unit Price', width: 60, align: 'right', format: (v) => Number(v || 0).toFixed(2) },
+        { key: 'unit_price', label: 'Unit Price', width: 60, align: 'right', format: (v, r) => `${r.currency === 'USD' ? '$' : '৳'}${Number(v || 0).toFixed(2)}` },
+        { key: 'conversion_rate', label: 'Conversion Rate', width: 60, align: 'right', format: (v, r) => r.currency === 'USD' && r.conversion_rate ? `৳${Number(r.conversion_rate).toFixed(2)}` : '-' },
         { key: 'current_stock', label: 'Stock', width: 50, align: 'right' },
-        { key: 'total_value', label: 'Total Value', width: 70, align: 'right', format: (v, r) => (r.current_stock * (r.unit_price || 0)).toFixed(2) },
+        { key: 'total_value', label: 'Total Value', width: 70, align: 'right', format: (v, r) => `${r.currency === 'USD' ? '$' : '৳'}${(r.current_stock * (r.unit_price || 0)).toFixed(2)}` },
         { key: 'unit', label: 'Unit', width: 40 },
         { key: 'min_stock_level', label: 'Min Level', width: 55, align: 'right' },
       ];
@@ -1066,6 +1067,7 @@ function getReportColumns(type) {
         { key: 'current_stock', label: 'Stock In Hand', width: 55, align: 'right' },
         { key: 'unit', label: 'Unit', width: 35 },
         { key: 'unit_price', label: 'Unit Price', width: 55, align: 'right', format: (v, r) => `${r.currency === 'USD' ? '$' : '৳'}${Number(v || 0).toFixed(2)}` },
+        { key: 'conversion_rate', label: 'Conversion Rate', width: 55, align: 'right', format: (v, r) => (r.converted_from_usd || r.currency === 'USD') && r.conversion_rate ? `৳${Number(r.conversion_rate).toFixed(2)}` : '-' },
         { key: 'total_value', label: 'Total Value', width: 65, align: 'right', format: (v, r) => `${r.currency === 'USD' ? '$' : '৳'}${Number(v || 0).toFixed(2)}` },
       ];
     case 'auditFinishedGoods':
@@ -1078,6 +1080,7 @@ function getReportColumns(type) {
         { key: 'current_stock', label: 'Stock In Hand', width: 55, align: 'right' },
         { key: 'unit', label: 'Unit', width: 35 },
         { key: 'unit_price', label: 'Unit Price', width: 55, align: 'right', format: (v, r) => `${r.currency === 'USD' ? '$' : '৳'}${Number(v || 0).toFixed(2)}` },
+        { key: 'conversion_rate', label: 'Conversion Rate', width: 55, align: 'right', format: (v, r) => (r.converted_from_usd || r.currency === 'USD') && r.conversion_rate ? `৳${Number(r.conversion_rate).toFixed(2)}` : '-' },
         { key: 'total_value', label: 'Total Value', width: 65, align: 'right', format: (v, r) => `${r.currency === 'USD' ? '$' : '৳'}${Number(v || 0).toFixed(2)}` },
       ];
     case 'auditWorkingProcess':
@@ -1093,6 +1096,7 @@ function getReportColumns(type) {
         { key: 'outstanding', label: 'Outstanding', width: 50, align: 'right' },
         { key: 'unit', label: 'Unit', width: 35 },
         { key: 'unit_price', label: 'Unit Price', width: 55, align: 'right', format: (v, r) => `${r.currency === 'USD' ? '$' : '৳'}${Number(v || 0).toFixed(2)}` },
+        { key: 'conversion_rate', label: 'Conversion Rate', width: 55, align: 'right', format: (v, r) => (r.converted_from_usd || r.currency === 'USD') && r.conversion_rate ? `৳${Number(r.conversion_rate).toFixed(2)}` : '-' },
         { key: 'outstanding_value', label: 'Outstanding Value', width: 65, align: 'right', format: (v, r) => `${r.currency === 'USD' ? '$' : '৳'}${Number(v || 0).toFixed(2)}` },
       ];
     default:

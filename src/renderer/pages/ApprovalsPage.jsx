@@ -129,6 +129,8 @@ export default function ApprovalsPage() {
               {renderField('Color', itemData.color, oldData?.color)}
               {renderField('Unit', itemData.unit, oldData?.unit)}
               {renderField('Unit Price', itemData.unitPrice || itemData.unit_price, oldData?.unit_price)}
+              {renderField('Currency', itemData.currency, oldData?.currency)}
+              {(itemData.currency === 'USD' || oldData?.currency === 'USD') && renderField('Conversion Rate (BDT)', itemData.conversionRate || itemData.conversion_rate, oldData?.conversion_rate)}
               {renderField('Opening Stock', itemData.openingStock || itemData.opening_stock, oldData?.opening_stock)}
               {renderField('Min Level', itemData.minStockLevel || itemData.min_stock_level, oldData?.min_stock_level)}
             </div>

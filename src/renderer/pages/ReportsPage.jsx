@@ -56,7 +56,7 @@ export default function ReportsPage() {
 
     // Numeric fields
     const numericFields = [
-      'current_stock', 'order_quantity', 'min_stock_level', 'unit_price',
+      'current_stock', 'order_quantity', 'min_stock_level', 'unit_price', 'conversion_rate',
       'total_in', 'total_out', 'shipped_quantity', 'total_shipped', 'balance'
     ];
 
@@ -414,6 +414,7 @@ export default function ReportsPage() {
                 <SortHeader label="Size / Color" field="size" />
                 <SortHeader label="Buyer" field="buyer_name" />
                 <SortHeader label="Unit Price" field="unit_price" className="text-right" />
+                <SortHeader label="Conversion Rate" field="conversion_rate" className="text-right" />
                 <SortHeader label="Stock" field="current_stock" className="text-right" />
                 <th className="text-right">Total Value</th>
                 <SortHeader label="Unit" field="unit" />
@@ -432,9 +433,84 @@ export default function ReportsPage() {
                 </td>
                 <td>{[r.size, r.color].filter(Boolean).join(' / ') || '-'}</td>
                 <td>{r.buyer_name || '-'}</td>
-                <td className="text-right text-mono">{r.currency === 'USD' ? '$' : '৳'}{Number(r.unit_price || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                <td className="text-right text-mono">
+                  {(() => {
+                    const activeTiers = (r.price_tiers || []).filter(t => Number(t.quantity) > 0);
+                    const distinctPrices = [...new Set(activeTiers.map(t => Number(t.unit_price)))];
+                    const distinctRates = r.currency === 'USD' ? [...new Set(activeTiers.map(t => Number(t.conversion_rate || r.conversion_rate || 0)))] : [1];
+                    if (distinctPrices.length > 1 || distinctRates.length > 1) {
+                      return (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'flex-end' }}>
+                          {activeTiers.map((t, idx) => (
+                            <span key={idx} className="badge badge-info" style={{ fontSize: 10, padding: '1px 5px', whiteSpace: 'nowrap' }}>
+                              {t.quantity} @ {t.currency === 'USD' ? '$' : '৳'}{Number(t.unit_price || 0).toFixed(2)}
+                              {t.currency === 'USD' && t.conversion_rate ? ` (@ ৳${Number(t.conversion_rate).toFixed(2)})` : ''}
+                            </span>
+                          ))}
+                        </div>
+                      );
+                    }
+                    const displayPrice = distinctPrices.length === 1 ? distinctPrices[0] : (r.unit_price || 0);
+                    return `${r.currency === 'USD' ? '$' : '৳'}${Number(displayPrice).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
+                  })()}
+                </td>
+                <td className="text-right text-mono">
+                  {(() => {
+                    if (r.currency !== 'USD') return '-';
+                    const activeTiers = (r.price_tiers || []).filter(t => Number(t.quantity) > 0);
+                    const distinctRates = [...new Set(activeTiers.map(t => Number(t.conversion_rate || r.conversion_rate || 0)).filter(rate => rate > 0))];
+                    if (distinctRates.length > 1) {
+                      return (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 1, alignItems: 'flex-end' }}>
+                          {distinctRates.map((rate, idx) => (
+                            <span key={idx} style={{ fontSize: 10 }}>৳{Number(rate).toFixed(2)}</span>
+                          ))}
+                        </div>
+                      );
+                    }
+                    const singleRate = distinctRates.length === 1 ? distinctRates[0] : r.conversion_rate;
+                    return singleRate ? `৳${Number(singleRate).toFixed(2)}` : '-';
+                  })()}
+                </td>
                 <td className="text-right text-mono fw-bold" style={{ color: r.current_stock <= r.min_stock_level && r.min_stock_level > 0 ? 'var(--danger)' : 'var(--success)' }}>{r.current_stock}</td>
-                <td className="text-right text-mono">{r.currency === 'USD' ? '$' : '৳'}{Number((r.current_stock * (r.unit_price || 0))).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                <td className="text-right text-mono">
+                  {(() => {
+                    const activeTiers = (r.price_tiers || []).filter(t => Number(t.quantity) > 0);
+                    let totalUSD = 0;
+                    let totalBDT = 0;
+                    if (activeTiers.length > 0) {
+                      activeTiers.forEach(t => {
+                        const val = (Number(t.quantity) || 0) * (Number(t.unit_price) || 0);
+                        if (t.currency === 'USD') {
+                          totalUSD += val;
+                          totalBDT += val * (Number(t.conversion_rate || r.conversion_rate || 1));
+                        } else {
+                          totalBDT += val;
+                        }
+                      });
+                    } else {
+                      const val = (r.current_stock || 0) * (r.unit_price || 0);
+                      if (r.currency === 'USD') {
+                        totalUSD = val;
+                        totalBDT = val * (Number(r.conversion_rate || 1));
+                      } else {
+                        totalBDT = val;
+                      }
+                    }
+
+                    if (r.currency === 'USD') {
+                      return (
+                        <div>
+                          <div>${totalUSD.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+                          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                            (৳{totalBDT.toLocaleString(undefined, { minimumFractionDigits: 2 })})
+                          </div>
+                        </div>
+                      );
+                    }
+                    return `৳${totalBDT.toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
+                  })()}
+                </td>
                 <td>{r.unit}</td>
                 <td className="text-right text-mono">{r.min_stock_level}</td>
               </tr>
@@ -1071,7 +1147,14 @@ export default function ReportsPage() {
             <td className="text-right text-mono text-muted">{r.returned_qty}</td>
             <td className="text-right text-mono fw-bold" style={{ color: '#f59e0b' }}>{r.outstanding}</td>
             <td>{r.unit}</td>
-            <td className="text-right text-mono">{r.currency === 'USD' ? '$' : '৳'}{Number(r.unit_price || 0).toFixed(2)}</td>
+            <td className="text-right text-mono">
+              {r.currency === 'USD' ? '$' : '৳'}{Number(r.unit_price || 0).toFixed(2)}
+              {r.converted_from_usd && (
+                <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                  (${Number(r.original_unit_price || 0).toFixed(2)} @ ৳{Number(r.conversion_rate).toFixed(2)})
+                </div>
+              )}
+            </td>
             <td className="text-right text-mono fw-bold">{r.currency === 'USD' ? '$' : '৳'}{Number(r.outstanding_value || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
           </tr>
         ))}</tbody>
@@ -1124,7 +1207,14 @@ export default function ReportsPage() {
             <td>{r.buyer_name || '-'}</td>
             <td className="text-right text-mono fw-bold" style={{ color: '#10b981' }}>{r.current_stock}</td>
             <td>{r.unit}</td>
-            <td className="text-right text-mono">{r.currency === 'USD' ? '$' : '৳'}{Number(r.unit_price || 0).toFixed(2)}</td>
+            <td className="text-right text-mono">
+              {r.currency === 'USD' ? '$' : '৳'}{Number(r.unit_price || 0).toFixed(2)}
+              {r.converted_from_usd && (
+                <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                  (${Number(r.original_unit_price || 0).toFixed(2)} @ ৳{Number(r.conversion_rate).toFixed(2)})
+                </div>
+              )}
+            </td>
             <td className="text-right text-mono fw-bold">{r.currency === 'USD' ? '$' : '৳'}{Number(r.total_value || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
           </tr>
         ))}</tbody>
@@ -1177,7 +1267,14 @@ export default function ReportsPage() {
             <td style={{ fontSize: 12 }}>{r.supplier_name || '-'}</td>
             <td className="text-right text-mono fw-bold" style={{ color: '#6366f1' }}>{r.current_stock}</td>
             <td>{r.unit}</td>
-            <td className="text-right text-mono">{r.currency === 'USD' ? '$' : '৳'}{Number(r.unit_price || 0).toFixed(2)}</td>
+            <td className="text-right text-mono">
+              {r.currency === 'USD' ? '$' : '৳'}{Number(r.unit_price || 0).toFixed(2)}
+              {r.converted_from_usd && (
+                <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                  (${Number(r.original_unit_price || 0).toFixed(2)} @ ৳{Number(r.conversion_rate).toFixed(2)})
+                </div>
+              )}
+            </td>
             <td className="text-right text-mono fw-bold">{r.currency === 'USD' ? '$' : '৳'}{Number(r.total_value || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
           </tr>
         ))}</tbody>

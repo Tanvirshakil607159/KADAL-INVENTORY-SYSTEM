@@ -1,5 +1,6 @@
 const { dbPrepare, getSupabase, isCloudEnabled } = require('../connection');
 const { normalizeBuyerName } = require('../../utils/buyer-normalizer');
+const ItemPriceTiersRepo = require('./item-price-tiers');
 
 const ItemsRepo = {
   async getAll(filters = {}) {
@@ -41,13 +42,18 @@ const ItemsRepo = {
       }
 
       const data = await fetchAll(query.order('name', { ascending: true }).order('id', { ascending: true }));
+      const tiersMap = await ItemPriceTiersRepo.getAllActiveGrouped();
       
       // Map Supabase relation format to match local format
-      return data.map(i => ({
-        ...i,
-        category_name: i.categories?.name,
-        supplier_name: i.suppliers?.name
-      }));
+      return data.map(i => {
+        const itemTiers = tiersMap[i.id] || [];
+        return {
+          ...i,
+          category_name: i.categories?.name,
+          supplier_name: i.suppliers?.name,
+          price_tiers: itemTiers.length > 0 ? itemTiers : (Number(i.current_stock) > 0 ? [{ quantity: i.current_stock, unit_price: i.unit_price, currency: i.currency, conversion_rate: i.conversion_rate }] : [])
+        };
+      });
     }
 
     // Local Fallback
@@ -65,7 +71,15 @@ const ItemsRepo = {
     }
     if (filters.lowStock) { where.push('i.current_stock <= i.min_stock_level'); }
     const w = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
-    return dbPrepare(`SELECT i.*, c.name as category_name, s.name as supplier_name FROM items i LEFT JOIN categories c ON i.category_id = c.id LEFT JOIN suppliers s ON i.supplier_id = s.id ${w} ORDER BY i.name ASC`).all(...params);
+    const rows = dbPrepare(`SELECT i.*, c.name as category_name, s.name as supplier_name FROM items i LEFT JOIN categories c ON i.category_id = c.id LEFT JOIN suppliers s ON i.supplier_id = s.id ${w} ORDER BY i.name ASC`).all(...params);
+    const tiersMap = await ItemPriceTiersRepo.getAllActiveGrouped();
+    return rows.map(i => {
+      const itemTiers = tiersMap[i.id] || [];
+      return {
+        ...i,
+        price_tiers: itemTiers.length > 0 ? itemTiers : (Number(i.current_stock) > 0 ? [{ quantity: i.current_stock, unit_price: i.unit_price, currency: i.currency, conversion_rate: i.conversion_rate }] : [])
+      };
+    });
   },
 
   async getById(id) {
@@ -76,13 +90,21 @@ const ItemsRepo = {
         .eq('id', id)
         .single();
       if (error) throw error;
+      const tiers = await ItemPriceTiersRepo.getActiveByItem(id);
       return {
         ...data,
         category_name: data.categories?.name,
-        supplier_name: data.suppliers?.name
+        supplier_name: data.suppliers?.name,
+        price_tiers: tiers.length > 0 ? tiers : (Number(data.current_stock) > 0 ? [{ quantity: data.current_stock, unit_price: data.unit_price, currency: data.currency, conversion_rate: data.conversion_rate }] : [])
       };
     }
-    return dbPrepare(`SELECT i.*, c.name as category_name, s.name as supplier_name FROM items i LEFT JOIN categories c ON i.category_id = c.id LEFT JOIN suppliers s ON i.supplier_id = s.id WHERE i.id = ?`).get(id);
+    const item = dbPrepare(`SELECT i.*, c.name as category_name, s.name as supplier_name FROM items i LEFT JOIN categories c ON i.category_id = c.id LEFT JOIN suppliers s ON i.supplier_id = s.id WHERE i.id = ?`).get(id);
+    if (!item) return null;
+    const tiers = await ItemPriceTiersRepo.getActiveByItem(id);
+    return {
+      ...item,
+      price_tiers: tiers.length > 0 ? tiers : (Number(item.current_stock) > 0 ? [{ quantity: item.current_stock, unit_price: item.unit_price, currency: item.currency, conversion_rate: item.conversion_rate }] : [])
+    };
   },
 
   async search(query) {
@@ -96,16 +118,33 @@ const ItemsRepo = {
         .order('name', { ascending: true })
         .order('id', { ascending: true });
       if (error) throw error;
-      return data.map(i => ({ ...i, category_name: i.categories?.name }));
+      const tiersMap = await ItemPriceTiersRepo.getAllActiveGrouped();
+      return data.map(i => {
+        const itemTiers = tiersMap[i.id] || [];
+        return {
+          ...i,
+          category_name: i.categories?.name,
+          price_tiers: itemTiers.length > 0 ? itemTiers : (Number(i.current_stock) > 0 ? [{ quantity: i.current_stock, unit_price: i.unit_price, currency: i.currency, conversion_rate: i.conversion_rate }] : [])
+        };
+      });
     }
     const s = `%${query}%`;
-    return dbPrepare(`SELECT i.*, c.name as category_name FROM items i LEFT JOIN categories c ON i.category_id = c.id WHERE i.is_active = 1 AND (i.name LIKE ? OR i.item_code LIKE ? OR i.color LIKE ? OR i.size LIKE ? OR i.buyer_name LIKE ? OR i.style_name LIKE ? OR i.purchase_no LIKE ? OR i.order_number LIKE ?) ORDER BY i.name ASC LIMIT 50`).all(s, s, s, s, s, s, s, s);
+    const rows = dbPrepare(`SELECT i.*, c.name as category_name FROM items i LEFT JOIN categories c ON i.category_id = c.id WHERE i.is_active = 1 AND (i.name LIKE ? OR i.item_code LIKE ? OR i.color LIKE ? OR i.size LIKE ? OR i.buyer_name LIKE ? OR i.style_name LIKE ? OR i.purchase_no LIKE ? OR i.order_number LIKE ?) ORDER BY i.name ASC LIMIT 50`).all(s, s, s, s, s, s, s, s);
+    const tiersMap = await ItemPriceTiersRepo.getAllActiveGrouped();
+    return rows.map(i => {
+      const itemTiers = tiersMap[i.id] || [];
+      return {
+        ...i,
+        price_tiers: itemTiers.length > 0 ? itemTiers : (Number(i.current_stock) > 0 ? [{ quantity: i.current_stock, unit_price: i.unit_price, currency: i.currency, conversion_rate: i.conversion_rate }] : [])
+      };
+    });
   },
 
   async create(data) {
     const finalCode = data.itemCode || await this.getNextCode();
     // Normalize buyer name to canonical format
     const normalizedBuyer = data.buyerName ? normalizeBuyerName(data.buyerName) : null;
+    const conversionRate = data.currency === 'USD' ? (Number(data.conversionRate) || null) : null;
     
     if (isCloudEnabled()) {
       const { data: inserted, error } = await getSupabase()
@@ -129,22 +168,40 @@ const ItemsRepo = {
           order_quantity: data.orderQuantity || 0,
           unit_price: data.unitPrice || 0,
           currency: data.currency || 'BDT',
+          conversion_rate: conversionRate,
           source_type: data.sourceType || 'SOURCE'
         }])
         .select()
         .single();
       if (error) throw error;
+      if (data.openingStock && Number(data.openingStock) > 0) {
+        try {
+          await ItemPriceTiersRepo.addStockTier(inserted.id, data.openingStock, data.unitPrice, data.currency, conversionRate);
+        } catch (e) {
+          console.error('[ItemsRepo] Failed to create opening stock tier:', e.message);
+        }
+      }
       return inserted.id;
     }
 
-    return dbPrepare(`INSERT INTO items (item_code, name, category_id, size, color, unit, supplier_id, opening_stock, current_stock, min_stock_level, notes, buyer_name, style_name, purchase_no, order_number, order_quantity, unit_price, currency, source_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-      finalCode, data.name, data.categoryId||null, data.size||null, data.color||null, data.unit||'pcs', data.supplierId||null, data.openingStock||0, data.openingStock||0, data.minStockLevel||0, data.notes||null, normalizedBuyer, data.styleName||null, data.purchaseNo||null, data.orderNumber||null, data.orderQuantity||0, data.unitPrice||0, data.currency||'BDT', data.sourceType||'SOURCE'
+    const insertedId = dbPrepare(`INSERT INTO items (item_code, name, category_id, size, color, unit, supplier_id, opening_stock, current_stock, min_stock_level, notes, buyer_name, style_name, purchase_no, order_number, order_quantity, unit_price, currency, conversion_rate, source_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      finalCode, data.name, data.categoryId||null, data.size||null, data.color||null, data.unit||'pcs', data.supplierId||null, data.openingStock||0, data.openingStock||0, data.minStockLevel||0, data.notes||null, normalizedBuyer, data.styleName||null, data.purchaseNo||null, data.orderNumber||null, data.orderQuantity||0, data.unitPrice||0, data.currency||'BDT', conversionRate, data.sourceType||'SOURCE'
     ).lastInsertRowid;
+
+    if (data.openingStock && Number(data.openingStock) > 0) {
+      try {
+        await ItemPriceTiersRepo.addStockTier(insertedId, data.openingStock, data.unitPrice, data.currency, conversionRate);
+      } catch (e) {
+        console.error('[ItemsRepo] Failed to create local opening stock tier:', e.message);
+      }
+    }
+    return insertedId;
   },
 
   async update(id, data) {
     // Normalize buyer name to canonical format
     const normalizedBuyer = data.buyerName ? normalizeBuyerName(data.buyerName) : null;
+    const conversionRate = data.currency === 'USD' ? (Number(data.conversionRate) || null) : null;
     
     if (isCloudEnabled()) {
       const { error } = await getSupabase()
@@ -165,6 +222,7 @@ const ItemsRepo = {
           order_quantity: data.orderQuantity || 0,
           unit_price: data.unitPrice || 0,
           currency: data.currency || 'BDT',
+          conversion_rate: conversionRate,
           source_type: data.sourceType || 'SOURCE',
           updated_at: new Date().toISOString()
         })
@@ -172,8 +230,8 @@ const ItemsRepo = {
       if (error) throw error;
       return true;
     }
-    return dbPrepare(`UPDATE items SET name=?, category_id=?, size=?, color=?, unit=?, supplier_id=?, min_stock_level=?, notes=?, buyer_name=?, style_name=?, purchase_no=?, order_number=?, order_quantity=?, unit_price=?, currency=?, source_type=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(
-      data.name, data.categoryId||null, data.size||null, data.color||null, data.unit||'pcs', data.supplierId||null, data.minStockLevel||0, data.notes||null, normalizedBuyer, data.styleName||null, data.purchaseNo||null, data.orderNumber||null, data.orderQuantity||0, data.unitPrice||0, data.currency||'BDT', data.sourceType||'SOURCE', id
+    return dbPrepare(`UPDATE items SET name=?, category_id=?, size=?, color=?, unit=?, supplier_id=?, min_stock_level=?, notes=?, buyer_name=?, style_name=?, purchase_no=?, order_number=?, order_quantity=?, unit_price=?, currency=?, conversion_rate=?, source_type=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(
+      data.name, data.categoryId||null, data.size||null, data.color||null, data.unit||'pcs', data.supplierId||null, data.minStockLevel||0, data.notes||null, normalizedBuyer, data.styleName||null, data.purchaseNo||null, data.orderNumber||null, data.orderQuantity||0, data.unitPrice||0, data.currency||'BDT', conversionRate, data.sourceType||'SOURCE', id
     );
   },
 
@@ -187,6 +245,18 @@ const ItemsRepo = {
       return true;
     }
     return dbPrepare(`UPDATE items SET current_stock = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(newStock, id);
+  },
+
+  async updateConversionRate(id, conversionRate) {
+    if (isCloudEnabled()) {
+      const { error } = await getSupabase()
+        .from('items')
+        .update({ conversion_rate: conversionRate, updated_at: new Date().toISOString() })
+        .eq('id', id);
+      if (error) throw error;
+      return true;
+    }
+    return dbPrepare(`UPDATE items SET conversion_rate = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(conversionRate, id);
   },
 
   async adjustStock(id, delta) {
@@ -245,26 +315,75 @@ const ItemsRepo = {
 
   async getTotalValue() {
     if (isCloudEnabled()) {
+      try {
+        const { data: tiers, error: tErr } = await getSupabase()
+          .from('item_price_tiers')
+          .select('quantity, unit_price, currency, conversion_rate')
+          .gt('quantity', 0);
+        if (!tErr && tiers && tiers.length > 0) {
+          const res = { BDT: 0, USD: 0 };
+          tiers.forEach(t => {
+            const qty = Number(t.quantity) || 0;
+            const price = Number(t.unit_price) || 0;
+            const val = qty * price;
+            if (t.currency === 'USD') {
+              res.USD += val;
+              res.BDT += val * (Number(t.conversion_rate) || 1);
+            } else {
+              res.BDT += val;
+            }
+          });
+          return res;
+        }
+      } catch (e) {}
+
       const { data, error } = await getSupabase()
         .from('items')
-        .select('current_stock, unit_price, currency')
+        .select('current_stock, unit_price, currency, conversion_rate')
         .eq('is_active', true);
       if (error) throw error;
       const res = { BDT: 0, USD: 0 };
       data.forEach(i => {
-        const val = (i.current_stock || 0) * (i.unit_price || 0);
-        if (i.currency === 'USD') res.USD += val;
-        else res.BDT += val;
+        const stock = Number(i.current_stock) || 0;
+        const price = Number(i.unit_price) || 0;
+        const val = stock * price;
+        if (i.currency === 'USD') {
+          res.USD += val;
+          res.BDT += val * (Number(i.conversion_rate) || 1);
+        } else {
+          res.BDT += val;
+        }
       });
       return res;
     }
-    const rows = dbPrepare('SELECT currency, SUM(current_stock * unit_price) as total FROM items WHERE is_active = 1 GROUP BY currency').all();
-    const res = { BDT: 0, USD: 0 };
-    rows.forEach(r => {
-      if (r.currency === 'USD') res.USD = r.total;
-      else res.BDT += r.total;
-    });
-    return res;
+
+    try {
+      const tierRow = dbPrepare(`
+        SELECT 
+          COALESCE(SUM(CASE WHEN t.currency = 'USD' THEN t.quantity * t.unit_price * COALESCE(t.conversion_rate, 1) ELSE t.quantity * t.unit_price END), 0) as total_bdt,
+          COALESCE(SUM(CASE WHEN t.currency = 'USD' THEN t.quantity * t.unit_price ELSE 0 END), 0) as total_usd
+        FROM item_price_tiers t
+        JOIN items i ON t.item_id = i.id
+        WHERE i.is_active = 1 AND t.quantity > 0
+      `).get();
+      if (tierRow && (tierRow.total_bdt > 0 || tierRow.total_usd > 0)) {
+        return {
+          BDT: tierRow.total_bdt || 0,
+          USD: tierRow.total_usd || 0
+        };
+      }
+    } catch (e) {}
+
+    const row = dbPrepare(`
+      SELECT 
+        COALESCE(SUM(CASE WHEN currency = 'USD' THEN current_stock * unit_price * COALESCE(conversion_rate, 1) ELSE current_stock * unit_price END), 0) as total_bdt,
+        COALESCE(SUM(CASE WHEN currency = 'USD' THEN current_stock * unit_price ELSE 0 END), 0) as total_usd
+      FROM items WHERE is_active = 1
+    `).get();
+    return {
+      BDT: row ? (row.total_bdt || 0) : 0,
+      USD: row ? (row.total_usd || 0) : 0
+    };
   },
 
   async getLowStockCount() {

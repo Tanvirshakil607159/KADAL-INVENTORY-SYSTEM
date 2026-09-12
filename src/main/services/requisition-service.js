@@ -1,6 +1,7 @@
 const RequisitionsRepo = require('../database/repositories/requisitions');
 const ItemsRepo = require('../database/repositories/items');
 const StockTransactionsRepo = require('../database/repositories/stock-transactions');
+const ItemPriceTiersRepo = require('../database/repositories/item-price-tiers');
 const AuditLogsRepo = require('../database/repositories/audit-logs');
 const SettingsRepo = require('../database/repositories/settings');
 const AuthService = require('./auth-service');
@@ -160,6 +161,7 @@ const RequisitionService = {
         const stockBefore = freshItem.current_stock;
         const stockAfter = stockBefore - item.fulfillQty;
         await ItemsRepo.updateStock(item.item_id, stockAfter);
+        await ItemPriceTiersRepo.deductStockFIFO(item.item_id, item.fulfillQty);
         completedDeductions.push({ item, stockBefore, stockAfter });
       }
     } catch (err) {
@@ -219,6 +221,7 @@ const RequisitionService = {
             const stockBefore = dbItem.current_stock;
             const stockAfter = stockBefore + issued;
             await ItemsRepo.updateStock(item.item_id, stockAfter);
+            await ItemPriceTiersRepo.addStockTier(item.item_id, issued, dbItem.unit_price, dbItem.currency, dbItem.conversion_rate);
             await StockTransactionsRepo.create({
               itemId: item.item_id,
               type: 'IN',

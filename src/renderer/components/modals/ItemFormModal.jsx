@@ -27,6 +27,7 @@ export default function ItemFormModal({ data, onSaved }) {
     orderQuantity: item?.orderQuantity || item?.order_quantity || 0,
     unitPrice: item?.unitPrice || item?.unit_price || 0, 
     currency: item?.currency || '',
+    conversionRate: item?.conversionRate || item?.conversion_rate || '',
     sourceType: item?.source_type || item?.sourceType || 'SOURCE',
   });
   const [errors, setErrors] = useState({});
@@ -79,6 +80,13 @@ export default function ItemFormModal({ data, onSaved }) {
       if (!filled) e[f] = 'Required';
     });
 
+    if (form.currency === 'USD') {
+      const rateNum = Number(form.conversionRate);
+      if (!form.conversionRate || isNaN(rateNum) || rateNum <= 0) {
+        e.conversionRate = 'Required (must be > 0)';
+      }
+    }
+
     setErrors(e);
     if (Object.keys(e).length > 0) {
       addToast('error', 'Please fill in all fields');
@@ -92,6 +100,7 @@ export default function ItemFormModal({ data, onSaved }) {
     try {
       const finalForm = {
         ...form,
+        conversionRate: form.currency === 'USD' ? (Number(form.conversionRate) || null) : null,
         openingStock: form.sourceType === 'PRODUCTION' ? 0 : form.openingStock
       };
       if (data.overrideSave) {
@@ -294,9 +303,17 @@ export default function ItemFormModal({ data, onSaved }) {
           )}
           <div className="form-row-2">
             <div className="form-group">
-              <label className="form-label">Unit Price</label>
+              <label className="form-label">Unit Price *</label>
               <div style={{ display: 'flex', gap: 8 }}>
-                <select className={`form-select ${errors.currency ? 'error' : (isFilled(form.currency) ? 'filled' : '')}`} value={form.currency} onChange={e => set('currency', e.target.value)} style={{ width: 100 }}>
+                <select 
+                  className={`form-select ${errors.currency ? 'error' : (isFilled(form.currency) ? 'filled' : '')}`} 
+                  value={form.currency} 
+                  onChange={e => {
+                    const newCurr = e.target.value;
+                    setForm(f => ({ ...f, currency: newCurr, conversionRate: newCurr === 'USD' ? f.conversionRate : '' }));
+                  }} 
+                  style={{ width: 100 }}
+                >
                   <option value="">Select...</option>
                   <option value="BDT">BDT (৳)</option>
                   <option value="USD">USD ($)</option>
@@ -314,15 +331,49 @@ export default function ItemFormModal({ data, onSaved }) {
                 />
               </div>
             </div>
-            <SuggestionInput
-              label="Notes"
-              value={form.notes}
-              onChange={v => set('notes', v)}
-              suggestions={dvList.notes}
-              placeholder="Optional notes..."
-              error={errors.notes}
-            />
+            {form.currency === 'USD' ? (
+              <div className="form-group">
+                <label className="form-label">Conversion Rate (BDT per USD) *</label>
+                <input 
+                  className={`form-input ${errors.conversionRate ? 'error' : (isFilled(form.conversionRate) ? 'filled' : '')}`}
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  value={form.conversionRate}
+                  onChange={e => set('conversionRate', e.target.value)}
+                  onWheel={(e) => e.target.blur()}
+                  placeholder="e.g. 120.00"
+                />
+                {Number(form.unitPrice) > 0 && Number(form.conversionRate) > 0 && (
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+                    ≈ ৳ {(Number(form.unitPrice) * Number(form.conversionRate)).toFixed(2)} BDT / unit
+                  </div>
+                )}
+                {errors.conversionRate && <div style={{ fontSize: 11, color: 'var(--danger)', marginTop: 2 }}>{errors.conversionRate}</div>}
+              </div>
+            ) : (
+              <SuggestionInput
+                label="Notes"
+                value={form.notes}
+                onChange={v => set('notes', v)}
+                suggestions={dvList.notes}
+                placeholder="Optional notes..."
+                error={errors.notes}
+              />
+            )}
           </div>
+          {form.currency === 'USD' && (
+            <div className="form-group" style={{ marginBottom: 16 }}>
+              <SuggestionInput
+                label="Notes"
+                value={form.notes}
+                onChange={v => set('notes', v)}
+                suggestions={dvList.notes}
+                placeholder="Optional notes..."
+                error={errors.notes}
+              />
+            </div>
+          )}
         </div>
         <div className="modal-footer">
           <button className="btn btn-outline" onClick={closeModal}>Cancel</button>

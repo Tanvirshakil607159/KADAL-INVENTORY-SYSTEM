@@ -61,13 +61,43 @@ export const inventoryApi = {
       if (filters.search) {
         query = query.or(`name.ilike.%${filters.search}%,item_code.ilike.%${filters.search}%,color.ilike.%${filters.search}%,buyer_name.ilike.%${filters.search}%,style_name.ilike.%${filters.search}%,purchase_no.ilike.%${filters.search}%,order_number.ilike.%${filters.search}%`);
       }
+      let tiersMap = {};
+      try {
+        const { data: tiers } = await supabase.from('item_price_tiers').select('*').gt('quantity', 0).order('created_at', { ascending: true });
+        if (tiers) {
+          tiers.forEach(t => {
+            if (!tiersMap[t.item_id]) tiersMap[t.item_id] = [];
+            tiersMap[t.item_id].push(t);
+          });
+        }
+      } catch (e) {}
+
       const data = await fetchAll(query.order('name'));
-      return data.map(i => ({ ...i, category_name: i.categories?.name, supplier_name: i.suppliers?.name }));
+      return data.map(i => {
+        const itemTiers = tiersMap[i.id] || [];
+        return {
+          ...i,
+          category_name: i.categories?.name,
+          supplier_name: i.suppliers?.name,
+          price_tiers: itemTiers.length > 0 ? itemTiers : (Number(i.current_stock) > 0 ? [{ quantity: i.current_stock, unit_price: i.unit_price, currency: i.currency, conversion_rate: i.conversion_rate }] : [])
+        };
+      });
     },
     getById: async (id) => {
-      const { data, error } = await getSupabase().from('items').select('*, categories(name), suppliers(name)').eq('id', id).single();
+      const supabase = getSupabase();
+      const { data, error } = await supabase.from('items').select('*, categories(name), suppliers(name)').eq('id', id).single();
       if (error) throw error;
-      return { ...data, category_name: data.categories?.name, supplier_name: data.suppliers?.name };
+      let itemTiers = [];
+      try {
+        const { data: tiers } = await supabase.from('item_price_tiers').select('*').eq('item_id', id).gt('quantity', 0).order('created_at', { ascending: true });
+        if (tiers) itemTiers = tiers;
+      } catch (e) {}
+      return {
+        ...data,
+        category_name: data.categories?.name,
+        supplier_name: data.suppliers?.name,
+        price_tiers: itemTiers.length > 0 ? itemTiers : (Number(data.current_stock) > 0 ? [{ quantity: data.current_stock, unit_price: data.unit_price, currency: data.currency, conversion_rate: data.conversion_rate }] : [])
+      };
     },
     create: async (data) => {
       const mapped = {
@@ -89,6 +119,7 @@ export const inventoryApi = {
         order_quantity: data.orderQuantity || 0,
         unit_price: data.unitPrice || 0,
         currency: data.currency || 'BDT',
+        conversion_rate: data.currency === 'USD' ? (Number(data.conversionRate) || null) : null,
         source_type: data.sourceType || 'SOURCE'
       };
       const supabase = getSupabase();
@@ -99,6 +130,16 @@ export const inventoryApi = {
 
       if (data.openingStock && Number(data.openingStock) > 0) {
         try {
+          await supabase.from('item_price_tiers').insert([{
+            item_id: insertedId,
+            quantity: Number(data.openingStock),
+            unit_price: Number(data.unitPrice || 0),
+            currency: data.currency || 'BDT',
+            conversion_rate: data.currency === 'USD' ? (Number(data.conversionRate) || null) : null
+          }]);
+        } catch (e) {}
+
+        try {
           const userRaw = sessionStorage.getItem('kadal_user');
           const user = userRaw ? JSON.parse(userRaw) : null;
 
@@ -108,6 +149,9 @@ export const inventoryApi = {
             quantity: Number(data.openingStock),
             stock_before: 0,
             stock_after: Number(data.openingStock),
+            unit_price: Number(data.unitPrice || 0),
+            currency: data.currency || 'BDT',
+            conversion_rate: data.currency === 'USD' ? (Number(data.conversionRate) || null) : null,
             reference: 'Opening Stock',
             notes: 'Initial stock entry',
             created_by: user?.id || null
@@ -164,6 +208,7 @@ export const inventoryApi = {
         order_quantity: data.orderQuantity || 0,
         unit_price: data.unitPrice || 0,
         currency: data.currency || 'BDT',
+        conversion_rate: data.currency === 'USD' ? (Number(data.conversionRate) || null) : null,
         source_type: data.sourceType || 'SOURCE'
       };
       const { error } = await getSupabase().from('items').update(mapped).eq('id', id);

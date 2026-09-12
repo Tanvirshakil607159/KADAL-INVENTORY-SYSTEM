@@ -1,6 +1,7 @@
 const ChallansRepo = require('../database/repositories/challans');
 const ItemsRepo = require('../database/repositories/items');
 const StockTransactionsRepo = require('../database/repositories/stock-transactions');
+const ItemPriceTiersRepo = require('../database/repositories/item-price-tiers');
 const AuditLogsRepo = require('../database/repositories/audit-logs');
 const SettingsRepo = require('../database/repositories/settings');
 const AuthService = require('./auth-service');
@@ -99,6 +100,7 @@ const ChallanService = {
         const freshStockAfter = freshStockBefore - change.item.quantity;
         
         await ItemsRepo.updateStock(change.item.itemId, freshStockAfter);
+        await ItemPriceTiersRepo.deductStockFIFO(change.item.itemId, change.item.quantity);
         completedDeductions.push({
           itemId: change.item.itemId,
           quantity: change.item.quantity,
@@ -184,6 +186,7 @@ const ChallanService = {
       
       const stockBefore = dbItem.current_stock;
       await ItemsRepo.adjustStock(item.item_id, item.quantity);
+      await ItemPriceTiersRepo.addStockTier(item.item_id, item.quantity, dbItem.unit_price, dbItem.currency, dbItem.conversion_rate);
       
       // Update transaction log with accurate "after" value
       const stockAfter = stockBefore + item.quantity;
@@ -211,6 +214,7 @@ const ChallanService = {
         if (dbItem) {
           const stockBefore = dbItem.current_stock;
           await ItemsRepo.adjustStock(item.item_id, item.quantity);
+          await ItemPriceTiersRepo.addStockTier(item.item_id, item.quantity, dbItem.unit_price, dbItem.currency, dbItem.conversion_rate);
           const stockAfter = stockBefore + item.quantity;
           
           await StockTransactionsRepo.create({

@@ -208,7 +208,7 @@ export const webBridge = {
     addMovement: (data) => wrap(async () => {
       const supabase = getSupabase();
       if (!supabase) throw new Error('Supabase not configured');
-      const { data: item, error: itemErr } = await supabase.from('items').select('current_stock').eq('id', data.itemId).single();
+      const { data: item, error: itemErr } = await supabase.from('items').select('current_stock, unit_price, currency, conversion_rate').eq('id', data.itemId).single();
       if (itemErr) throw itemErr;
       const userRaw = sessionStorage.getItem('kadal_user');
       const user = userRaw ? JSON.parse(userRaw) : null;
@@ -230,21 +230,81 @@ export const webBridge = {
 
       const stockBefore = item.current_stock || 0;
       let stockAfter = stockBefore;
+      const restockPrice = data.unitPrice !== undefined && data.unitPrice !== null && data.unitPrice !== '' ? Number(data.unitPrice) : Number(item.unit_price || 0);
+      const curr = data.currency || item.currency || 'BDT';
+      const convRate = data.conversionRate !== undefined ? data.conversionRate : item.conversion_rate;
+
       if (data.type === 'IN') {
         stockAfter = stockBefore + data.quantity;
+        try {
+          let tierQuery = supabase.from('item_price_tiers')
+            .select('*')
+            .eq('item_id', data.itemId)
+            .eq('unit_price', restockPrice)
+            .eq('currency', curr)
+            .gt('quantity', 0);
+
+          if (curr === 'USD') {
+            if (convRate !== null && convRate !== undefined) tierQuery = tierQuery.eq('conversion_rate', convRate);
+            else tierQuery = tierQuery.is('conversion_rate', null);
+          }
+
+          const { data: existingTiers } = await tierQuery
+            .order('created_at', { ascending: false })
+            .limit(1);
+
+          if (existingTiers && existingTiers.length > 0) {
+            await supabase.from('item_price_tiers')
+              .update({ quantity: Number(existingTiers[0].quantity) + data.quantity, updated_at: new Date().toISOString() })
+              .eq('id', existingTiers[0].id);
+          } else {
+            await supabase.from('item_price_tiers').insert([{
+              item_id: data.itemId,
+              quantity: data.quantity,
+              unit_price: restockPrice,
+              currency: curr,
+              conversion_rate: convRate
+            }]);
+          }
+        } catch (e) {}
       } else if (data.type === 'OUT') {
         stockAfter = stockBefore - data.quantity;
         if (stockAfter < 0) {
           throw new Error(`Insufficient stock. Available: ${stockBefore}, Requested: ${data.quantity}`);
         }
+        try {
+          const { data: tiers } = await supabase.from('item_price_tiers')
+            .select('*')
+            .eq('item_id', data.itemId)
+            .gt('quantity', 0)
+            .order('created_at', { ascending: true });
+          if (tiers) {
+            let rem = data.quantity;
+            for (const t of tiers) {
+              if (rem <= 0) break;
+              const tQty = Number(t.quantity);
+              if (tQty <= rem) {
+                await supabase.from('item_price_tiers').update({ quantity: 0, updated_at: new Date().toISOString() }).eq('id', t.id);
+                rem -= tQty;
+              } else {
+                await supabase.from('item_price_tiers').update({ quantity: tQty - rem, updated_at: new Date().toISOString() }).eq('id', t.id);
+                rem = 0;
+                break;
+              }
+            }
+          }
+        } catch (e) {}
       } else if (data.type === 'ADJUSTMENT') {
         stockAfter = data.quantity;
       } else {
         throw new Error('Invalid movement type');
       }
 
-      await supabase.from('items').update({ current_stock: stockAfter }).eq('id', data.itemId);
-
+      const itemUpdates = { current_stock: stockAfter, updated_at: new Date().toISOString() };
+      if (data.type === 'IN' && curr === 'USD' && convRate !== null && convRate !== undefined) {
+        itemUpdates.conversion_rate = convRate;
+      }
+      await supabase.from('items').update(itemUpdates).eq('id', data.itemId);
 
       const { error: txErr } = await supabase.from('stock_transactions').insert([{
         item_id: data.itemId,
@@ -252,6 +312,9 @@ export const webBridge = {
         quantity: data.quantity,
         stock_before: stockBefore,
         stock_after: stockAfter,
+        unit_price: data.type === 'IN' ? restockPrice : item.unit_price,
+        currency: curr,
+        conversion_rate: convRate,
         reference: data.reference || null,
         notes: data.notes || null,
         created_by: user?.id || null
@@ -645,11 +708,45 @@ export const webBridge = {
   dashboard: {
     getStats: () => wrap(async () => {
       const supabase = getSupabase();
-      const items = await fetchAll(supabase.from('items').select('current_stock, unit_price').eq('is_active', true));
+      const items = await fetchAll(supabase.from('items').select('current_stock, unit_price, currency, conversion_rate').eq('is_active', true));
+      let totalBDT = 0;
+      let totalUSD = 0;
+      let tiersCalculated = false;
+      try {
+        const { data: tiers } = await supabase.from('item_price_tiers').select('quantity, unit_price, currency, conversion_rate').gt('quantity', 0);
+        if (tiers && tiers.length > 0) {
+          tiers.forEach(t => {
+            const qty = Number(t.quantity) || 0;
+            const price = Number(t.unit_price) || 0;
+            const val = qty * price;
+            if (t.currency === 'USD') {
+              totalUSD += val;
+              totalBDT += val * (Number(t.conversion_rate) || 1);
+            } else {
+              totalBDT += val;
+            }
+          });
+          tiersCalculated = true;
+        }
+      } catch (e) {}
+
+      if (!tiersCalculated) {
+        items?.forEach(i => {
+          const stock = Number(i.current_stock) || 0;
+          const price = Number(i.unit_price) || 0;
+          const val = stock * price;
+          if (i.currency === 'USD') {
+            totalUSD += val;
+            totalBDT += val * (Number(i.conversion_rate) || 1);
+          } else {
+            totalBDT += val;
+          }
+        });
+      }
       const stats = {
         totalItems: items?.length || 0,
         totalStock: items?.reduce((s, i) => s + (i.current_stock || 0), 0) || 0,
-        totalValue: { BDT: items?.reduce((s, i) => s + (i.current_stock * i.unit_price || 0), 0) || 0, USD: 0 },
+        totalValue: { BDT: totalBDT, USD: totalUSD },
         lowStockCount: 0
       };
       return stats;

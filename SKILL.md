@@ -212,13 +212,13 @@ All 30 migrations live in `src/main/database/migrations/001-initial.js`, each gu
 | 028 | add-requisition-settings |
 | 029 | add-produced-item-ids-to-issues |
 | 030 | normalize-buyer-names |
+| 031 | add-conversion-rate-to-items |
+| 032 | add-item-price-tiers |
 
-> The helper functions are named in English ordinals (`applyThirtiethMigration`) and are **not** in file order. Migration 031 = add `applyThirtyFirstMigration`, call it from the guarded block at the bottom of `runMigrations`, and mirror the DDL in a `supabase_*.sql` file for the cloud.
-
-### 5.2 Tables (27)
+### 5.2 Tables (28)
 
 `_migrations` · `roles` · `users` · `categories` · `suppliers` · `buyers` · `units` · `items` ·
-`stock_transactions` · `challans` · `challan_items` · `gate_passes` · `approvals` · `audit_logs` ·
+`item_price_tiers` · `stock_transactions` · `challans` · `challan_items` · `gate_passes` · `approvals` · `audit_logs` ·
 `settings` · `recipients` · `issues` · `issue_items` · `returns` · `return_items` ·
 `requisitions` · `requisition_items` · `factory_production` ·
 `warehouses` · `warehouse_stock` · `warehouse_zones` · `warehouse_bins` · `bin_stock`
@@ -229,7 +229,7 @@ All 30 migrations live in `src/main/database/migrations/001-initial.js`, each gu
 items (
   id, item_code UNIQUE, name, category_id FK, size, color, unit,
   supplier_id FK, opening_stock, current_stock, min_stock_level,
-  unit_price, currency DEFAULT 'BDT',
+  unit_price, currency DEFAULT 'BDT', conversion_rate DEFAULT NULL,
   buyer_name, style_name, purchase_no, order_number, order_quantity,
   source_type DEFAULT 'SOURCE',        -- 'SOURCE' | 'PRODUCTION' | import
   barcode_data, notes, is_active, created_at, updated_at

@@ -1,5 +1,6 @@
 const ItemsRepo = require('../database/repositories/items');
 const StockTransactionsRepo = require('../database/repositories/stock-transactions');
+const ItemPriceTiersRepo = require('../database/repositories/item-price-tiers');
 const AuditLogsRepo = require('../database/repositories/audit-logs');
 const SettingsRepo = require('../database/repositories/settings');
 const AuthService = require('./auth-service');
@@ -188,23 +189,41 @@ const InventoryService = {
     return await this._executeStockMovement(data);
   },
 
-  async _executeStockMovement({ itemId, type, quantity, reference, notes, warehouseId }) {
+  async _executeStockMovement({ itemId, type, quantity, reference, notes, warehouseId, unitPrice, currency, conversionRate }) {
     const item = await ItemsRepo.getById(itemId);
     if (!item) throw new Error('Item not found');
     if (quantity <= 0) throw new Error('Quantity must be greater than 0');
 
     const stockBefore = item.current_stock;
     let stockAfter;
-    if (type === 'IN') { stockAfter = stockBefore + quantity; }
+    const restockPrice = unitPrice !== undefined && unitPrice !== null && unitPrice !== '' ? Number(unitPrice) : Number(item.unit_price || 0);
+    const curr = currency || item.currency || 'BDT';
+    const convRate = conversionRate !== undefined ? conversionRate : item.conversion_rate;
+
+    if (type === 'IN') { 
+      stockAfter = stockBefore + quantity; 
+      await ItemPriceTiersRepo.addStockTier(itemId, quantity, restockPrice, curr, convRate);
+    }
     else if (type === 'OUT') {
       stockAfter = stockBefore - quantity;
       if (stockAfter < 0) {
         throw new Error(`Insufficient stock. Available: ${stockBefore}, Requested: ${quantity}`);
       }
-    } else if (type === 'ADJUSTMENT') { stockAfter = quantity; }
+      await ItemPriceTiersRepo.deductStockFIFO(itemId, quantity);
+    } else if (type === 'ADJUSTMENT') { 
+      stockAfter = quantity; 
+      await ItemPriceTiersRepo.adjustStock(itemId, quantity, item.unit_price, item.currency);
+    }
     else throw new Error('Invalid transaction type');
 
     await ItemsRepo.updateStock(itemId, stockAfter);
+    if (type === 'IN' && curr === 'USD' && convRate !== null && convRate !== undefined) {
+      try {
+        await ItemsRepo.updateConversionRate(itemId, convRate);
+      } catch (e) {
+        console.warn('[InventoryService] Failed to update item conversion rate:', e.message);
+      }
+    }
     
     // Sync with warehouse
     const whId = warehouseId || SettingsRepo.get('default_warehouse_id') || 1;
@@ -226,6 +245,9 @@ const InventoryService = {
     
     const txnId = await StockTransactionsRepo.create({
       itemId, type, quantity, stockBefore, stockAfter, reference, notes,
+      unitPrice: type === 'IN' ? restockPrice : item.unit_price,
+      currency: curr,
+      conversionRate: convRate,
       createdBy: AuthService.getCurrentUser()?.id,
     });
     return { success: true, stockAfter, transactionId: txnId };

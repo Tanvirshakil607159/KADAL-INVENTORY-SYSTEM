@@ -110,7 +110,7 @@ const ReportService = {
           .select(`
             *, 
             issues (issue_id, issue_type, recipient_name, issue_date, status),
-            items (name, item_code, unit, unit_price, currency, style_name, purchase_no, order_number, size, color, buyer_name, category_id)
+            items (name, item_code, unit, unit_price, currency, conversion_rate, style_name, purchase_no, order_number, size, color, buyer_name, category_id)
           `)
           .order('id')
       );
@@ -137,6 +137,7 @@ const ReportService = {
             unit: r.unit || r.items?.unit || 'pcs',
             unit_price: r.items?.unit_price || 0,
             currency: r.items?.currency || 'BDT',
+            conversion_rate: r.items?.conversion_rate || null,
             style_name: r.style_no || r.items?.style_name || '',
             purchase_no: r.purchase_no || r.items?.purchase_no || '',
             order_number: r.order_number || r.items?.order_number || '',
@@ -217,7 +218,7 @@ const ReportService = {
           (ii.quantity - COALESCE(ii.returned_quantity,0) - COALESCE(ii.damage_quantity,0) - COALESCE(ii.rejected_quantity,0) - COALESCE(ii.consumed_quantity,0)) as outstanding,
           iss.issue_id, iss.recipient_name, iss.issue_date, iss.status as issue_status,
           it.name as item_name, it.item_code, COALESCE(ii.unit, it.unit) as unit,
-          it.unit_price, it.currency,
+          it.unit_price, it.currency, it.conversion_rate,
           COALESCE(NULLIF(ii.style_no, ''), it.style_name) as style_name,
           COALESCE(NULLIF(ii.purchase_no, ''), it.purchase_no) as purchase_no,
           COALESCE(NULLIF(ii.order_number, ''), it.order_number) as order_number,
@@ -239,14 +240,44 @@ const ReportService = {
       workingProcess = workingProcess.filter(r => String(r.category_id || r.items?.category_id) === String(filters.categoryId));
     }
 
+    // Convert USD to BDT for items that have a conversion rate; items without conversion rate remain same
+    const applyConversionToItems = (itemList, valueKey = 'total_value', priceKey = 'unit_price', stockKey = 'current_stock') => {
+      return itemList.map(i => {
+        const origCurr = i.currency || 'BDT';
+        const isUSD = origCurr === 'USD';
+        const rate = Number(i.conversion_rate);
+        const hasRate = isUSD && !isNaN(rate) && rate > 0;
+        const origPrice = Number(i[priceKey] || 0);
+        const effectivePrice = hasRate ? (origPrice * rate) : origPrice;
+        const stockQty = Number(i[stockKey] || 0);
+        const totalVal = stockQty * effectivePrice;
+        return {
+          ...i,
+          [priceKey]: effectivePrice,
+          currency: hasRate ? 'BDT' : origCurr,
+          [valueKey]: totalVal,
+          converted_from_usd: hasRate,
+          original_currency: origCurr,
+          original_unit_price: origPrice,
+        };
+      });
+    };
+
+    rawMaterials = applyConversionToItems(rawMaterials, 'total_value', 'unit_price', 'current_stock');
+    finishedGoods = applyConversionToItems(finishedGoods, 'total_value', 'unit_price', 'current_stock');
+    workingProcess = applyConversionToItems(workingProcess, 'outstanding_value', 'unit_price', 'outstanding');
+
     // Compute summaries
     const computeSummary = (items, stockKey = 'current_stock', valueKey = 'total_value') => {
       let totalQty = 0, totalBDT = 0, totalUSD = 0, itemCount = items.length;
       items.forEach(i => {
         totalQty += Number(i[stockKey] || 0);
         const val = Number(i[valueKey] || 0);
-        if ((i.currency || 'BDT') === 'USD') totalUSD += val;
-        else totalBDT += val;
+        if (i.currency === 'USD') {
+          totalUSD += val;
+        } else {
+          totalBDT += val;
+        }
       });
       return { itemCount, totalQty, totalBDT, totalUSD };
     };

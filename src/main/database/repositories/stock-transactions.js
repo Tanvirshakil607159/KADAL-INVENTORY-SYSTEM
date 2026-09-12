@@ -30,6 +30,9 @@ const StockTransactionsRepo = {
           challan_id: data.challanId || null,
           reference: data.reference || null,
           notes: data.notes || null,
+          unit_price: data.unitPrice !== undefined && data.unitPrice !== null ? Number(data.unitPrice) : null,
+          currency: data.currency || 'BDT',
+          conversion_rate: data.conversionRate ? Number(data.conversionRate) : null,
           created_by: data.createdBy || null
         }])
         .select()
@@ -46,8 +49,8 @@ const StockTransactionsRepo = {
       return dup.id;
     }
 
-    return dbPrepare(`INSERT INTO stock_transactions (item_id, type, quantity, stock_before, stock_after, challan_id, reference, notes, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-      data.itemId, data.type, data.quantity, data.stockBefore, data.stockAfter, data.challanId || null, data.reference || null, data.notes || null, data.createdBy || null
+    return dbPrepare(`INSERT INTO stock_transactions (item_id, type, quantity, stock_before, stock_after, challan_id, reference, notes, unit_price, currency, conversion_rate, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      data.itemId, data.type, data.quantity, data.stockBefore, data.stockAfter, data.challanId || null, data.reference || null, data.notes || null, data.unitPrice !== undefined && data.unitPrice !== null ? Number(data.unitPrice) : null, data.currency || 'BDT', data.conversionRate ? Number(data.conversionRate) : null, data.createdBy || null
     ).lastInsertRowid;
   },
 
@@ -79,8 +82,9 @@ const StockTransactionsRepo = {
         item_name: st.items?.name,
         item_code: st.items?.item_code,
         item_unit: st.items?.unit,
-        unit_price: st.items?.unit_price,
-        currency: st.items?.currency,
+        unit_price: st.unit_price !== null && st.unit_price !== undefined ? st.unit_price : st.items?.unit_price,
+        currency: st.currency || st.items?.currency || 'BDT',
+        conversion_rate: st.conversion_rate !== null && st.conversion_rate !== undefined ? st.conversion_rate : st.items?.conversion_rate,
         style_name: st.items?.style_name,
         purchase_no: st.items?.purchase_no,
         order_number: st.items?.order_number,
@@ -98,7 +102,7 @@ const StockTransactionsRepo = {
     if (filters.dateFrom) { where.push('st.created_at >= ?'); params.push(filters.dateFrom); }
     if (filters.dateTo) { where.push("st.created_at <= ?"); params.push(filters.dateTo + 'T23:59:59.999Z'); }
     const w = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
-    return dbPrepare(`SELECT st.*, i.name as item_name, i.item_code, i.unit as item_unit, i.unit_price, i.currency, i.style_name, i.purchase_no, i.order_number, i.size, i.color, i.buyer_name, u.full_name as created_by_name, ch.challan_number FROM stock_transactions st JOIN items i ON st.item_id = i.id LEFT JOIN users u ON st.created_by = u.id LEFT JOIN challans ch ON st.challan_id = ch.id ${w} ORDER BY st.created_at DESC LIMIT 1000`).all(...params);
+    return dbPrepare(`SELECT st.*, i.name as item_name, i.item_code, i.unit as item_unit, COALESCE(st.unit_price, i.unit_price) as unit_price, COALESCE(st.currency, i.currency) as currency, COALESCE(st.conversion_rate, i.conversion_rate) as conversion_rate, i.style_name, i.purchase_no, i.order_number, i.size, i.color, i.buyer_name, u.full_name as created_by_name, ch.challan_number FROM stock_transactions st JOIN items i ON st.item_id = i.id LEFT JOIN users u ON st.created_by = u.id LEFT JOIN challans ch ON st.challan_id = ch.id ${w} ORDER BY st.created_at DESC LIMIT 1000`).all(...params);
   },
 
   async getMovementSummary(filters = {}) {

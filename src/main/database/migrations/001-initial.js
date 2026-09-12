@@ -269,6 +269,24 @@ function runMigrations(db) {
     db.run("INSERT INTO _migrations (name) VALUES ('030-normalize-buyer-names')");
     console.log('[DB] Migration 030-normalize-buyer-names applied successfully');
   }
+
+  // NEW MIGRATION: 031-add-conversion-rate-to-items
+  const applied31 = db.exec("SELECT * FROM _migrations WHERE name = '031-add-conversion-rate-to-items'");
+  if (applied31.length === 0 || applied31[0].values.length === 0) {
+    console.log('[DB] Running migration: 031-add-conversion-rate-to-items');
+    applyThirtyFirstMigration(db);
+    db.run("INSERT INTO _migrations (name) VALUES ('031-add-conversion-rate-to-items')");
+    console.log('[DB] Migration 031-add-conversion-rate-to-items applied successfully');
+  }
+
+  // NEW MIGRATION: 032-add-item-price-tiers
+  const applied32 = db.exec("SELECT * FROM _migrations WHERE name = '032-add-item-price-tiers'");
+  if (applied32.length === 0 || applied32[0].values.length === 0) {
+    console.log('[DB] Running migration: 032-add-item-price-tiers');
+    applyThirtySecondMigration(db);
+    db.run("INSERT INTO _migrations (name) VALUES ('032-add-item-price-tiers')");
+    console.log('[DB] Migration 032-add-item-price-tiers applied successfully');
+  }
 }
 
 function applyTwentyNinthMigration(db) {
@@ -917,5 +935,50 @@ function applyThirtiethMigration(db) {
     }
   } catch (e) {
     console.error('[DB] Migration 030: Error deduplicating buyers:', e.message);
+  }
+}
+
+function applyThirtyFirstMigration(db) {
+  try {
+    db.run(`ALTER TABLE items ADD COLUMN conversion_rate REAL DEFAULT NULL`);
+    console.log('[DB] Migration 031: Added conversion_rate column to items table');
+  } catch (e) {
+    console.error('[DB] Migration 031 error:', e.message);
+  }
+}
+
+function applyThirtySecondMigration(db) {
+  try {
+    db.run(`CREATE TABLE IF NOT EXISTS item_price_tiers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+      quantity REAL NOT NULL DEFAULT 0,
+      unit_price REAL NOT NULL DEFAULT 0,
+      currency TEXT DEFAULT 'BDT',
+      conversion_rate REAL DEFAULT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`);
+    db.run(`CREATE INDEX IF NOT EXISTS idx_item_price_tiers_item_id ON item_price_tiers(item_id)`);
+
+    // Add unit_price, currency, conversion_rate to stock_transactions if not present
+    try { db.run("ALTER TABLE stock_transactions ADD COLUMN unit_price REAL DEFAULT NULL"); } catch (e) {}
+    try { db.run("ALTER TABLE stock_transactions ADD COLUMN currency TEXT DEFAULT 'BDT'"); } catch (e) {}
+    try { db.run("ALTER TABLE stock_transactions ADD COLUMN conversion_rate REAL DEFAULT NULL"); } catch (e) {}
+
+    // Backfill existing items where current_stock > 0
+    const itemsRes = db.exec("SELECT id, current_stock, unit_price, currency, conversion_rate FROM items WHERE current_stock > 0");
+    if (itemsRes.length > 0 && itemsRes[0].values.length > 0) {
+      const insertStmt = db.prepare("INSERT INTO item_price_tiers (item_id, quantity, unit_price, currency, conversion_rate) VALUES (?, ?, ?, ?, ?)");
+      let count = 0;
+      for (const [id, stock, price, curr, conv] of itemsRes[0].values) {
+        insertStmt.run([id, stock, price || 0, curr || 'BDT', conv || null]);
+        count++;
+      }
+      insertStmt.free();
+      console.log(`[DB] Migration 032: Backfilled ${count} item price tiers`);
+    }
+  } catch (e) {
+    console.error('[DB] Migration 032 error:', e.message);
   }
 }
