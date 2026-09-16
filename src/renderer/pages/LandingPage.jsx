@@ -1,3 +1,4 @@
+import ThemeToggle from '../components/common/ThemeToggle';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import useStore from '../store/useStore';
 import slide1 from '../assets/slide/1.png';
@@ -268,6 +269,7 @@ export default function LandingPage({ onEnterApp }) {
             </div>
           </div>
           <div className="nav-links">
+            <ThemeToggle />
             <button type="button" onClick={() => scrollToSection('about')} className="nav-link-btn">About</button>
             <button type="button" onClick={() => scrollToSection('mission')} className="nav-link-btn">Mission</button>
             <button type="button" onClick={() => scrollToSection('facility')} className="nav-link-btn">Facility</button>

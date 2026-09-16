@@ -1,3 +1,4 @@
+import SearchableSelect from '../ui/SearchableSelect';
 import React, { useState } from 'react';
 import useStore from '../../store/useStore';
 import { Plus, Search, Filter } from 'lucide-react';
@@ -62,30 +63,30 @@ export default function IssueBrowserModal({ data }) {
           </div>
           {/* Filter row */}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
-            <select className="form-select" value={filters.category} onChange={e => setFilters({ ...filters, category: e.target.value })} style={{ width: 130, fontSize: 12 }}>
+            <SearchableSelect className="form-select" value={filters.category} onValueChange={value => setFilters({ ...filters, category: value })} style={{ width: 130, fontSize: 12 }}>
               <option value="">All Categories</option>
               {categories.map((v, i) => <option key={i} value={v}>{v}</option>)}
-            </select>
-            <select className="form-select" value={filters.buyer} onChange={e => setFilters({ ...filters, buyer: e.target.value })} style={{ width: 130, fontSize: 12 }}>
+            </SearchableSelect>
+            <SearchableSelect className="form-select" value={filters.buyer} onValueChange={value => setFilters({ ...filters, buyer: value })} style={{ width: 130, fontSize: 12 }}>
               <option value="">All Buyers</option>
               {buyers.map((v, i) => <option key={i} value={v}>{v}</option>)}
-            </select>
-            <select className="form-select" value={filters.style} onChange={e => setFilters({ ...filters, style: e.target.value })} style={{ width: 130, fontSize: 12 }}>
+            </SearchableSelect>
+            <SearchableSelect className="form-select" value={filters.style} onValueChange={value => setFilters({ ...filters, style: value })} style={{ width: 130, fontSize: 12 }}>
               <option value="">All Styles</option>
               {(distinctValues.styles || []).map((v, i) => <option key={i} value={v}>{v}</option>)}
-            </select>
-            <select className="form-select" value={filters.order} onChange={e => setFilters({ ...filters, order: e.target.value })} style={{ width: 130, fontSize: 12 }}>
+            </SearchableSelect>
+            <SearchableSelect className="form-select" value={filters.order} onValueChange={value => setFilters({ ...filters, order: value })} style={{ width: 130, fontSize: 12 }}>
               <option value="">All Orders</option>
               {(distinctValues.orders || []).map((v, i) => <option key={i} value={v}>{v}</option>)}
-            </select>
-            <select className="form-select" value={filters.size} onChange={e => setFilters({ ...filters, size: e.target.value })} style={{ width: 110, fontSize: 12 }}>
+            </SearchableSelect>
+            <SearchableSelect className="form-select" value={filters.size} onValueChange={value => setFilters({ ...filters, size: value })} style={{ width: 110, fontSize: 12 }}>
               <option value="">All Sizes</option>
               {sizes.map((v, i) => <option key={i} value={v}>{v}</option>)}
-            </select>
-            <select className="form-select" value={filters.color} onChange={e => setFilters({ ...filters, color: e.target.value })} style={{ width: 110, fontSize: 12 }}>
+            </SearchableSelect>
+            <SearchableSelect className="form-select" value={filters.color} onValueChange={value => setFilters({ ...filters, color: value })} style={{ width: 110, fontSize: 12 }}>
               <option value="">All Colors</option>
               {colors.map((v, i) => <option key={i} value={v}>{v}</option>)}
-            </select>
+            </SearchableSelect>
             {hasFilters && <button className="btn btn-ghost btn-sm" onClick={clearFilters} style={{ fontSize: 11 }}>✕ Clear</button>}
           </div>
           <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>Showing {filteredItems.length} of {allItems.length} items • {issueItems.length} selected</div>

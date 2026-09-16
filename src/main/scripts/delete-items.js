@@ -11,11 +11,10 @@ const { createClient } = require('@supabase/supabase-js');
 const path = require('path');
 const fs = require('fs');
 
-// Item codes to delete
-const ITEM_CODES = [
-  'KADAL-4614', 'KADAL-4615', 'KADAL-4616', 'KADAL-4617', 'KADAL-4618',
-  'KADAL-4619', 'KADAL-4620', 'KADAL-4621', 'KADAL-4622', 'KADAL-4623',
-  'KADAL-4624'
+// Item codes to delete (supports CLI arguments, e.g. node delete-items.js CODE1 CODE2 or comma-separated)
+const cliArgs = process.argv.slice(2).flatMap(arg => arg.split(',').map(s => s.trim())).filter(Boolean);
+const ITEM_CODES = cliArgs.length > 0 ? cliArgs : [
+  'KADAL-6911', 'KADAL-6916', 'KADAL-6904'
 ];
 
 // Read Supabase credentials from local SQLite settings DB
@@ -145,6 +144,7 @@ async function main() {
   // Step 2: Delete related records from all child tables
   const deleteOps = [
     { table: 'stock_transactions', column: 'item_id', label: 'Stock Transactions' },
+    { table: 'item_price_tiers', column: 'item_id', label: 'Item Price Tiers' },
     { table: 'challan_items', column: 'item_id', label: 'Challan Items' },
     { table: 'issue_items', column: 'item_id', label: 'Issue Items' },
     { table: 'requisition_items', column: 'item_id', label: 'Requisition Items' },
@@ -190,7 +190,29 @@ async function main() {
   console.log(`✓ Deleted ${deletedItems?.length || 0} items:`);
   (deletedItems || []).forEach(i => console.log(`  - ${i.item_code}`));
 
-  // Step 4: Log audit
+  // Step 4: Also cleanup local SQLite if items exist there
+  try {
+    const initSqlJs = require('sql.js');
+    const SQL = await initSqlJs();
+    const userDataPath = path.join(process.env.APPDATA || '', 'kadal-inventory');
+    const dbPath = path.join(userDataPath, 'kadal.db');
+    if (fs.existsSync(dbPath)) {
+      const dbBuffer = fs.readFileSync(dbPath);
+      const db = new SQL.Database(dbBuffer);
+      const inCodes = ITEM_CODES.map(c => `'${c}'`).join(',');
+      db.run(`DELETE FROM stock_transactions WHERE item_id IN (SELECT id FROM items WHERE item_code IN (${inCodes}))`);
+      db.run(`DELETE FROM item_price_tiers WHERE item_id IN (SELECT id FROM items WHERE item_code IN (${inCodes}))`);
+      db.run(`DELETE FROM items WHERE item_code IN (${inCodes})`);
+      const updatedBuffer = Buffer.from(db.export());
+      fs.writeFileSync(dbPath, updatedBuffer);
+      db.close();
+      console.log('✓ Cleaned up local SQLite database if matching items were present.');
+    }
+  } catch (e) {
+    console.log('⚠ Local SQLite cleanup error:', e.message);
+  }
+
+  // Step 5: Log audit
   try {
     await supabase.from('audit_logs').insert([{
       action: 'BULK_DELETE_ITEMS',

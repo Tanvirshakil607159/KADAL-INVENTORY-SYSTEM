@@ -2,6 +2,126 @@ import React, { useEffect, useState } from 'react';
 import useStore from '../store/useStore';
 import { Clock, CheckCircle, XCircle, ArrowUpDown, ArrowUp, ArrowDown, AlertCircle } from 'lucide-react';
 
+function GatePassApprovalDetails({ safeData, renderProperty }) {
+  const [challans, setChallans] = useState(safeData?.challans || []);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    // If challans already has details (challan_number or receiver_name), update state
+    if (safeData?.challans && safeData.challans.length > 0 && (safeData.challans[0].receiver_name || safeData.challans[0].challan_number)) {
+      setChallans(safeData.challans);
+      return;
+    }
+
+    // Otherwise, if we have challanIds, fetch details on the fly
+    if (Array.isArray(safeData?.challanIds) && safeData.challanIds.length > 0) {
+      let isMounted = true;
+      setLoading(true);
+      Promise.all(
+        safeData.challanIds.map(async (cid) => {
+          try {
+            const res = await window.kadal.challans.getById(cid);
+            return res?.success && res?.data ? res.data : null;
+          } catch (e) {
+            return null;
+          }
+        })
+      ).then(results => {
+        if (isMounted) {
+          const valid = results.filter(Boolean);
+          if (valid.length > 0) {
+            setChallans(valid);
+          }
+          setLoading(false);
+        }
+      }).catch(() => {
+        if (isMounted) setLoading(false);
+      });
+
+      return () => { isMounted = false; };
+    }
+  }, [safeData]);
+
+  const receiverName = [
+    ...new Set([
+      safeData?.receiverName,
+      safeData?.receiver_name,
+      ...challans.map(c => c.receiver_name || c.receiverName)
+    ].filter(Boolean))
+  ].join(', ');
+
+  const receiverContact = [
+    ...new Set([
+      safeData?.receiverContact,
+      safeData?.receiver_contact,
+      ...challans.map(c => c.receiver_contact || c.receiverContact)
+    ].filter(Boolean))
+  ].join(', ');
+
+  const receiverAddress = [
+    ...new Set([
+      safeData?.receiverAddress,
+      safeData?.receiver_address,
+      ...challans.map(c => c.receiver_address || c.receiverAddress)
+    ].filter(Boolean))
+  ].join('; ');
+
+  return (
+    <div className="approval-details-rich">
+      <div className="approval-data-grid mb-3">
+        {renderProperty('Receiver', receiverName || (loading ? 'Loading...' : '-'))}
+        {receiverContact ? renderProperty('Contact', receiverContact) : null}
+        {receiverAddress ? renderProperty('Address', receiverAddress) : null}
+        {renderProperty('Poly Bags', safeData?.polyBags ?? safeData?.poly_bags)}
+        {renderProperty('Cartons', safeData?.cartons)}
+        {renderProperty('Plastic Bags', safeData?.plasticBags ?? safeData?.plastic_bags)}
+      </div>
+
+      <div className="p-3 bg-light rounded">
+        <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span>Included Challans ({challans.length || safeData?.challanIds?.length || 0}):</span>
+          {loading && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Fetching challan details...</span>}
+        </div>
+
+        {challans.length > 0 ? (
+          <div className="table-wrapper" style={{ maxHeight: 200, border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)' }}>
+            <table className="data-table table-sm">
+              <thead>
+                <tr>
+                  <th>Challan No</th>
+                  <th>Receiver</th>
+                  <th>Date</th>
+                </tr>
+              </thead>
+              <tbody>
+                {challans.map((c, i) => (
+                  <tr key={c.id || i}>
+                    <td className="text-mono fw-bold" style={{ color: 'var(--accent)' }}>
+                      {c.challan_number || `ID: ${c.id}`}
+                    </td>
+                    <td style={{ fontWeight: 500 }}>
+                      {c.receiver_name || c.receiverName || receiverName || '-'}
+                    </td>
+                    <td className="text-muted" style={{ fontSize: 11 }}>
+                      {c.challan_date ? new Date(c.challan_date).toLocaleDateString() : '-'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {safeData?.challanIds?.map((cid, i) => (
+              <span key={i} className="badge badge-info">ID: {cid}</span>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function ApprovalsPage() {
   const { user, addToast, openModal, setCategories, setSuppliers, setUnits } = useStore();
   const [requests, setRequests] = useState([]);
@@ -80,9 +200,9 @@ export default function ApprovalsPage() {
     if (!data) return null;
     
     const renderProperty = (label, value) => (
-      <div className="approval-data-item">
+      <div className="approval-data-item" title={typeof value === 'string' && value !== '-' ? value : undefined}>
         <label>{label}</label>
-        <span>{value || '-'}</span>
+        <span title={typeof value === 'string' && value !== '-' ? value : undefined}>{value || '-'}</span>
       </div>
     );
 
@@ -224,23 +344,7 @@ export default function ApprovalsPage() {
         );
 
       case 'CREATE_GATE_PASS':
-        return (
-          <div className="approval-details-rich">
-            <div className="approval-data-grid mb-3">
-              {renderProperty('Poly Bags', safeData.polyBags)}
-              {renderProperty('Cartons', safeData.cartons)}
-              {renderProperty('Plastic Bags', safeData.plasticBags)}
-            </div>
-            <div className="p-3 bg-light rounded">
-              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>Included Challan IDs:</div>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                {safeData.challanIds?.map((cid, i) => (
-                  <span key={i} className="badge badge-info">ID: {cid}</span>
-                ))}
-              </div>
-            </div>
-          </div>
-        );
+        return <GatePassApprovalDetails safeData={safeData} renderProperty={renderProperty} />;
 
       default:
         return <pre style={{ fontSize: 11, background: 'var(--bg-glass)', padding: 10, borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>{JSON.stringify(safeData, null, 2)}</pre>;
@@ -308,7 +412,7 @@ export default function ApprovalsPage() {
                       {req.type === 'UPDATE_ITEM' && `Update Item: ${req.data.data?.name || req.data.name}`}
                       {req.type === 'STOCK_MOVEMENT' && `Stock ${req.data.type}: ${req.data.quantity} ${req.data.itemName || 'units'}`}
                       {req.type === 'CREATE_CHALLAN' && `New Challan: ${req.data.receiverName}`}
-                      {req.type === 'CREATE_GATE_PASS' && `New Gate Pass (${req.data.challanIds?.length || 0} Challans)`}
+                      {req.type === 'CREATE_GATE_PASS' && `New Gate Pass: ${req.data?.receiverName || req.data?.receiver_name ? `${req.data.receiverName || req.data.receiver_name} ` : ''}(${req.data?.challanIds?.length || 0} Challans)`}
                     </td>
                     <td>
                       <span className={`badge badge-${req.status === 'PENDING' ? 'warning' : req.status === 'APPROVED' ? 'success' : 'danger'}`}>

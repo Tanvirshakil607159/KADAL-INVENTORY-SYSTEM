@@ -1,3 +1,4 @@
+import SearchableSelect from '../components/ui/SearchableSelect';
 import React, { useState, useEffect } from 'react';
 import useStore from '../store/useStore';
 import { Download, FileSpreadsheet, FileText, Eye, ArrowLeft, XCircle, Trash2, ArrowUpDown, ArrowUp, ArrowDown, ClipboardList } from 'lucide-react';
@@ -1374,37 +1375,37 @@ export default function ReportsPage() {
           )}
 
           <div className="toolbar-row" style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <select className="form-input" style={{ width: 150 }} value={buyerName} onChange={e => setBuyerName(e.target.value)}>
+            <SearchableSelect className="form-input" style={{ width: 150 }} value={buyerName} onValueChange={value => setBuyerName(value)}>
               <option value="">All Buyers</option>
               {distinctValues.buyers.map(v => <option key={v} value={v}>{v}</option>)}
-            </select>
-            <select className="form-input" style={{ width: 150 }} value={styleName} onChange={e => setStyleName(e.target.value)}>
+            </SearchableSelect>
+            <SearchableSelect className="form-input" style={{ width: 150 }} value={styleName} onValueChange={value => setStyleName(value)}>
               <option value="">All Styles</option>
               {distinctValues.styles.map(v => <option key={v} value={v}>{v}</option>)}
-            </select>
-            <select className="form-select" value={orderNumber} onChange={e => setOrderNumber(e.target.value)} style={{ width: 140, padding: '8px 12px', fontSize: 13 }}>
+            </SearchableSelect>
+            <SearchableSelect className="form-select" value={orderNumber} onValueChange={value => setOrderNumber(value)} style={{ width: 140, padding: '8px 12px', fontSize: 13 }}>
               <option value="">All Orders</option>
               {distinctValues.orders?.map((v, i) => <option key={i} value={v}>{v}</option>)}
-            </select>
-            <select className="form-select" value={purchaseNo} onChange={e => setPurchaseNo(e.target.value)} style={{ width: 140, padding: '8px 12px', fontSize: 13 }}>
+            </SearchableSelect>
+            <SearchableSelect className="form-select" value={purchaseNo} onValueChange={value => setPurchaseNo(value)} style={{ width: 140, padding: '8px 12px', fontSize: 13 }}>
               <option value="">All Purchase No</option>
               {distinctValues.purchases.map((v, i) => <option key={i} value={v}>{v}</option>)}
-            </select>
-            <select className="form-select" value={categoryId} onChange={e => setCategoryId(e.target.value)} style={{ width: 140, padding: '8px 12px', fontSize: 13 }}>
+            </SearchableSelect>
+            <SearchableSelect className="form-select" value={categoryId} onValueChange={value => setCategoryId(value)} style={{ width: 140, padding: '8px 12px', fontSize: 13 }}>
               <option value="">All Categories</option>
               {categoriesList.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
+            </SearchableSelect>
             {(activeTab === 'challan' || activeTab === 'itemChallan' || activeTab === 'dailyDelivery' || activeTab === 'itemDeliverySummary' || activeTab === 'categoryDeliverySummary' || activeTab === 'monthlyReport') && (
               <>
-                <select className="form-select" value={status} onChange={e => setStatus(e.target.value)} style={{ width: 120, padding: '8px 12px', fontSize: 13 }}>
+                <SearchableSelect className="form-select" value={status} onValueChange={value => setStatus(value)} style={{ width: 120, padding: '8px 12px', fontSize: 13 }}>
                   <option value="">All Status</option>
                   <option value="ACTIVE">Active</option>
                   <option value="CANCELLED">Inactive</option>
-                </select>
-                <select className="form-select" style={{ width: 150, padding: '8px 12px', fontSize: 13 }} value={receiverName} onChange={e => setReceiverName(e.target.value)}>
+                </SearchableSelect>
+                <SearchableSelect className="form-select" style={{ width: 150, padding: '8px 12px', fontSize: 13 }} value={receiverName} onValueChange={value => setReceiverName(value)}>
                   <option value="">All Recipients</option>
                   {recipientsList.map(r => <option key={r.id} value={r.name}>{r.name}</option>)}
-                </select>
+                </SearchableSelect>
               </>
             )}
           </div>

@@ -1,3 +1,4 @@
+import SearchableSelect from '../components/ui/SearchableSelect';
 import React, { useState, useEffect, useCallback } from 'react';
 import useStore from '../store/useStore';
 import { ClipboardList, Plus, Trash2, FileText, FileSpreadsheet, Search, CheckCircle, XCircle, Ban, Package, Eye, ChevronRight } from 'lucide-react';
@@ -380,14 +381,14 @@ export default function RequisitionPage() {
             <ClipboardList size={20} color="var(--accent)" /> Requisitions
           </h3>
           <input className="form-input" style={{ width: 180 }} value={filterSearch} onChange={e => setFilterSearch(e.target.value)} placeholder="Search..." />
-          <select className="form-input" style={{ width: 130 }} value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
+          <SearchableSelect className="form-input" style={{ width: 130 }} value={filterStatus} onValueChange={value => setFilterStatus(value)}>
             <option value="">All Statuses</option>
             <option value="PENDING">Pending</option>
             <option value="APPROVED">Approved</option>
             <option value="FULFILLED">Fulfilled</option>
             <option value="REJECTED">Rejected</option>
             <option value="CANCELLED">Cancelled</option>
-          </select>
+          </SearchableSelect>
           <input type="date" className="form-input" style={{ width: 130 }} value={filterDateFrom} onChange={e => setFilterDateFrom(e.target.value)} />
           <span className="text-muted">to</span>
           <input type="date" className="form-input" style={{ width: 130 }} value={filterDateTo} onChange={e => setFilterDateTo(e.target.value)} />

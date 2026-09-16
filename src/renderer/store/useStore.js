@@ -1,9 +1,14 @@
 import { create } from 'zustand';
+import { applyTheme, readTheme } from '../theme';
 
 const savedUser = sessionStorage.getItem('kadal_user');
 const initialUser = savedUser ? JSON.parse(savedUser) : null;
 
 const useStore = create((set, get) => ({
+  // Appearance is a preference on this device, independent of company settings.
+  theme: applyTheme(readTheme(), false),
+  setTheme: (theme, persist = true) => set({ theme: applyTheme(theme, persist) }),
+
   // Auth
   user: initialUser,
   isLoggedIn: !!initialUser,

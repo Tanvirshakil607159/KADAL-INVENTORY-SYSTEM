@@ -80,8 +80,23 @@ export default function GatePassPage() {
     }
     setCreating(true);
     try {
+      const uniqueReceivers = [...new Set(selectedChallans.map(c => c.receiver_name).filter(Boolean))];
+      const uniqueContacts = [...new Set(selectedChallans.map(c => c.receiver_contact).filter(Boolean))];
+      const uniqueAddresses = [...new Set(selectedChallans.map(c => c.receiver_address).filter(Boolean))];
+
       const res = await window.kadal.gatePass.create({
         challanIds: selectedChallans.map(c => c.id),
+        receiverName: uniqueReceivers.join(', '),
+        receiverContact: uniqueContacts.join(', '),
+        receiverAddress: uniqueAddresses.join('; '),
+        challans: selectedChallans.map(c => ({
+          id: c.id,
+          challan_number: c.challan_number,
+          receiver_name: c.receiver_name,
+          receiver_contact: c.receiver_contact,
+          receiver_address: c.receiver_address,
+          challan_date: c.challan_date
+        })),
         polyBags: parseInt(polyBags) || 0,
         cartons: parseInt(cartons) || 0,
         plasticBags: parseInt(plasticBags) || 0

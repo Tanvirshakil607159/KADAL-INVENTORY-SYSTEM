@@ -1,3 +1,4 @@
+import ThemeToggle from '../components/common/ThemeToggle';
 import React, { useState, useEffect } from 'react';
 import useStore from '../store/useStore';
 import { Lock, User, LogIn, ShieldCheck, Eye, EyeOff, Database, ArrowLeft } from 'lucide-react';
@@ -118,6 +119,7 @@ export default function LoginPage() {
 
   return (
     <div className="login-wrapper">
+      <ThemeToggle className="theme-toggle-floating" />
       <div className="login-bg-elements">
         <div className="floating-shape shape-1"></div>
         <div className="floating-shape shape-2"></div>

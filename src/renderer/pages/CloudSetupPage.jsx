@@ -1,3 +1,4 @@
+import ThemeToggle from '../components/common/ThemeToggle';
 import React, { useState, useEffect } from 'react';
 import useStore from '../store/useStore';
 import logo from '../assets/logo.png';
@@ -47,6 +48,7 @@ export default function CloudSetupPage({ onComplete }) {
 
   return (
     <div className="login-wrapper">
+      <ThemeToggle className="theme-toggle-floating" />
       <div className="login-bg-elements">
         <div className="floating-shape shape-1"></div>
         <div className="floating-shape shape-2"></div>
@@ -110,7 +112,7 @@ export default function CloudSetupPage({ onComplete }) {
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
                 <ShieldCheck size={20} className="text-accent" style={{ marginTop: '2px', flexShrink: 0 }} />
                 <div style={{ fontSize: '13px', lineHeight: '1.6' }}>
-                  <strong style={{ color: '#fff', display: 'block', marginBottom: '4px' }}>Secure Real-time Data</strong>
+                  <strong style={{ color: 'var(--text-primary)', display: 'block', marginBottom: '4px' }}>Secure Real-time Data</strong>
                   <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
                     Cloud sync allows your entire team to work on the same inventory data simultaneously across different locations.
                   </p>

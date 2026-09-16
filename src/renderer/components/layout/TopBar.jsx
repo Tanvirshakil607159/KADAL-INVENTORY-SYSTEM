@@ -1,6 +1,7 @@
 import React from 'react';
 import useStore from '../../store/useStore';
 import { RotateCw, Home } from 'lucide-react';
+import ThemeToggle from '../common/ThemeToggle';
 
 const pageTitles = {
   dashboard: 'Dashboard',
@@ -49,6 +50,7 @@ export default function TopBar() {
         </div>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <ThemeToggle />
         <button 
           className="btn-icon" 
           onClick={() => setShowLanding(true)} 

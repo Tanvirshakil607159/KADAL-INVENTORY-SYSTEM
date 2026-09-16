@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import useStore from '../store/useStore';
+import { Moon, Sun, Check } from 'lucide-react';
 import { Save, Plus, Trash2, Edit2, Users, Tag, Truck, Building, Upload, FileSpreadsheet, Link, CheckCircle, AlertCircle, Download, Cloud, RefreshCw, ArrowUpCircle, ArrowDownCircle, FolderOpen, XCircle } from 'lucide-react';
 
 const TABS = [
   { id: 'company', label: 'Company', icon: Building },
+  { id: 'appearance', label: 'Appearance', icon: Sun },
   { id: 'users', label: 'Users', icon: Users },
   { id: 'categories', label: 'Categories', icon: Tag },
   { id: 'units', label: 'Units', icon: Tag },
@@ -19,6 +21,7 @@ export default function SettingsPage() {
   const { user } = useStore();
 
   const availableTabs = TABS.filter(t => {
+    if (t.id === 'appearance') return true;
     if (user?.roleName === 'Super Admin') return true;
     const p = user?.permissions || {};
     if (Object.hasOwn(p, `settings_${t.id}`)) {
@@ -44,6 +47,7 @@ export default function SettingsPage() {
         ))}
       </div>
       {activeTab === 'company' && <CompanySettings />}
+      {activeTab === 'appearance' && <AppearanceSettings />}
       {activeTab === 'users' && <UserSettings />}
       {activeTab === 'categories' && <CategorySettings />}
       {activeTab === 'units' && <UnitSettings />}
@@ -54,6 +58,30 @@ export default function SettingsPage() {
       {activeTab === 'recipients' && <RecipientSettings />}
       {activeTab === 'system' && <SystemSettings />}
     </div>
+  );
+}
+
+function AppearanceSettings() {
+  const { theme, setTheme } = useStore();
+  return (
+    <section className="card appearance-settings" aria-labelledby="appearance-title">
+      <h3 id="appearance-title">Appearance</h3>
+      <p className="text-secondary">Choose how KADAL looks. Your choice is saved automatically on this device.</p>
+      <div className="theme-options" role="group" aria-label="Color mode">
+        {[{ value: 'dark', label: 'Dark Mode', description: 'The original KADAL appearance.', Icon: Moon },
+          { value: 'light', label: 'Light Mode', description: 'Soft off-white surfaces with reduced glare.', Icon: Sun }].map(({ value, label, description, Icon }) => (
+          <button key={value} type="button" className={`theme-option ${theme === value ? 'selected' : ''}`}
+            aria-pressed={theme === value} onClick={() => setTheme(value)}>
+            <span className={`theme-preview theme-preview-${value}`} aria-hidden="true">
+              <span className="theme-preview-sidebar" />
+              <span className="theme-preview-content"><span /><span /><span /></span>
+            </span>
+            <span className="theme-option-title"><Icon size={18} />{label}{theme === value && <Check size={16} />}</span>
+            <span className="theme-option-description">{description}</span>
+          </button>
+        ))}
+      </div>
+    </section>
   );
 }
 

@@ -139,7 +139,7 @@ export default function Sidebar() {
         })}
       </nav>
       <div className="sidebar-footer">
-        <div className="sidebar-nav-item" onClick={handleLogout} style={{ color: 'rgba(255,200,200,0.9)' }}>
+        <div className="sidebar-nav-item" onClick={handleLogout} style={{ color: 'var(--logout-color)' }}>
           <LogOut size={16} /> <span>Logout</span>
         </div>
         <div className="app-version">v{version}</div>

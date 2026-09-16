@@ -37,6 +37,26 @@ const ApprovalsRepo = {
         console.warn('[ApprovalsRepo] Could not batch enrich items:', e.message);
       }
 
+      // Batch enrich CREATE_GATE_PASS challans with challan & receiver details
+      let challanMap = {};
+      try {
+        const gatePassChallanIds = [...new Set(data.filter(a => a.type === 'CREATE_GATE_PASS').flatMap(a => {
+          const d = typeof a.data === 'string' ? JSON.parse(a.data) : a.data;
+          return d?.challanIds || [];
+        }).filter(Boolean))];
+
+        if (gatePassChallanIds.length > 0) {
+          const chunkSize = 500;
+          for (let i = 0; i < gatePassChallanIds.length; i += chunkSize) {
+            const chunk = gatePassChallanIds.slice(i, i + chunkSize);
+            const { data: chs } = await getSupabase().from('challans').select('id, challan_number, receiver_name, receiver_contact, receiver_address, challan_date').in('id', chunk);
+            (chs || []).forEach(c => { challanMap[c.id] = c; });
+          }
+        }
+      } catch (e) {
+        console.warn('[ApprovalsRepo] Could not batch enrich challans for gate passes:', e.message);
+      }
+
       return data.map(a => {
         try {
           const parsedData = typeof a.data === 'string' ? JSON.parse(a.data) : a.data;
@@ -50,6 +70,18 @@ const ApprovalsRepo = {
             parsedData.orderQuantity = parsedData.orderQuantity ?? item.order_quantity;
             parsedData.currentStock = parsedData.currentStock ?? item.current_stock;
             parsedData.unit = parsedData.unit || item.unit;
+          }
+          if (a.type === 'CREATE_GATE_PASS' && parsedData && Array.isArray(parsedData.challanIds)) {
+            const chs = parsedData.challanIds.map(id => challanMap[id]).filter(Boolean);
+            if (chs.length > 0) {
+              parsedData.challans = chs;
+              const receivers = [...new Set(chs.map(c => c.receiver_name).filter(Boolean))];
+              const contacts = [...new Set(chs.map(c => c.receiver_contact).filter(Boolean))];
+              const addresses = [...new Set(chs.map(c => c.receiver_address).filter(Boolean))];
+              parsedData.receiverName = parsedData.receiverName || receivers.join(', ');
+              parsedData.receiverContact = parsedData.receiverContact || contacts.join(', ');
+              parsedData.receiverAddress = parsedData.receiverAddress || addresses.join('; ');
+            }
           }
           return { 
             ...a, 
@@ -96,6 +128,19 @@ const ApprovalsRepo = {
             r.data.unit = r.data.unit || item.unit;
           }
         }
+        if (r.type === 'CREATE_GATE_PASS' && r.data && Array.isArray(r.data.challanIds) && r.data.challanIds.length > 0) {
+          const placeholders = r.data.challanIds.map(() => '?').join(',');
+          const chs = dbPrepare(`SELECT id, challan_number, receiver_name, receiver_contact, receiver_address, challan_date FROM challans WHERE id IN (${placeholders})`).all(...r.data.challanIds);
+          if (chs && chs.length > 0) {
+            r.data.challans = chs;
+            const receivers = [...new Set(chs.map(c => c.receiver_name).filter(Boolean))];
+            const contacts = [...new Set(chs.map(c => c.receiver_contact).filter(Boolean))];
+            const addresses = [...new Set(chs.map(c => c.receiver_address).filter(Boolean))];
+            r.data.receiverName = r.data.receiverName || receivers.join(', ');
+            r.data.receiverContact = r.data.receiverContact || contacts.join(', ');
+            r.data.receiverAddress = r.data.receiverAddress || addresses.join('; ');
+          }
+        }
         return r;
       } catch (e) {
         console.error('[ApprovalsRepo] Failed to parse data for ID:', r.id);
@@ -127,6 +172,18 @@ const ApprovalsRepo = {
               data.data.unit = data.data.unit || item.unit;
             }
           }
+          if (data.type === 'CREATE_GATE_PASS' && Array.isArray(data.data?.challanIds) && data.data.challanIds.length > 0) {
+            const { data: chs } = await getSupabase().from('challans').select('id, challan_number, receiver_name, receiver_contact, receiver_address, challan_date').in('id', data.data.challanIds);
+            if (chs && chs.length > 0) {
+              data.data.challans = chs;
+              const receivers = [...new Set(chs.map(c => c.receiver_name).filter(Boolean))];
+              const contacts = [...new Set(chs.map(c => c.receiver_contact).filter(Boolean))];
+              const addresses = [...new Set(chs.map(c => c.receiver_address).filter(Boolean))];
+              data.data.receiverName = data.data.receiverName || receivers.join(', ');
+              data.data.receiverContact = data.data.receiverContact || contacts.join(', ');
+              data.data.receiverAddress = data.data.receiverAddress || addresses.join('; ');
+            }
+          }
         } catch (e) {}
       }
       return data;
@@ -152,6 +209,19 @@ const ApprovalsRepo = {
           row.data.orderQuantity = row.data.orderQuantity ?? item.order_quantity;
           row.data.currentStock = row.data.currentStock ?? item.current_stock;
           row.data.unit = row.data.unit || item.unit;
+        }
+      }
+      if (row.type === 'CREATE_GATE_PASS' && row.data && Array.isArray(row.data.challanIds) && row.data.challanIds.length > 0) {
+        const placeholders = row.data.challanIds.map(() => '?').join(',');
+        const chs = dbPrepare(`SELECT id, challan_number, receiver_name, receiver_contact, receiver_address, challan_date FROM challans WHERE id IN (${placeholders})`).all(...row.data.challanIds);
+        if (chs && chs.length > 0) {
+          row.data.challans = chs;
+          const receivers = [...new Set(chs.map(c => c.receiver_name).filter(Boolean))];
+          const contacts = [...new Set(chs.map(c => c.receiver_contact).filter(Boolean))];
+          const addresses = [...new Set(chs.map(c => c.receiver_address).filter(Boolean))];
+          row.data.receiverName = row.data.receiverName || receivers.join(', ');
+          row.data.receiverContact = row.data.receiverContact || contacts.join(', ');
+          row.data.receiverAddress = row.data.receiverAddress || addresses.join('; ');
         }
       }
       row.entityId = row.entity_id;

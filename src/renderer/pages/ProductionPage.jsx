@@ -1,10 +1,12 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import SearchableSelect from '../components/ui/SearchableSelect';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import useStore from '../store/useStore';
 import { 
   Factory, History, BarChart3, Search, Calendar, 
   Trash2, Plus, Package, Hammer, AlertTriangle, 
   CheckCircle2, Info, Loader2, ArrowRight,
-  FileSpreadsheet, FileText
+  FileSpreadsheet, FileText, ArrowUpDown, ArrowUp, ArrowDown,
+  RotateCcw, Filter, X
 } from 'lucide-react';
 
 export default function ProductionPage() {
@@ -617,8 +619,37 @@ function ProductionEntryTab({ addToast, user }) {
 function ProductionHistoryTab({ addToast, user }) {
   const { showConfirm } = useStore();
   const [history, setHistory] = useState([]);
+  const [filtered, setFiltered] = useState([]);
   const [loading, setLoading] = useState(false);
-  const isSuperAdmin = user?.role_name === 'Super Admin';
+  const [categoriesList, setCategoriesList] = useState([]);
+  const isSuperAdmin = user?.role_name === 'Super Admin' || user?.roleName === 'Super Admin';
+
+  // Filters
+  const [search, setSearch] = useState('');
+  const [filterRecipient, setFilterRecipient] = useState('');
+  const [filterProduct, setFilterProduct] = useState('');
+  const [filterBuyer, setFilterBuyer] = useState('');
+  const [filterCategory, setFilterCategory] = useState('');
+  const [filterStyle, setFilterStyle] = useState('');
+  const [filterOrder, setFilterOrder] = useState('');
+  const [filterPurchase, setFilterPurchase] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+
+  // Sorting
+  const [sortConfig, setSortConfig] = useState({ key: 'created_at', direction: 'desc' });
+
+  // Load categories
+  useEffect(() => {
+    const fetchCats = async () => {
+      try {
+        const res = await window.kadal.categories.getAll();
+        if (res?.success) setCategoriesList(res.data);
+        else if (Array.isArray(res)) setCategoriesList(res);
+      } catch (e) {}
+    };
+    fetchCats();
+  }, []);
 
   const loadHistory = useCallback(async () => {
     setLoading(true);
@@ -626,6 +657,7 @@ function ProductionHistoryTab({ addToast, user }) {
       const res = await window.kadal.production.getAll({});
       if (res?.success) {
         setHistory(res.data);
+        setFiltered(res.data);
       }
     } catch (e) {
       addToast('error', 'Failed to load history');
@@ -636,6 +668,220 @@ function ProductionHistoryTab({ addToast, user }) {
   useEffect(() => {
     loadHistory();
   }, [loadHistory]);
+
+  // Distinct values for dropdown filters
+  const distinctRecipients = useMemo(() => {
+    return [...new Set(history.map(r => r.recipient_name).filter(Boolean))].sort();
+  }, [history]);
+
+  const distinctProducts = useMemo(() => {
+    return [...new Set(history.map(r => r.product_name).filter(Boolean))].sort();
+  }, [history]);
+
+  const distinctBuyers = useMemo(() => {
+    return [...new Set(history.map(r => r.buyer_name).filter(Boolean))].sort();
+  }, [history]);
+
+  const distinctStyles = useMemo(() => {
+    return [...new Set(history.map(r => r.style_name).filter(Boolean))].sort();
+  }, [history]);
+
+  const distinctOrders = useMemo(() => {
+    return [...new Set(history.map(r => r.order_number).filter(Boolean))].sort();
+  }, [history]);
+
+  const distinctPurchases = useMemo(() => {
+    return [...new Set(history.map(r => r.purchase_no).filter(Boolean))].sort();
+  }, [history]);
+
+  // Quick date presets
+  const setFilterToday = () => {
+    const today = new Date().toISOString().split('T')[0];
+    setDateFrom(today);
+    setDateTo(today);
+  };
+
+  const setFilterThisMonth = () => {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const lastDay = new Date(y, now.getMonth() + 1, 0).getDate();
+    setDateFrom(`${y}-${m}-01`);
+    setDateTo(`${y}-${m}-${lastDay}`);
+  };
+
+  const setFilterThisYear = () => {
+    const y = new Date().getFullYear();
+    setDateFrom(`${y}-01-01`);
+    setDateTo(`${y}-12-31`);
+  };
+
+  const handleMonthSelect = (e) => {
+    const val = e.target.value;
+    if (!val) {
+      setDateFrom('');
+      setDateTo('');
+      return;
+    }
+    const [y, m] = val.split('-');
+    const lastDay = new Date(y, m, 0).getDate();
+    setDateFrom(`${y}-${m}-01`);
+    setDateTo(`${y}-${m}-${lastDay}`);
+  };
+
+  const resetAllFilters = () => {
+    setSearch('');
+    setFilterRecipient('');
+    setFilterProduct('');
+    setFilterBuyer('');
+    setFilterCategory('');
+    setFilterStyle('');
+    setFilterOrder('');
+    setFilterPurchase('');
+    setDateFrom('');
+    setDateTo('');
+  };
+
+  const hasActiveFilters = Boolean(
+    search || filterRecipient || filterProduct || filterBuyer ||
+    filterCategory || filterStyle || filterOrder || filterPurchase ||
+    dateFrom || dateTo
+  );
+
+  // Apply filters
+  useEffect(() => {
+    let result = [...history];
+
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      result = result.filter(r => {
+        const prodId = `prd-${r.id}`.toLowerCase();
+        const rawId = String(r.id || '');
+        const issueId = String(r.issue_id || '').toLowerCase();
+        const recipient = String(r.recipient_name || '').toLowerCase();
+        const prodName = String(r.product_name || '').toLowerCase();
+        const prodCode = String(r.product_code || '').toLowerCase();
+        const style = String(r.style_name || '').toLowerCase();
+        const order = String(r.order_number || '').toLowerCase();
+        const purchase = String(r.purchase_no || '').toLowerCase();
+        const buyer = String(r.buyer_name || '').toLowerCase();
+        const size = String(r.size || '').toLowerCase();
+        const color = String(r.color || '').toLowerCase();
+        const remarks = String(r.remarks || '').toLowerCase();
+
+        return (
+          prodId.includes(q) || rawId.includes(q) || issueId.includes(q) ||
+          recipient.includes(q) || prodName.includes(q) || prodCode.includes(q) ||
+          style.includes(q) || order.includes(q) || purchase.includes(q) ||
+          buyer.includes(q) || size.includes(q) || color.includes(q) ||
+          remarks.includes(q)
+        );
+      });
+    }
+
+    if (filterRecipient) {
+      result = result.filter(r => r.recipient_name === filterRecipient);
+    }
+
+    if (filterProduct) {
+      result = result.filter(r => r.product_name === filterProduct);
+    }
+
+    if (filterBuyer) {
+      result = result.filter(r => r.buyer_name === filterBuyer);
+    }
+
+    if (filterCategory) {
+      result = result.filter(r => String(r.category_id) === String(filterCategory) || r.category_name === filterCategory);
+    }
+
+    if (filterStyle) {
+      result = result.filter(r => r.style_name === filterStyle);
+    }
+
+    if (filterOrder) {
+      result = result.filter(r => r.order_number === filterOrder);
+    }
+
+    if (filterPurchase) {
+      result = result.filter(r => r.purchase_no === filterPurchase);
+    }
+
+    if (dateFrom || dateTo) {
+      result = result.filter(r => {
+        if (!r.created_at) return true;
+        const itemDateStr = new Date(r.created_at).toLocaleDateString('en-CA');
+        if (dateFrom && itemDateStr < dateFrom) return false;
+        if (dateTo && itemDateStr > dateTo) return false;
+        return true;
+      });
+    }
+
+    setFiltered(result);
+  }, [
+    history, search, filterRecipient, filterProduct, filterBuyer,
+    filterCategory, filterStyle, filterOrder, filterPurchase, dateFrom, dateTo
+  ]);
+
+  // Sorting
+  const handleSort = (key) => {
+    setSortConfig(prev => ({
+      key,
+      direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc'
+    }));
+  };
+
+  const sortedData = useMemo(() => {
+    if (!sortConfig.key) return filtered;
+    return [...filtered].sort((a, b) => {
+      let valA = a[sortConfig.key];
+      let valB = b[sortConfig.key];
+
+      if (['production_quantity', 'wastage_quantity', 'id'].includes(sortConfig.key)) {
+        valA = Number(valA) || 0;
+        valB = Number(valB) || 0;
+      } else if (sortConfig.key === 'created_at') {
+        valA = new Date(valA || 0).getTime();
+        valB = new Date(valB || 0).getTime();
+      } else {
+        valA = (valA || '').toString().toLowerCase();
+        valB = (valB || '').toString().toLowerCase();
+      }
+
+      if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
+      if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }, [filtered, sortConfig]);
+
+  const SortHeader = ({ label, field, className = "", style = {} }) => (
+    <th 
+      className={`sortable ${className}`} 
+      onClick={() => handleSort(field)}
+      style={{ cursor: 'pointer', userSelect: 'none', ...style }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4 }}>
+        <span>{label}</span>
+        <span className={`sort-icon-container ${sortConfig.key === field ? 'active' : ''}`} style={{ display: 'inline-flex', opacity: sortConfig.key === field ? 1 : 0.35 }}>
+          {sortConfig.key !== field ? <ArrowUpDown size={12} /> : 
+           sortConfig.direction === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />}
+        </span>
+      </div>
+    </th>
+  );
+
+  // Metrics
+  const totalProducedQty = useMemo(() => {
+    return filtered.reduce((sum, r) => sum + (Number(r.production_quantity) || 0), 0);
+  }, [filtered]);
+
+  const totalWastageQty = useMemo(() => {
+    return filtered.reduce((sum, r) => sum + (Number(r.wastage_quantity) || 0), 0);
+  }, [filtered]);
+
+  const uniqueProductsCount = useMemo(() => {
+    return new Set(filtered.map(r => r.product_name).filter(Boolean)).size;
+  }, [filtered]);
 
   const handleDelete = async (item) => {
     const ok = await showConfirm({
@@ -660,55 +906,330 @@ function ProductionHistoryTab({ addToast, user }) {
   };
 
   const exportExcel = async () => {
-    const res = await window.kadal.reports.exportExcel('factoryProductionReport', history);
+    const res = await window.kadal.reports.exportExcel('factoryProductionReport', sortedData);
     if (res?.success) addToast('success', 'Excel exported successfully');
     else addToast('error', 'Export failed');
   };
 
   const exportPdf = async () => {
-    const res = await window.kadal.reports.exportPdf('factoryProductionReport', history);
+    const res = await window.kadal.reports.exportPdf('factoryProductionReport', sortedData);
     if (res?.success) addToast('success', 'PDF exported successfully');
     else addToast('error', 'Export failed');
   };
 
   return (
     <div className="card" style={{ padding: 20 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <h3 style={{ margin: 0 }}>Recent Factory Production Batches</h3>
+      {/* HEADER WITH TITLE & EXPORT BUTTONS */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
+        <div>
+          <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <History size={20} color="var(--accent)" /> Factory Production History
+          </h3>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+            View and filter all recorded production batches and stock additions
+          </div>
+        </div>
         <div style={{ display: 'flex', gap: 10 }}>
-          <button className="btn btn-outline btn-sm" onClick={exportExcel} disabled={history.length === 0}>
+          <button className="btn btn-outline btn-sm" onClick={exportExcel} disabled={sortedData.length === 0}>
             <FileSpreadsheet size={14} /> Excel
           </button>
-          <button className="btn btn-outline btn-sm" onClick={exportPdf} disabled={history.length === 0}>
+          <button className="btn btn-outline btn-sm" onClick={exportPdf} disabled={sortedData.length === 0}>
             <FileText size={14} /> PDF
           </button>
         </div>
       </div>
+
+      {/* FILTER CONTROLS */}
+      <div style={{
+        background: 'var(--bg-glass)',
+        padding: 16,
+        borderRadius: 'var(--radius-md)',
+        border: '1px solid var(--border)',
+        marginBottom: 16,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 12
+      }}>
+        {/* ROW 1: Search & Date Presets & Date Range */}
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', flex: 1, minWidth: 280 }}>
+            <div className="search-bar" style={{ minWidth: 240, maxWidth: 360, flex: 1 }}>
+              <Search size={16} />
+              <input 
+                className="form-input" 
+                placeholder="Search batches, items, factories, styles..." 
+                value={search} 
+                onChange={e => setSearch(e.target.value)} 
+              />
+            </div>
+
+            <div className="filter-group" style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+              <button 
+                type="button"
+                className={`btn btn-sm ${!dateFrom && !dateTo ? 'btn-primary' : 'btn-outline'}`}
+                onClick={() => { setDateFrom(''); setDateTo(''); }}
+                style={{ padding: '4px 10px', fontSize: 12 }}
+              >
+                All Time
+              </button>
+              <button 
+                type="button"
+                className="btn btn-outline btn-sm" 
+                onClick={setFilterToday}
+                style={{ padding: '4px 10px', fontSize: 12 }}
+              >
+                Today
+              </button>
+              <button 
+                type="button"
+                className="btn btn-outline btn-sm" 
+                onClick={setFilterThisMonth}
+                style={{ padding: '4px 10px', fontSize: 12 }}
+              >
+                This Month
+              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'var(--bg)', padding: '2px 6px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }}>
+                <span className="text-muted" style={{ fontSize: 11, fontWeight: 500 }}>Month:</span>
+                <input 
+                  type="month" 
+                  className="form-input" 
+                  onChange={handleMonthSelect} 
+                  style={{ width: 120, padding: '2px 4px', fontSize: 12, height: 26, border: 'none', background: 'transparent' }} 
+                  title="Select Specific Month" 
+                />
+              </div>
+              <button 
+                type="button"
+                className="btn btn-outline btn-sm" 
+                onClick={setFilterThisYear}
+                style={{ padding: '4px 10px', fontSize: 12 }}
+              >
+                This Year
+              </button>
+            </div>
+          </div>
+
+          {/* Date range inputs */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <Calendar size={14} className="text-muted" />
+              <input 
+                type="date" 
+                className="form-input" 
+                value={dateFrom} 
+                onChange={e => setDateFrom(e.target.value)} 
+                style={{ width: 130, padding: '5px 8px', fontSize: 12 }} 
+                title="Date From"
+              />
+              <span className="text-muted" style={{ fontSize: 12 }}>to</span>
+              <input 
+                type="date" 
+                className="form-input" 
+                value={dateTo} 
+                onChange={e => setDateTo(e.target.value)} 
+                style={{ width: 130, padding: '5px 8px', fontSize: 12 }} 
+                title="Date To"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* ROW 2: Dropdown Filters */}
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+          {/* Factory */}
+          <div style={{ minWidth: 150, flex: 1 }}>
+            <SearchableSelect 
+              className="form-select" 
+              value={filterRecipient} 
+              onValueChange={val => setFilterRecipient(val)}
+              style={{ width: '100%', fontSize: 12, padding: '6px 10px' }}
+            >
+              <option value="">All Factories ({distinctRecipients.length})</option>
+              {distinctRecipients.map(r => (
+                <option key={r} value={r}>{r}</option>
+              ))}
+            </SearchableSelect>
+          </div>
+
+          {/* Produced Item */}
+          <div style={{ minWidth: 160, flex: 1 }}>
+            <SearchableSelect 
+              className="form-select" 
+              value={filterProduct} 
+              onValueChange={val => setFilterProduct(val)}
+              style={{ width: '100%', fontSize: 12, padding: '6px 10px' }}
+            >
+              <option value="">All Products ({distinctProducts.length})</option>
+              {distinctProducts.map(p => (
+                <option key={p} value={p}>{p}</option>
+              ))}
+            </SearchableSelect>
+          </div>
+
+          {/* Buyer */}
+          <div style={{ minWidth: 140, flex: 1 }}>
+            <SearchableSelect 
+              className="form-select" 
+              value={filterBuyer} 
+              onValueChange={val => setFilterBuyer(val)}
+              style={{ width: '100%', fontSize: 12, padding: '6px 10px' }}
+            >
+              <option value="">All Buyers ({distinctBuyers.length})</option>
+              {distinctBuyers.map(b => (
+                <option key={b} value={b}>{b}</option>
+              ))}
+            </SearchableSelect>
+          </div>
+
+          {/* Category */}
+          <div style={{ minWidth: 140, flex: 1 }}>
+            <SearchableSelect 
+              className="form-select" 
+              value={filterCategory} 
+              onValueChange={val => setFilterCategory(val)}
+              style={{ width: '100%', fontSize: 12, padding: '6px 10px' }}
+            >
+              <option value="">All Categories</option>
+              {categoriesList.map(c => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </SearchableSelect>
+          </div>
+
+          {/* Style */}
+          <div style={{ minWidth: 130, flex: 1 }}>
+            <SearchableSelect 
+              className="form-select" 
+              value={filterStyle} 
+              onValueChange={val => setFilterStyle(val)}
+              style={{ width: '100%', fontSize: 12, padding: '6px 10px' }}
+            >
+              <option value="">All Styles ({distinctStyles.length})</option>
+              {distinctStyles.map(s => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </SearchableSelect>
+          </div>
+
+          {/* Order No */}
+          <div style={{ minWidth: 130, flex: 1 }}>
+            <SearchableSelect 
+              className="form-select" 
+              value={filterOrder} 
+              onValueChange={val => setFilterOrder(val)}
+              style={{ width: '100%', fontSize: 12, padding: '6px 10px' }}
+            >
+              <option value="">All Orders ({distinctOrders.length})</option>
+              {distinctOrders.map(o => (
+                <option key={o} value={o}>{o}</option>
+              ))}
+            </SearchableSelect>
+          </div>
+
+          {/* Purchase No */}
+          <div style={{ minWidth: 130, flex: 1 }}>
+            <SearchableSelect 
+              className="form-select" 
+              value={filterPurchase} 
+              onValueChange={val => setFilterPurchase(val)}
+              style={{ width: '100%', fontSize: 12, padding: '6px 10px' }}
+            >
+              <option value="">All Purchase Nos ({distinctPurchases.length})</option>
+              {distinctPurchases.map(p => (
+                <option key={p} value={p}>{p}</option>
+              ))}
+            </SearchableSelect>
+          </div>
+
+          {/* Reset Filters button */}
+          {hasActiveFilters && (
+            <button 
+              type="button"
+              className="btn btn-ghost btn-sm text-danger" 
+              onClick={resetAllFilters}
+              style={{ display: 'flex', alignItems: 'center', gap: 4, height: 32, padding: '4px 10px', fontSize: 12 }}
+              title="Reset all filters"
+            >
+              <RotateCcw size={13} /> Reset
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* SUMMARY STATS STRIP */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        gap: 12,
+        marginBottom: 14,
+        padding: '8px 14px',
+        background: 'var(--bg-card)',
+        border: '1px solid var(--border)',
+        borderRadius: 'var(--radius-sm)'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', fontSize: 13 }}>
+          <span className="text-muted">
+            Batches: <strong style={{ color: 'var(--text-primary)' }}>{filtered.length}</strong> {history.length !== filtered.length && <span style={{ fontSize: 11 }}>(of {history.length})</span>}
+          </span>
+          <span className="text-muted">
+            Total Produced: <strong className="text-success text-mono">+{totalProducedQty.toLocaleString()} pcs</strong>
+          </span>
+          <span className="text-muted">
+            Total Wastage: <strong className="text-danger text-mono">{totalWastageQty.toLocaleString()} pcs</strong>
+          </span>
+          <span className="text-muted">
+            Products: <strong style={{ color: 'var(--accent)' }}>{uniqueProductsCount}</strong>
+          </span>
+        </div>
+
+        {hasActiveFilters && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11 }}>
+            <span className="badge badge-info">
+              Active Filters Applied ({filtered.length} results)
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* TABLE */}
       {loading ? (
-        <div style={{ textAlign: 'center', padding: 40 }}><Loader2 size={24} className="spinner" style={{margin:'0 auto'}} /><p style={{marginTop:8}}>Loading production logs...</p></div>
-      ) : history.length === 0 ? (
-        <div className="empty-state"><h3>No production batches logged yet</h3><p>Use the "Log Production" tab to get started.</p></div>
+        <div style={{ textAlign: 'center', padding: 40 }}>
+          <Loader2 size={24} className="spinner" style={{ margin: '0 auto' }} />
+          <p style={{ marginTop: 8 }}>Loading production logs...</p>
+        </div>
+      ) : sortedData.length === 0 ? (
+        <div className="empty-state">
+          <h3>{history.length === 0 ? 'No production batches logged yet' : 'No matching production batches found'}</h3>
+          <p>{history.length === 0 ? 'Use the "Log Production" tab to get started.' : 'Try adjusting or clearing your filters.'}</p>
+          {hasActiveFilters && (
+            <button className="btn btn-outline btn-sm" onClick={resetAllFilters} style={{ marginTop: 12 }}>
+              <RotateCcw size={14} /> Clear All Filters
+            </button>
+          )}
+        </div>
       ) : (
         <div className="table-wrapper">
           <table className="data-table">
             <thead>
               <tr>
-                <th>Batch Date</th>
-                <th>Production ID</th>
-                <th>Issue ID</th>
-                <th>Factory</th>
-                <th>Produced Item</th>
-                <th>Style / Purchase / Order</th>
-                <th>Size / Color</th>
-                <th>Buyer</th>
-                <th style={{ textAlign: 'right' }}>Produced Qty</th>
-                <th style={{ textAlign: 'right' }}>Wastage</th>
+                <SortHeader label="Batch Date" field="created_at" />
+                <SortHeader label="Production ID" field="id" />
+                <SortHeader label="Issue ID" field="issue_id" />
+                <SortHeader label="Factory" field="recipient_name" />
+                <SortHeader label="Produced Item" field="product_name" />
+                <SortHeader label="Style / Purchase / Order" field="style_name" />
+                <SortHeader label="Size / Color" field="size" />
+                <SortHeader label="Buyer" field="buyer_name" />
+                <SortHeader label="Produced Qty" field="production_quantity" className="text-right" style={{ textAlign: 'right' }} />
+                <SortHeader label="Wastage" field="wastage_quantity" className="text-right" style={{ textAlign: 'right' }} />
                 <th>Unit</th>
                 <th style={{ textAlign: 'right' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {history.map(item => (
+              {sortedData.map(item => (
                 <tr key={item.id}>
                   <td style={{ fontSize: 13 }}>{new Date(item.created_at).toLocaleDateString('en-GB')}</td>
                   <td className="text-mono fw-bold" style={{ color: 'var(--accent)', fontSize: 12 }}>PRD-{item.id}</td>
@@ -863,14 +1384,14 @@ function ProductionReportsTab({ addToast }) {
           </div>
           <div>
             <label className="form-label">Category</label>
-            <select
+            <SearchableSelect
               className="form-select"
               value={filterCategory}
-              onChange={e => setFilterCategory(e.target.value)}
+              onValueChange={value => setFilterCategory(value)}
             >
               <option value="">All Categories</option>
               {categoriesList.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
+            </SearchableSelect>
           </div>
           <div>
             <label className="form-label">From Date</label>

@@ -2,7 +2,16 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 import './styles/index.css';
+import './styles/themes.css';
 import { webBridge } from './web/web-bridge';
+import useStore from './store/useStore';
+import { THEME_STORAGE_KEY, readTheme } from './theme';
+
+window.addEventListener('storage', (event) => {
+  if (event.key === THEME_STORAGE_KEY || event.key === null) {
+    useStore.getState().setTheme(readTheme(), false);
+  }
+});
 
 // Inject web bridge if running in browser
 if (!window.kadal) {

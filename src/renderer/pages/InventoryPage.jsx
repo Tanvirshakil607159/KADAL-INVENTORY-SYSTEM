@@ -1,3 +1,4 @@
+import SearchableSelect from '../components/ui/SearchableSelect';
 import React, { useEffect, useState, useCallback } from 'react';
 import useStore from '../store/useStore';
 import { Plus, Search, Package, ArrowUpDown, ArrowUp, ArrowDown, Printer, Edit2, Trash2 } from 'lucide-react';
@@ -135,22 +136,22 @@ export default function InventoryPage() {
             </div>
             <button type="submit" className="btn btn-primary">Search</button>
           </form>
-          <select className="form-select" value={catFilter} onChange={e => setCatFilter(e.target.value)} style={{ width: 'auto', minWidth: 150, padding: '8px 32px 8px 12px', fontSize: 13 }}>
+          <SearchableSelect className="form-select" value={catFilter} onValueChange={value => setCatFilter(value)} style={{ width: 'auto', minWidth: 150, padding: '8px 32px 8px 12px', fontSize: 13 }}>
             <option value="">All Categories</option>
             {categories.filter(c=>c.is_active).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-          <select className="form-select" value={styleFilter} onChange={e => setStyleFilter(e.target.value)} style={{ width: 'auto', minWidth: 120, padding: '8px 32px 8px 12px', fontSize: 13 }}>
+          </SearchableSelect>
+          <SearchableSelect className="form-select" value={styleFilter} onValueChange={value => setStyleFilter(value)} style={{ width: 'auto', minWidth: 120, padding: '8px 32px 8px 12px', fontSize: 13 }}>
             <option value="">All Styles</option>
             {distinctValues.styles.map((v, i) => <option key={i} value={v}>{v}</option>)}
-          </select>
-          <select className="form-select" value={orderFilter} onChange={e => setOrderFilter(e.target.value)} style={{ width: 'auto', minWidth: 120, padding: '8px 32px 8px 12px', fontSize: 13 }}>
+          </SearchableSelect>
+          <SearchableSelect className="form-select" value={orderFilter} onValueChange={value => setOrderFilter(value)} style={{ width: 'auto', minWidth: 120, padding: '8px 32px 8px 12px', fontSize: 13 }}>
             <option value="">All Orders</option>
             {distinctValues.orders?.map((v, i) => <option key={i} value={v}>{v}</option>)}
-          </select>
-          <select className="form-select" value={purchaseFilter} onChange={e => setPurchaseFilter(e.target.value)} style={{ width: 'auto', minWidth: 120, padding: '8px 32px 8px 12px', fontSize: 13 }}>
+          </SearchableSelect>
+          <SearchableSelect className="form-select" value={purchaseFilter} onValueChange={value => setPurchaseFilter(value)} style={{ width: 'auto', minWidth: 120, padding: '8px 32px 8px 12px', fontSize: 13 }}>
             <option value="">All Purchase No</option>
             {distinctValues.purchases.map((v, i) => <option key={i} value={v}>{v}</option>)}
-          </select>
+          </SearchableSelect>
         </div>
         <div className="toolbar-right">
           {user?.permissions?.inventory === 'rw' && (

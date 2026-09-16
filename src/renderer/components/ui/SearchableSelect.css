@@ -1,0 +1,25 @@
+.searchable-select { position: relative; display: inline-block; flex-shrink: 0; vertical-align: middle; }
+.searchable-select .searchable-select-input { background-image: none; cursor: text; text-overflow: ellipsis; }
+.searchable-select-chevron { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: var(--text-muted); pointer-events: none; }
+.searchable-select-input:disabled { cursor: not-allowed; opacity: 0.55; }
+.searchable-select-menu {
+  position: fixed;
+  z-index: 10020;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px;
+  background: var(--bg-surface-solid);
+  color: var(--text-primary);
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-lg);
+  font: 12px var(--font);
+}
+.searchable-select-option { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 10px; min-height: 34px; border-radius: 4px; cursor: pointer; }
+.searchable-select-option span { overflow-wrap: anywhere; }
+.searchable-select-option svg { flex-shrink: 0; color: var(--primary); }
+.searchable-select-option.highlighted { background: var(--primary-lighter); color: var(--primary-light); }
+.searchable-select-option[aria-selected='true'] { font-weight: 600; }
+.searchable-select-option[aria-disabled='true'] { opacity: 0.45; cursor: not-allowed; }
+.searchable-select-empty { padding: 14px 10px; color: var(--text-muted); }
+@media print { .searchable-select-menu { display: none; } }

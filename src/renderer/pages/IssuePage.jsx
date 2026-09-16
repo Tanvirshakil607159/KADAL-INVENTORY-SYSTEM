@@ -1,3 +1,4 @@
+import SearchableSelect from '../components/ui/SearchableSelect';
 import React, { useState, useEffect, useCallback } from 'react';
 import useStore from '../store/useStore';
 import { Send, RotateCcw, BarChart3, Plus, Trash2, FileSpreadsheet, FileText, Search, Package, Eye } from 'lucide-react';
@@ -654,7 +655,7 @@ function ReportsTab({ addToast }) {
       <div className="tabs" style={{marginBottom:12}}>{REPORT_TABS.map(t => <button key={t.id} className={`tab ${reportTab===t.id?'active':''}`} onClick={() => setReportTab(t.id)}>{t.label}</button>)}</div>
       <div className="toolbar" style={{flexWrap:'wrap', gap:10}}>
         <div className="toolbar-left" style={{display:'flex',gap:10,flexWrap:'wrap'}}>
-          <select className="form-input" style={{width:140}} value={issueType} onChange={e => setIssueType(e.target.value)}><option value="">All Types</option><option value="FACTORY">Factory</option><option value="EMPLOYEE">Employee</option></select>
+          <SearchableSelect className="form-input" style={{width:140}} value={issueType} onValueChange={value => setIssueType(value)}><option value="">All Types</option><option value="FACTORY">Factory</option><option value="EMPLOYEE">Employee</option></SearchableSelect>
           <input type="date" className="form-input" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={{width:130}} />
           <span className="text-muted">to</span>
           <input type="date" className="form-input" value={dateTo} onChange={e => setDateTo(e.target.value)} style={{width:130}} />

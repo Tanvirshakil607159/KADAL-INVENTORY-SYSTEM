@@ -1,3 +1,4 @@
+import SearchableSelect from '../components/ui/SearchableSelect';
 import React, { useEffect, useState } from 'react';
 import useStore from '../store/useStore';
 import { Search, FileText, XCircle, Eye, Download, FileSpreadsheet, Trash2, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
@@ -230,11 +231,11 @@ export default function ChallanHistoryPage() {
       <div className="toolbar">
         <div className="toolbar-left">
           <div className="search-bar"><Search /><input className="form-input" placeholder="Search by challan no or receiver..." value={search} onChange={e => setSearch(e.target.value)} /></div>
-          <select className="form-select" value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{ width: 'auto', minWidth: 120, padding: '8px 32px 8px 12px', fontSize: 13 }}>
+          <SearchableSelect className="form-select" value={statusFilter} onValueChange={value => setStatusFilter(value)} style={{ width: 'auto', minWidth: 120, padding: '8px 32px 8px 12px', fontSize: 13 }}>
             <option value="">All Status</option>
             <option value="ACTIVE">Active</option>
             <option value="CANCELLED">Inactive</option>
-          </select>
+          </SearchableSelect>
           <div className="filter-group" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
             <button className="btn btn-outline btn-sm" onClick={setFilterToday}>Today</button>
             <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'var(--bg)', borderRadius: 'var(--radius-sm)' }}>

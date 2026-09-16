@@ -1,3 +1,4 @@
+import ThemeToggle from '../components/common/ThemeToggle';
 import React, { useState, useEffect, useMemo } from 'react';
 import { CheckCircle2, Download, AlertTriangle, Shield, ShieldCheck, FileText, Phone, MapPin, User, Calendar, Info, RefreshCw, Hash, Clock, Building2, Package } from 'lucide-react';
 import logo from '../assets/logo.png';
@@ -333,6 +334,7 @@ export default function ChallanVerificationPage({ challanNumber }) {
   if (loading) {
     return (
       <div className="verification-portal">
+      <ThemeToggle className="theme-toggle-floating" />
         <style>{stylesText}</style>
         <div className="loading-container">
           <div className="spinner"></div>
@@ -347,6 +349,7 @@ export default function ChallanVerificationPage({ challanNumber }) {
   if (error) {
     return (
       <div className="verification-portal">
+      <ThemeToggle className="theme-toggle-floating" />
         <style>{stylesText}</style>
         <div className="portal-container">
           <div className="portal-header">
@@ -378,6 +381,7 @@ export default function ChallanVerificationPage({ challanNumber }) {
 
   return (
     <div className="verification-portal">
+      <ThemeToggle className="theme-toggle-floating" />
       <style>{stylesText}</style>
       <div className="portal-container">
         
@@ -594,7 +598,7 @@ export default function ChallanVerificationPage({ challanNumber }) {
 const stylesText = `
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@500;700&display=swap');
 
-:root {
+.verification-portal {
   --bg-primary: #07080a;
   --bg-card: rgba(18, 21, 28, 0.65);
   --bg-inner: rgba(255, 255, 255, 0.015);
