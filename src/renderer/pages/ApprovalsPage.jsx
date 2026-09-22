@@ -1,6 +1,164 @@
 import React, { useEffect, useState } from 'react';
 import useStore from '../store/useStore';
-import { Clock, CheckCircle, XCircle, ArrowUpDown, ArrowUp, ArrowDown, AlertCircle } from 'lucide-react';
+import { Clock, CheckCircle, XCircle, ArrowUpDown, ArrowUp, ArrowDown, AlertCircle, Package } from 'lucide-react';
+
+function IssueApprovalDetails({ safeData, renderProperty }) {
+  const [prodItems, setProdItems] = useState(safeData?.producedProducts || []);
+  const issueItems = safeData?.items || [];
+
+  useEffect(() => {
+    let isMounted = true;
+    const initial = safeData?.producedProducts || [];
+    // If any item is missing buyerName or color or orderNumber, fetch it from inventory
+    const needsEnrichment = initial.some(p => (!p.buyerName && !p.buyer_name) || !p.orderNumber) ||
+      (initial.length === 0 && (safeData?.producedItemIds?.length > 0 || safeData?.producedItemId));
+
+    if (needsEnrichment) {
+      const pIds = initial.length > 0
+        ? initial.map(p => p.id).filter(Boolean)
+        : (safeData?.producedItemIds || (safeData?.producedItemId ? [safeData.producedItemId] : []));
+
+      if (pIds.length > 0 && window.kadal?.items?.getById) {
+        Promise.all(pIds.map(async (id) => {
+          try {
+            const res = await window.kadal.items.getById(id);
+            if (res?.success && res?.data) {
+              const item = res.data;
+              const prev = initial.find(p => p.id === id) || {};
+              return {
+                id: item.id,
+                name: item.name,
+                itemCode: item.item_code,
+                unit: item.unit || prev.unit,
+                styleName: item.style_name || prev.styleName,
+                buyerName: item.buyer_name || prev.buyerName,
+                color: item.color || prev.color,
+                size: item.size || prev.size,
+                orderNumber: item.order_number || prev.orderNumber,
+                purchaseNo: item.purchase_no || prev.purchaseNo,
+                orderQuantity: item.order_quantity ?? prev.orderQuantity,
+              };
+            }
+          } catch (e) {}
+          return initial.find(p => p.id === id) || null;
+        })).then(results => {
+          if (isMounted) {
+            const valid = results.filter(Boolean);
+            if (valid.length > 0) setProdItems(valid);
+          }
+        });
+      }
+    } else {
+      setProdItems(initial);
+    }
+    return () => { isMounted = false; };
+  }, [safeData]);
+
+  return (
+    <div className="approval-details-rich">
+      <div className="approval-data-grid mb-3">
+        {renderProperty('Recipient', safeData?.recipientName)}
+        {renderProperty('Issue Type', safeData?.issueType || 'FACTORY')}
+        {safeData?.issueType === 'EMPLOYEE' && renderProperty('Category', safeData?.isReturnable ? 'Returnable' : 'Non-Returnable')}
+        {renderProperty('Issue Date', safeData?.issueDate ? new Date(safeData.issueDate).toLocaleDateString() : 'Today')}
+        {safeData?.expectedReturnDate && renderProperty('Expected Return', new Date(safeData.expectedReturnDate).toLocaleDateString())}
+      </div>
+
+      {prodItems.length > 0 && (
+        <div className="p-3 bg-light rounded mb-3" style={{ border: '1px solid var(--border)' }}>
+          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text)' }}>
+            <Package size={15} color="var(--primary)" /> Target Finished Product(s) to Produce ({prodItems.length}):
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {prodItems.map((prod, pIdx) => {
+              const buyer = prod.buyerName || prod.buyer_name || '-';
+              const color = prod.color || '-';
+              const orderNo = prod.orderNumber || prod.order_number || '-';
+              const style = prod.styleName || prod.style_name || '-';
+              const purchaseNo = prod.purchaseNo || prod.purchase_no || '-';
+              const size = prod.size || '-';
+              const orderQty = prod.orderQuantity ?? prod.order_quantity;
+
+              return (
+                <div key={prod.id || pIdx} style={{ padding: '10px 14px', background: 'var(--bg-card)', borderRadius: 6, border: '1px solid var(--border)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+                    <div>
+                      <strong style={{ fontSize: 13, color: 'var(--text)' }}>{prod.name}</strong>
+                      <span className="text-mono text-muted" style={{ fontSize: 11, marginLeft: 6 }}>({prod.itemCode || prod.item_code})</span>
+                    </div>
+                    {orderQty != null && (
+                      <span className="badge badge-info" style={{ fontSize: 11 }}>
+                        Order Qty: {orderQty} {prod.unit || ''}
+                      </span>
+                    )}
+                  </div>
+
+                  <div style={{ 
+                    display: 'grid', 
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', 
+                    gap: '6px 12px', 
+                    fontSize: 11, 
+                    background: 'var(--bg-muted)', 
+                    padding: '8px 12px', 
+                    borderRadius: 4,
+                    border: '1px solid var(--border)' 
+                  }}>
+                    <div><span className="text-muted">Buyer:</span> <strong style={{ color: 'var(--text)' }}>{buyer}</strong></div>
+                    <div><span className="text-muted">Color:</span> <strong style={{ color: 'var(--text)' }}>{color}</strong></div>
+                    <div><span className="text-muted">Order No:</span> <strong style={{ color: 'var(--text)' }}>{orderNo}</strong></div>
+                    <div><span className="text-muted">Style:</span> <strong style={{ color: 'var(--text)' }}>{style}</strong></div>
+                    {purchaseNo !== '-' && <div><span className="text-muted">Purchase No:</span> <strong style={{ color: 'var(--text)' }}>{purchaseNo}</strong></div>}
+                    {size !== '-' && size !== 'N/A' && <div><span className="text-muted">Size:</span> <strong style={{ color: 'var(--text)' }}>{size}</strong></div>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>
+        Issued Items ({issueItems.length}):
+      </div>
+      <div className="table-wrapper" style={{ maxHeight: 300, border: '1px solid var(--border)' }}>
+        <table className="data-table table-sm">
+          <thead>
+            <tr>
+              <th>Item Name</th>
+              <th>Code</th>
+              <th>Buyer</th>
+              <th>Style / Order</th>
+              <th className="text-right">Stock</th>
+              <th className="text-right">Issued Qty</th>
+              <th>Unit</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            {issueItems.map((it, i) => (
+              <tr key={i}>
+                <td style={{ fontWeight: 600 }}>{it.name || `Item #${it.itemId}`}</td>
+                <td className="text-mono" style={{ fontSize: 11 }}>{it.itemCode || '-'}</td>
+                <td style={{ fontSize: 11 }}>{it.buyerName || '-'}</td>
+                <td style={{ fontSize: 11 }}>{[it.styleNo, it.orderNumber].filter(Boolean).join(' / ') || '-'}</td>
+                <td className="text-right text-mono" style={{ fontSize: 11 }}>{it.currentStock ?? '-'}</td>
+                <td className="text-right fw-bold" style={{ color: 'var(--primary)' }}>{it.quantity}</td>
+                <td className="text-muted">{it.unit}</td>
+                <td style={{ fontSize: 11 }}>{it.notes || '-'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {safeData?.remarks && (
+        <div className="mt-3 p-2 bg-light rounded" style={{ fontSize: 12 }}>
+          <strong>Remarks:</strong> {safeData.remarks}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function GatePassApprovalDetails({ safeData, renderProperty }) {
   const [challans, setChallans] = useState(safeData?.challans || []);
@@ -347,81 +505,7 @@ export default function ApprovalsPage() {
         return <GatePassApprovalDetails safeData={safeData} renderProperty={renderProperty} />;
 
       case 'CREATE_ISSUE':
-        const issueItems = safeData.items || [];
-        const prodItems = safeData.producedProducts || [];
-
-        return (
-          <div className="approval-details-rich">
-            <div className="approval-data-grid mb-3">
-              {renderProperty('Recipient', safeData.recipientName)}
-              {renderProperty('Issue Type', safeData.issueType || 'FACTORY')}
-              {safeData.issueType === 'EMPLOYEE' && renderProperty('Category', safeData.isReturnable ? 'Returnable' : 'Non-Returnable')}
-              {renderProperty('Issue Date', safeData.issueDate ? new Date(safeData.issueDate).toLocaleDateString() : 'Today')}
-              {safeData.expectedReturnDate && renderProperty('Expected Return', new Date(safeData.expectedReturnDate).toLocaleDateString())}
-            </div>
-
-            {prodItems.length > 0 && (
-              <div className="p-3 bg-light rounded mb-3">
-                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>
-                  Target Finished Product(s) to Produce ({prodItems.length}):
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {prodItems.map((prod, pIdx) => (
-                    <div key={prod.id || pIdx} style={{ fontSize: 12, display: 'flex', justifyContent: 'space-between', padding: '6px 10px', background: 'var(--bg-card)', borderRadius: 4, border: '1px solid var(--border)' }}>
-                      <div>
-                        <strong>{prod.name}</strong> <span className="text-mono text-muted">({prod.itemCode})</span>
-                        {prod.styleName ? ` | Style: ${prod.styleName}` : ''}
-                      </div>
-                      <div className="text-muted">
-                        {prod.orderQuantity ? `Order: ${prod.orderQuantity} ` : ''}{prod.unit || ''}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>
-              Issued Items ({issueItems.length}):
-            </div>
-            <div className="table-wrapper" style={{ maxHeight: 300, border: '1px solid var(--border)' }}>
-              <table className="data-table table-sm">
-                <thead>
-                  <tr>
-                    <th>Item Name</th>
-                    <th>Code</th>
-                    <th>Buyer</th>
-                    <th>Style / Order</th>
-                    <th className="text-right">Stock</th>
-                    <th className="text-right">Issued Qty</th>
-                    <th>Unit</th>
-                    <th>Notes</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {issueItems.map((it, i) => (
-                    <tr key={i}>
-                      <td style={{ fontWeight: 600 }}>{it.name || `Item #${it.itemId}`}</td>
-                      <td className="text-mono" style={{ fontSize: 11 }}>{it.itemCode || '-'}</td>
-                      <td style={{ fontSize: 11 }}>{it.buyerName || '-'}</td>
-                      <td style={{ fontSize: 11 }}>{[it.styleNo, it.orderNumber].filter(Boolean).join(' / ') || '-'}</td>
-                      <td className="text-right text-mono" style={{ fontSize: 11 }}>{it.currentStock ?? '-'}</td>
-                      <td className="text-right fw-bold" style={{ color: 'var(--primary)' }}>{it.quantity}</td>
-                      <td className="text-muted">{it.unit}</td>
-                      <td style={{ fontSize: 11 }}>{it.notes || '-'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            {safeData.remarks && (
-              <div className="mt-3 p-2 bg-light rounded" style={{ fontSize: 12 }}>
-                <strong>Remarks:</strong> {safeData.remarks}
-              </div>
-            )}
-          </div>
-        );
+        return <IssueApprovalDetails safeData={safeData} renderProperty={renderProperty} />;
 
       default:
         return <pre style={{ fontSize: 11, background: 'var(--bg-glass)', padding: 10, borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>{JSON.stringify(safeData, null, 2)}</pre>;

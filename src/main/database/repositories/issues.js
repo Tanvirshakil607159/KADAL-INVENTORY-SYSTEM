@@ -26,6 +26,22 @@ function cleanRemarks(remarks) {
   return clean || null;
 }
 
+async function fetchAllSupabase(queryBuilder, pageSize = 1000) {
+  let allData = [];
+  let page = 0;
+  while (true) {
+    const from = page * pageSize;
+    const to = from + pageSize - 1;
+    const { data, error } = await queryBuilder.range(from, to);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    allData = allData.concat(data);
+    if (data.length < pageSize) break;
+    page++;
+  }
+  return allData;
+}
+
 const IssuesRepo = {
   // ==================== Issues ====================
   async getAll(filters = {}) {
@@ -47,8 +63,7 @@ const IssuesRepo = {
         query = query.or(`issue_id.ilike.%${filters.search}%,recipient_name.ilike.%${filters.search}%`);
       }
 
-      const { data, error } = await query;
-      if (error) throw error;
+      const data = await fetchAllSupabase(query);
       return data.map(r => ({
         ...r,
         remarks: cleanRemarks(r.remarks),
@@ -481,41 +496,131 @@ const IssuesRepo = {
     if (isCloudEnabled()) {
       const supabase = getSupabase();
       let query = supabase.from('issue_items').select(`
-        *, issues (issue_id, issue_type, recipient_name, issue_date, status, expected_return_date),
+        *, issues (id, issue_id, issue_type, recipient_name, issue_date, status, expected_return_date, remarks, produced_item_id),
         items (name, item_code, unit, style_name, purchase_no, order_number, size, color, buyer_name)
-      `);
-      const { data, error } = await query;
-      if (error) throw error;
+      `).order('id', { ascending: false });
+      const data = await fetchAllSupabase(query);
 
-      let result = data.map(r => ({
-        issue_id: r.issues?.issue_id,
-        issue_type: r.issues?.issue_type,
-        recipient_name: r.issues?.recipient_name,
-        issue_date: r.issues?.issue_date,
-        status: r.issues?.status,
-        expected_return_date: r.issues?.expected_return_date,
-        item_name: r.items?.name,
-        item_code: r.items?.item_code,
-        style_name: r.style_no || r.items?.style_name || '-',
-        purchase_no: r.purchase_no || r.items?.purchase_no || '-',
-        order_number: r.order_number || r.items?.order_number || '-',
-        size: r.items?.size,
-        color: r.items?.color,
-        buyer_name: r.items?.buyer_name,
-        quantity: r.quantity,
-        returned_quantity: r.returned_quantity,
-        damage_quantity: r.damage_quantity,
-        rejected_quantity: r.rejected_quantity,
-        consumed_quantity: r.consumed_quantity || 0,
-        outstanding: r.quantity - (r.returned_quantity || 0) - (r.damage_quantity || 0) - (r.rejected_quantity || 0) - (r.consumed_quantity || 0),
-        unit: r.unit || r.items?.unit || 'pcs',
-      }));
+      // Extract all unique target product IDs across issues
+      const allProdIds = [...new Set((data || []).flatMap(r => extractProdIds(r.issues)))];
+      const targetItemMap = {};
+
+      if (allProdIds.length > 0) {
+        const chunkSize = 500;
+        for (let i = 0; i < allProdIds.length; i += chunkSize) {
+          const chunk = allProdIds.slice(i, i + chunkSize);
+          const { data: targetItems, error: tErr } = await supabase
+            .from('items')
+            .select('id, name, item_code, style_name, purchase_no, order_number, unit, color, size, buyer_name')
+            .in('id', chunk);
+          if (!tErr && targetItems) {
+            targetItems.forEach(it => { targetItemMap[it.id] = it; });
+          }
+        }
+      }
+
+      let result = (data || []).map(r => {
+        const prodIds = extractProdIds(r.issues);
+        const targetProducts = prodIds.map(id => targetItemMap[id]).filter(Boolean);
+        const targetProductsSummary = targetProducts.length > 0
+          ? targetProducts.map(tp => {
+              const parts = [`${tp.name}${tp.item_code ? ` (${tp.item_code})` : ''}`];
+              const details = [
+                tp.buyer_name && `Buyer: ${tp.buyer_name}`,
+                tp.color && tp.color !== 'N/A' && `Color: ${tp.color}`,
+                tp.order_number && `Order: ${tp.order_number}`,
+                tp.style_name && `Style: ${tp.style_name}`,
+              ].filter(Boolean);
+              if (details.length > 0) parts.push(`[${details.join(' | ')}]`);
+              return parts.join(' ');
+            }).join(';\n')
+          : '-';
+
+        return {
+          issue_id: r.issues?.issue_id,
+          issue_type: r.issues?.issue_type,
+          recipient_name: r.issues?.recipient_name,
+          issue_date: r.issues?.issue_date,
+          status: r.issues?.status,
+          expected_return_date: r.issues?.expected_return_date,
+          item_name: r.items?.name,
+          item_code: r.items?.item_code,
+          style_name: r.style_no || r.items?.style_name || '-',
+          purchase_no: r.purchase_no || r.items?.purchase_no || '-',
+          order_number: r.order_number || r.items?.order_number || '-',
+          size: r.items?.size,
+          color: r.items?.color,
+          buyer_name: r.items?.buyer_name,
+          quantity: r.quantity,
+          returned_quantity: r.returned_quantity,
+          damage_quantity: r.damage_quantity,
+          rejected_quantity: r.rejected_quantity,
+          consumed_quantity: r.consumed_quantity || 0,
+          outstanding: r.quantity - (r.returned_quantity || 0) - (r.damage_quantity || 0) - (r.rejected_quantity || 0) - (r.consumed_quantity || 0),
+          unit: r.unit || r.items?.unit || 'pcs',
+          target_products: targetProducts,
+          target_products_summary: targetProductsSummary,
+        };
+      });
 
       if (filters.issueType) result = result.filter(r => r.issue_type === filters.issueType);
       if (filters.status) result = result.filter(r => r.status === filters.status);
       if (filters.dateFrom) result = result.filter(r => r.issue_date >= filters.dateFrom);
       if (filters.dateTo) result = result.filter(r => r.issue_date <= filters.dateTo + 'T23:59:59.999Z');
       if (filters.recipientName) result = result.filter(r => r.recipient_name?.toLowerCase().includes(filters.recipientName.toLowerCase()));
+      if (filters.buyerName) {
+        const b = filters.buyerName.toLowerCase();
+        result = result.filter(r => 
+          r.buyer_name?.toLowerCase() === b ||
+          (r.target_products && r.target_products.some(tp => tp.buyer_name?.toLowerCase() === b))
+        );
+      }
+      if (filters.styleName) {
+        const s = filters.styleName.toLowerCase();
+        result = result.filter(r => 
+          r.style_name?.toLowerCase() === s ||
+          (r.target_products && r.target_products.some(tp => tp.style_name?.toLowerCase() === s))
+        );
+      }
+      if (filters.orderNumber) {
+        const o = filters.orderNumber.toLowerCase();
+        result = result.filter(r => 
+          r.order_number?.toLowerCase() === o ||
+          (r.target_products && r.target_products.some(tp => tp.order_number?.toLowerCase() === o))
+        );
+      }
+      if (filters.purchaseNo) {
+        const p = filters.purchaseNo.toLowerCase();
+        result = result.filter(r => 
+          r.purchase_no?.toLowerCase() === p ||
+          (r.target_products && r.target_products.some(tp => tp.purchase_no?.toLowerCase() === p))
+        );
+      }
+      if (filters.search) {
+        const q = filters.search.toLowerCase();
+        result = result.filter(r => 
+          r.issue_id?.toLowerCase().includes(q) ||
+          r.recipient_name?.toLowerCase().includes(q) ||
+          r.item_name?.toLowerCase().includes(q) ||
+          r.item_code?.toLowerCase().includes(q) ||
+          r.target_products_summary?.toLowerCase().includes(q) ||
+          (r.target_products && r.target_products.some(tp => 
+            tp.name?.toLowerCase().includes(q) || 
+            tp.item_code?.toLowerCase().includes(q) || 
+            tp.style_name?.toLowerCase().includes(q) ||
+            tp.order_number?.toLowerCase().includes(q) ||
+            tp.buyer_name?.toLowerCase().includes(q) ||
+            tp.color?.toLowerCase().includes(q) ||
+            tp.purchase_no?.toLowerCase().includes(q)
+          )) ||
+          r.style_name?.toLowerCase().includes(q) ||
+          r.order_number?.toLowerCase().includes(q) ||
+          r.purchase_no?.toLowerCase().includes(q) ||
+          r.buyer_name?.toLowerCase().includes(q) ||
+          r.status?.toLowerCase().includes(q)
+        );
+      }
+      result.sort((a, b) => new Date(b.issue_date || 0) - new Date(a.issue_date || 0));
       return result;
     }
 
@@ -527,8 +632,9 @@ const IssuesRepo = {
     if (filters.recipientName) { where.push('iss.recipient_name LIKE ?'); params.push(`%${filters.recipientName}%`); }
     const w = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
 
-    return dbPrepare(`
+    const rows = dbPrepare(`
       SELECT ii.*, iss.issue_id, iss.issue_type, iss.recipient_name, iss.issue_date, iss.status, iss.expected_return_date,
+        iss.remarks as issue_remarks, iss.produced_item_id, iss.produced_item_ids,
         it.name as item_name, it.item_code, it.size, it.color, it.buyer_name,
         COALESCE(NULLIF(ii.style_no, ''), it.style_name) as style_name,
         COALESCE(NULLIF(ii.purchase_no, ''), it.purchase_no) as purchase_no,
@@ -541,17 +647,116 @@ const IssuesRepo = {
       ${w}
       ORDER BY iss.issue_date DESC
     `).all(...params);
+
+    const allProdIds = [...new Set((rows || []).flatMap(r => extractProdIds({
+      remarks: r.issue_remarks,
+      produced_item_id: r.produced_item_id,
+      produced_item_ids: r.produced_item_ids,
+    })))];
+
+    const targetItemMap = {};
+    if (allProdIds.length > 0) {
+      const placeholders = allProdIds.map(() => '?').join(',');
+      const targetItems = dbPrepare(`
+        SELECT id, name, item_code, style_name, purchase_no, order_number, unit, color, size, buyer_name
+        FROM items WHERE id IN (${placeholders})
+      `).all(...allProdIds);
+      (targetItems || []).forEach(it => { targetItemMap[it.id] = it; });
+    }
+
+    let result = (rows || []).map(r => {
+      const prodIds = extractProdIds({
+        remarks: r.issue_remarks,
+        produced_item_id: r.produced_item_id,
+        produced_item_ids: r.produced_item_ids,
+      });
+      const targetProducts = prodIds.map(id => targetItemMap[id]).filter(Boolean);
+      const targetProductsSummary = targetProducts.length > 0
+        ? targetProducts.map(tp => {
+            const parts = [`${tp.name}${tp.item_code ? ` (${tp.item_code})` : ''}`];
+            const details = [
+              tp.buyer_name && `Buyer: ${tp.buyer_name}`,
+              tp.color && tp.color !== 'N/A' && `Color: ${tp.color}`,
+              tp.order_number && `Order: ${tp.order_number}`,
+              tp.style_name && `Style: ${tp.style_name}`,
+            ].filter(Boolean);
+            if (details.length > 0) parts.push(`[${details.join(' | ')}]`);
+            return parts.join(' ');
+          }).join(';\n')
+        : '-';
+
+      return {
+        ...r,
+        target_products: targetProducts,
+        target_products_summary: targetProductsSummary,
+      };
+    });
+
+    if (filters.buyerName) {
+      const b = filters.buyerName.toLowerCase();
+      result = result.filter(r => 
+        r.buyer_name?.toLowerCase() === b ||
+        (r.target_products && r.target_products.some(tp => tp.buyer_name?.toLowerCase() === b))
+      );
+    }
+    if (filters.styleName) {
+      const s = filters.styleName.toLowerCase();
+      result = result.filter(r => 
+        r.style_name?.toLowerCase() === s ||
+        (r.target_products && r.target_products.some(tp => tp.style_name?.toLowerCase() === s))
+      );
+    }
+    if (filters.orderNumber) {
+      const o = filters.orderNumber.toLowerCase();
+      result = result.filter(r => 
+        r.order_number?.toLowerCase() === o ||
+        (r.target_products && r.target_products.some(tp => tp.order_number?.toLowerCase() === o))
+      );
+    }
+    if (filters.purchaseNo) {
+      const p = filters.purchaseNo.toLowerCase();
+      result = result.filter(r => 
+        r.purchase_no?.toLowerCase() === p ||
+        (r.target_products && r.target_products.some(tp => tp.purchase_no?.toLowerCase() === p))
+      );
+    }
+    if (filters.search) {
+      const q = filters.search.toLowerCase();
+      result = result.filter(r => 
+        r.issue_id?.toLowerCase().includes(q) ||
+        r.recipient_name?.toLowerCase().includes(q) ||
+        r.item_name?.toLowerCase().includes(q) ||
+        r.item_code?.toLowerCase().includes(q) ||
+        r.target_products_summary?.toLowerCase().includes(q) ||
+        (r.target_products && r.target_products.some(tp => 
+          tp.name?.toLowerCase().includes(q) || 
+          tp.item_code?.toLowerCase().includes(q) || 
+          tp.style_name?.toLowerCase().includes(q) ||
+          tp.order_number?.toLowerCase().includes(q) ||
+          tp.buyer_name?.toLowerCase().includes(q) ||
+          tp.color?.toLowerCase().includes(q) ||
+          tp.purchase_no?.toLowerCase().includes(q)
+        )) ||
+        r.style_name?.toLowerCase().includes(q) ||
+        r.order_number?.toLowerCase().includes(q) ||
+        r.purchase_no?.toLowerCase().includes(q) ||
+        r.buyer_name?.toLowerCase().includes(q) ||
+        r.status?.toLowerCase().includes(q)
+      );
+    }
+
+    return result;
   },
 
   async getReturnReport(filters = {}) {
     if (isCloudEnabled()) {
       const supabase = getSupabase();
-      const { data, error } = await supabase.from('return_items').select(`
+      let query = supabase.from('return_items').select(`
         *,
         returns (return_date, remarks, approval_status, issues (issue_id, recipient_name, issue_type), users!returns_created_by_fkey (full_name)),
         issue_items (item_id, items (name, item_code))
-      `);
-      if (error) throw error;
+      `).order('id', { ascending: false });
+      const data = await fetchAllSupabase(query);
       let result = data.map(r => ({
         issue_id: r.returns?.issues?.issue_id,
         recipient_name: r.returns?.issues?.recipient_name,
@@ -568,6 +773,8 @@ const IssuesRepo = {
       }));
       if (filters.dateFrom) result = result.filter(r => r.return_date >= filters.dateFrom);
       if (filters.dateTo) result = result.filter(r => r.return_date <= filters.dateTo + 'T23:59:59.999Z');
+      if (filters.issueType) result = result.filter(r => r.issue_type === filters.issueType);
+      if (filters.recipientName) result = result.filter(r => r.recipient_name?.toLowerCase().includes(filters.recipientName.toLowerCase()));
       return result;
     }
 
@@ -575,6 +782,7 @@ const IssuesRepo = {
     if (filters.dateFrom) { where.push('ret.return_date >= ?'); params.push(filters.dateFrom); }
     if (filters.dateTo) { where.push('ret.return_date <= ?'); params.push(filters.dateTo + 'T23:59:59.999Z'); }
     if (filters.issueType) { where.push('iss.issue_type = ?'); params.push(filters.issueType); }
+    if (filters.recipientName) { where.push('iss.recipient_name LIKE ?'); params.push(`%${filters.recipientName}%`); }
     const w = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
 
     return dbPrepare(`
@@ -596,12 +804,12 @@ const IssuesRepo = {
   async getEmployeeOutstandingReport(filters = {}) {
     if (isCloudEnabled()) {
       const supabase = getSupabase();
-      const { data, error } = await supabase.from('issue_items').select(`
+      let query = supabase.from('issue_items').select(`
         *, issues (issue_id, issue_type, recipient_name, issue_date, status, expected_return_date),
         items (name, item_code)
-      `);
-      if (error) throw error;
-      return data
+      `).order('id', { ascending: false });
+      const data = await fetchAllSupabase(query);
+      let result = data
         .filter(r => r.issues?.issue_type === 'EMPLOYEE')
         .map(r => ({
           ...r,
@@ -614,7 +822,18 @@ const IssuesRepo = {
           outstanding: r.quantity - (r.returned_quantity || 0) - (r.damage_quantity || 0) - (r.rejected_quantity || 0) - (r.consumed_quantity || 0),
         }))
         .filter(r => r.outstanding > 0);
+      if (filters.recipientName) result = result.filter(r => r.recipient_name?.toLowerCase().includes(filters.recipientName.toLowerCase()));
+      if (filters.dateFrom) result = result.filter(r => r.issue_date >= filters.dateFrom);
+      if (filters.dateTo) result = result.filter(r => r.issue_date <= filters.dateTo + 'T23:59:59.999Z');
+      return result;
     }
+
+    let where = ["iss.issue_type = 'EMPLOYEE'", "(ii.quantity - COALESCE(ii.returned_quantity,0) - COALESCE(ii.damage_quantity,0) - COALESCE(ii.rejected_quantity,0) - COALESCE(ii.consumed_quantity,0)) > 0"];
+    let params = [];
+    if (filters.recipientName) { where.push('iss.recipient_name LIKE ?'); params.push(`%${filters.recipientName}%`); }
+    if (filters.dateFrom) { where.push('iss.issue_date >= ?'); params.push(filters.dateFrom); }
+    if (filters.dateTo) { where.push('iss.issue_date <= ?'); params.push(filters.dateTo + 'T23:59:59.999Z'); }
+    const w = `WHERE ${where.join(' AND ')}`;
 
     return dbPrepare(`
       SELECT ii.*, iss.issue_id, iss.recipient_name, iss.issue_date, iss.expected_return_date,
@@ -623,56 +842,60 @@ const IssuesRepo = {
       FROM issue_items ii
       JOIN issues iss ON ii.issue_id = iss.id
       JOIN items it ON ii.item_id = it.id
-      WHERE iss.issue_type = 'EMPLOYEE'
-      AND (ii.quantity - COALESCE(ii.returned_quantity,0) - COALESCE(ii.damage_quantity,0) - COALESCE(ii.rejected_quantity,0) - COALESCE(ii.consumed_quantity,0)) > 0
+      ${w}
       ORDER BY iss.issue_date DESC
-    `).all();
+    `).all(...params);
   },
 
   async getFactoryProductionReport(filters = {}) {
     if (isCloudEnabled()) {
       const supabase = getSupabase();
-      const { data, error } = await supabase.from('factory_production').select(`
+      let query = supabase.from('factory_production').select(`
         *, issues (issue_id, recipient_name)
       `).order('created_at', { ascending: false });
-      if (error) throw error;
+      const data = await fetchAllSupabase(query);
 
       // Extract distinct target product item IDs
       const productItemIds = [...new Set((data || []).map(r => r.product_item_id).filter(Boolean))];
-      const itemsMap = {};
-
+      const productMap = {};
       if (productItemIds.length > 0) {
         const chunkSize = 500;
         for (let i = 0; i < productItemIds.length; i += chunkSize) {
           const chunk = productItemIds.slice(i, i + chunkSize);
-          const { data: itemsChunk, error: iErr } = await supabase
+          const { data: pItems, error: pErr } = await supabase
             .from('items')
-            .select('id, item_code, name, style_name, purchase_no, order_number, size, color, buyer_name, unit')
+            .select('id, name, item_code, style_name, purchase_no, order_number, unit, color, size, buyer_name')
             .in('id', chunk);
-          if (iErr) throw iErr;
-          (itemsChunk || []).forEach(it => {
-            itemsMap[it.id] = it;
-          });
+          if (!pErr && pItems) {
+            pItems.forEach(it => { productMap[it.id] = it; });
+          }
         }
       }
 
-      return data.map(r => {
-        const prodItem = itemsMap[r.product_item_id];
+      let result = (data || []).map(r => {
+        const pItem = productMap[r.product_item_id] || {};
         return {
-          ...r,
-          issue_id: r.issues?.issue_id,
-          recipient_name: r.issues?.recipient_name,
-          product_code: prodItem?.item_code || '',
-          product_name: r.product_name || prodItem?.name || '',
-          style_name: prodItem?.style_name || '',
-          purchase_no: prodItem?.purchase_no || '',
-          order_number: prodItem?.order_number || '',
-          size: prodItem?.size || '',
-          color: prodItem?.color || '',
-          buyer_name: prodItem?.buyer_name || '',
-          unit: prodItem?.unit || 'pcs'
+          id: r.id,
+          issue_id: r.issues?.issue_id || '-',
+          recipient_name: r.issues?.recipient_name || '-',
+          produced_at: r.produced_at || r.created_at,
+          quantity: r.quantity,
+          remarks: r.remarks,
+          product_name: pItem.name || 'Unknown Product',
+          product_code: pItem.item_code || '-',
+          style_name: pItem.style_name || '-',
+          purchase_no: pItem.purchase_no || '-',
+          order_number: pItem.order_number || '-',
+          size: pItem.size || '-',
+          color: pItem.color || '-',
+          buyer_name: pItem.buyer_name || '-',
+          unit: pItem.unit || 'pcs'
         };
       });
+
+      if (filters.dateFrom) result = result.filter(r => r.produced_at >= filters.dateFrom);
+      if (filters.dateTo) result = result.filter(r => r.produced_at <= filters.dateTo + 'T23:59:59.999Z');
+      return result;
     }
 
     return dbPrepare(`
@@ -696,11 +919,11 @@ const IssuesRepo = {
   async getIssueReturnSummary(filters = {}) {
     if (isCloudEnabled()) {
       const supabase = getSupabase();
-      const { data, error } = await supabase.from('issues').select(`
+      let query = supabase.from('issues').select(`
         issue_id, issue_type, recipient_name, issue_date, status,
         issue_items (quantity, returned_quantity, damage_quantity, rejected_quantity, consumed_quantity)
-      `);
-      if (error) throw error;
+      `).order('id', { ascending: false });
+      const data = await fetchAllSupabase(query);
       let result = data.map(r => {
         const items = r.issue_items || [];
         const totalIssued = items.reduce((s, i) => s + i.quantity, 0);
@@ -719,6 +942,8 @@ const IssuesRepo = {
       if (filters.dateFrom) result = result.filter(r => r.issue_date >= filters.dateFrom);
       if (filters.dateTo) result = result.filter(r => r.issue_date <= filters.dateTo + 'T23:59:59.999Z');
       if (filters.issueType) result = result.filter(r => r.issue_type === filters.issueType);
+      if (filters.status) result = result.filter(r => r.status === filters.status);
+      if (filters.recipientName) result = result.filter(r => r.recipient_name?.toLowerCase().includes(filters.recipientName.toLowerCase()));
       return result;
     }
 
@@ -726,6 +951,8 @@ const IssuesRepo = {
     if (filters.dateFrom) { where.push('iss.issue_date >= ?'); params.push(filters.dateFrom); }
     if (filters.dateTo) { where.push('iss.issue_date <= ?'); params.push(filters.dateTo + 'T23:59:59.999Z'); }
     if (filters.issueType) { where.push('iss.issue_type = ?'); params.push(filters.issueType); }
+    if (filters.status) { where.push('iss.status = ?'); params.push(filters.status); }
+    if (filters.recipientName) { where.push('iss.recipient_name LIKE ?'); params.push(`%${filters.recipientName}%`); }
     const w = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
 
     return dbPrepare(`

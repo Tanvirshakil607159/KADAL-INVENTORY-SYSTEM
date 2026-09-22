@@ -65,10 +65,12 @@ const IssueService = {
               itemCode: prod.item_code,
               unit: prod.unit,
               styleName: prod.style_name,
-              orderQuantity: prod.order_quantity,
-              orderNumber: prod.order_number,
+              buyerName: prod.buyer_name,
               color: prod.color,
               size: prod.size,
+              orderNumber: prod.order_number,
+              purchaseNo: prod.purchase_no,
+              orderQuantity: prod.order_quantity,
             });
           }
         }

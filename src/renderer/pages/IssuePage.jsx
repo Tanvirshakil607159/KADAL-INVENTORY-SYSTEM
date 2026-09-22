@@ -1,7 +1,7 @@
 import SearchableSelect from '../components/ui/SearchableSelect';
 import React, { useState, useEffect, useCallback } from 'react';
 import useStore from '../store/useStore';
-import { Send, RotateCcw, BarChart3, Plus, Trash2, FileSpreadsheet, FileText, Search, Package, Eye, Clock } from 'lucide-react';
+import { Send, RotateCcw, BarChart3, Plus, Trash2, FileSpreadsheet, FileText, Search, Package, Eye, Clock, Filter, X } from 'lucide-react';
 
 const TABS = [
   { id: 'entry', label: 'Issue Entry', icon: Send },
@@ -258,16 +258,35 @@ function IssueEntryTab({ addToast, user }) {
               {producedProducts.length > 0 ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {producedProducts.map((pProduct, pIdx) => (
-                    <div key={pProduct.id || pIdx} style={{ padding: '8px 12px', border: '1px solid var(--accent)', background: 'rgba(var(--accent-rgb), 0.05)', borderRadius: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div>
-                        <div style={{ fontWeight: 600, color: 'var(--accent)', fontSize: 13 }}>{pProduct.name}</div>
-                        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Code: {pProduct.item_code} | Current Stock: {pProduct.current_stock || pProduct.currentStock || 0} {pProduct.unit} {pProduct.order_quantity != null && pProduct.order_quantity > 0 ? `| Order Qty: ${pProduct.order_quantity} ` : ''}{pProduct.style_name ? `| Style: ${pProduct.style_name}` : ''}</div>
+                    <div key={pProduct.id || pIdx} style={{ padding: '10px 14px', border: '1px solid var(--accent)', background: 'rgba(var(--accent-rgb), 0.05)', borderRadius: 6 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+                        <div>
+                          <div style={{ fontWeight: 600, color: 'var(--accent)', fontSize: 13 }}>{pProduct.name}</div>
+                          <span className="text-mono text-muted" style={{ fontSize: 11 }}>{pProduct.item_code}</span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ fontSize: 11 }} className="badge badge-info">Target #{pIdx + 1}</span>
+                          <button type="button" className="btn btn-ghost btn-icon btn-sm" onClick={() => removeProducedProduct(pProduct.id)} title="Remove Product">
+                            <Trash2 size={13} color="var(--danger)" />
+                          </button>
+                        </div>
                       </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span style={{ fontSize: 11 }} className="badge badge-info">Target #{pIdx + 1}</span>
-                        <button type="button" className="btn btn-ghost btn-icon btn-sm" onClick={() => removeProducedProduct(pProduct.id)} title="Remove Product">
-                          <Trash2 size={13} color="var(--danger)" />
-                        </button>
+                      <div style={{ 
+                        display: 'grid', 
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', 
+                        gap: '6px 12px', 
+                        fontSize: 11, 
+                        background: 'var(--bg-card)', 
+                        padding: '6px 10px', 
+                        borderRadius: 4, 
+                        border: '1px solid var(--border)' 
+                      }}>
+                        <div><span className="text-muted">Buyer:</span> <strong>{pProduct.buyer_name || pProduct.buyerName || '-'}</strong></div>
+                        <div><span className="text-muted">Color:</span> <strong>{pProduct.color || '-'}</strong></div>
+                        <div><span className="text-muted">Order No:</span> <strong>{pProduct.order_number || pProduct.orderNumber || '-'}</strong></div>
+                        <div><span className="text-muted">Style:</span> <strong>{pProduct.style_name || pProduct.styleName || '-'}</strong></div>
+                        {pProduct.order_quantity != null && <div><span className="text-muted">Order Qty:</span> <strong>{pProduct.order_quantity} {pProduct.unit}</strong></div>}
+                        <div><span className="text-muted">Stock:</span> <strong>{pProduct.current_stock ?? pProduct.currentStock ?? 0} {pProduct.unit}</strong></div>
                       </div>
                     </div>
                   ))}
@@ -420,17 +439,44 @@ function IssueEntryTab({ addToast, user }) {
               <div><strong>Expected Return:</strong> {selectedDetailIssue.expected_return_date ? new Date(selectedDetailIssue.expected_return_date).toLocaleDateString('en-GB') : 'N/A'}</div>
               <div><strong>Remarks:</strong> {selectedDetailIssue.remarks || 'None'}</div>
               {(selectedDetailIssue.produced_items?.length > 0 || selectedDetailIssue.produced_item || selectedDetailIssue.produced_item_id) && (
-                <div style={{ gridColumn: 'span 3', borderTop: '1px solid var(--border)', paddingTop: 10, marginTop: 4 }}>
-                  <strong>Target Finished Product(s) to Produce:</strong>
-                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
+                <div style={{ gridColumn: 'span 3', borderTop: '1px solid var(--border)', paddingTop: 12, marginTop: 6 }}>
+                  <strong style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8, fontSize: 13 }}>
+                    <Package size={15} color="var(--accent)" /> Target Finished Product(s) to Produce:
+                  </strong>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                     {(selectedDetailIssue.produced_items && selectedDetailIssue.produced_items.length > 0
                       ? selectedDetailIssue.produced_items
                       : [selectedDetailIssue.produced_item || allItems.find(it => it.id === selectedDetailIssue.produced_item_id)]
                     ).filter(Boolean).map((pItem, pIdx) => (
-                      <div key={pItem.id || pIdx} className="badge badge-info" style={{ padding: '6px 10px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <span style={{ fontWeight: 600 }}>{pItem.name}</span>
-                        {pItem.item_code && <span style={{ opacity: 0.85 }}>({pItem.item_code})</span>}
-                        {pItem.style_name && <span style={{ opacity: 0.85 }}>| Style: {pItem.style_name}</span>}
+                      <div key={pItem.id || pIdx} style={{ padding: '10px 14px', background: 'var(--bg-card)', borderRadius: 6, border: '1px solid var(--border)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+                          <div>
+                            <strong style={{ fontSize: 13 }}>{pItem.name}</strong>
+                            <span className="text-mono text-muted" style={{ fontSize: 11, marginLeft: 6 }}>({pItem.item_code})</span>
+                          </div>
+                          {pItem.order_quantity != null && (
+                            <span className="badge badge-info" style={{ fontSize: 11 }}>
+                              Order Qty: {pItem.order_quantity} {pItem.unit || ''}
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ 
+                          display: 'grid', 
+                          gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', 
+                          gap: '6px 12px', 
+                          fontSize: 11, 
+                          background: 'var(--bg-muted)', 
+                          padding: '8px 12px', 
+                          borderRadius: 4,
+                          border: '1px solid var(--border)' 
+                        }}>
+                          <div><span className="text-muted">Buyer:</span> <strong style={{ color: 'var(--text)' }}>{pItem.buyer_name || pItem.buyerName || '-'}</strong></div>
+                          <div><span className="text-muted">Color:</span> <strong style={{ color: 'var(--text)' }}>{pItem.color || '-'}</strong></div>
+                          <div><span className="text-muted">Order No:</span> <strong style={{ color: 'var(--text)' }}>{pItem.order_number || pItem.orderNumber || '-'}</strong></div>
+                          <div><span className="text-muted">Style:</span> <strong style={{ color: 'var(--text)' }}>{pItem.style_name || pItem.styleName || '-'}</strong></div>
+                          {pItem.purchase_no && <div><span className="text-muted">Purchase No:</span> <strong style={{ color: 'var(--text)' }}>{pItem.purchase_no}</strong></div>}
+                          {pItem.size && pItem.size !== 'N/A' && <div><span className="text-muted">Size:</span> <strong style={{ color: 'var(--text)' }}>{pItem.size}</strong></div>}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -653,13 +699,88 @@ function ReportsTab({ addToast }) {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [issueType, setIssueType] = useState('');
+  const [status, setStatus] = useState('');
+  const [recipientName, setRecipientName] = useState('');
+  const [buyerName, setBuyerName] = useState('');
+  const [styleName, setStyleName] = useState('');
+  const [orderNumber, setOrderNumber] = useState('');
+  const [purchaseNo, setPurchaseNo] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [recipientsList, setRecipientsList] = useState([]);
+  const [distinctValues, setDistinctValues] = useState({ styles: [], orders: [], purchases: [], buyers: [] });
 
-  useEffect(() => { loadReport(); }, [reportTab, dateFrom, dateTo, issueType]);
+  useEffect(() => {
+    const fetchOptions = async () => {
+      try {
+        const [recRes, dvRes] = await Promise.all([
+          window.kadal.recipients.getAll(),
+          window.kadal.items.getDistinctValues()
+        ]);
+        if (recRes?.success) setRecipientsList(recRes.data || []);
+        else if (Array.isArray(recRes)) setRecipientsList(recRes);
+        if (dvRes?.success) setDistinctValues(dvRes.data || { styles: [], orders: [], purchases: [], buyers: [] });
+      } catch (e) {}
+    };
+    fetchOptions();
+  }, []);
+
+  // Collect filter options combining distinctValues and current dataset
+  const buyerOptions = React.useMemo(() => {
+    const set = new Set(distinctValues?.buyers || []);
+    data.forEach(r => {
+      if (r.buyer_name) set.add(r.buyer_name);
+      if (r.target_products) r.target_products.forEach(tp => { if (tp.buyer_name) set.add(tp.buyer_name); });
+    });
+    return Array.from(set).filter(Boolean).sort();
+  }, [distinctValues?.buyers, data]);
+
+  const styleOptions = React.useMemo(() => {
+    const set = new Set(distinctValues?.styles || []);
+    data.forEach(r => {
+      if (r.style_name && r.style_name !== '-') set.add(r.style_name);
+      if (r.target_products) r.target_products.forEach(tp => { if (tp.style_name && tp.style_name !== '-') set.add(tp.style_name); });
+    });
+    return Array.from(set).filter(Boolean).sort();
+  }, [distinctValues?.styles, data]);
+
+  const orderOptions = React.useMemo(() => {
+    const set = new Set(distinctValues?.orders || []);
+    data.forEach(r => {
+      if (r.order_number && r.order_number !== '-') set.add(r.order_number);
+      if (r.target_products) r.target_products.forEach(tp => { if (tp.order_number && tp.order_number !== '-') set.add(tp.order_number); });
+    });
+    return Array.from(set).filter(Boolean).sort();
+  }, [distinctValues?.orders, data]);
+
+  const purchaseOptions = React.useMemo(() => {
+    const set = new Set(distinctValues?.purchases || []);
+    data.forEach(r => {
+      if (r.purchase_no && r.purchase_no !== '-') set.add(r.purchase_no);
+      if (r.target_products) r.target_products.forEach(tp => { if (tp.purchase_no && tp.purchase_no !== '-') set.add(tp.purchase_no); });
+    });
+    return Array.from(set).filter(Boolean).sort();
+  }, [distinctValues?.purchases, data]);
+
+  const recipientOptions = React.useMemo(() => {
+    const set = new Set((recipientsList || []).map(r => r.name || r).filter(Boolean));
+    data.forEach(r => { if (r.recipient_name) set.add(r.recipient_name); });
+    return Array.from(set).sort();
+  }, [recipientsList, data]);
 
   const loadReport = async () => {
     setLoading(true);
     try {
-      const filters = { dateFrom, dateTo, issueType: issueType || undefined };
+      const filters = {
+        dateFrom: dateFrom || undefined,
+        dateTo: dateTo || undefined,
+        issueType: issueType || undefined,
+        status: status || undefined,
+        recipientName: recipientName || undefined,
+        buyerName: buyerName || undefined,
+        styleName: styleName || undefined,
+        orderNumber: orderNumber || undefined,
+        purchaseNo: purchaseNo || undefined,
+      };
       let res;
       switch (reportTab) {
         case 'issueReport': res = await window.kadal.reports.issueReport(filters); break;
@@ -672,40 +793,415 @@ function ReportsTab({ addToast }) {
     setLoading(false);
   };
 
-  const exportExcel = async () => { const r = await window.kadal.reports.exportExcel(reportTab, data); if (r?.success) addToast('success', 'Excel exported'); else addToast('error', 'Export failed'); };
-  const exportPdf = async () => { const r = await window.kadal.reports.exportPdf(reportTab, data); if (r?.success) addToast('success', 'PDF exported'); else addToast('error', 'Export failed'); };
+  useEffect(() => { 
+    loadReport(); 
+  }, [reportTab, dateFrom, dateTo, issueType, status, recipientName, buyerName, styleName, orderNumber, purchaseNo]);
+
+  const filteredData = React.useMemo(() => {
+    return data.filter(r => {
+      // 1. Search Query
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase().trim();
+        const matchesSearch = 
+          r.issue_id?.toLowerCase().includes(q) ||
+          r.recipient_name?.toLowerCase().includes(q) ||
+          r.item_name?.toLowerCase().includes(q) ||
+          r.item_code?.toLowerCase().includes(q) ||
+          r.created_by_name?.toLowerCase().includes(q) ||
+          r.notes?.toLowerCase().includes(q) ||
+          r.target_products_summary?.toLowerCase().includes(q) ||
+          (r.target_products && r.target_products.some(tp => 
+            tp.name?.toLowerCase().includes(q) || 
+            tp.item_code?.toLowerCase().includes(q) || 
+            tp.style_name?.toLowerCase().includes(q) ||
+            tp.order_number?.toLowerCase().includes(q) ||
+            tp.buyer_name?.toLowerCase().includes(q) ||
+            tp.color?.toLowerCase().includes(q) ||
+            tp.purchase_no?.toLowerCase().includes(q)
+          )) ||
+          r.style_name?.toLowerCase().includes(q) ||
+          r.order_number?.toLowerCase().includes(q) ||
+          r.purchase_no?.toLowerCase().includes(q) ||
+          r.buyer_name?.toLowerCase().includes(q) ||
+          r.color?.toLowerCase().includes(q) ||
+          r.size?.toLowerCase().includes(q) ||
+          r.status?.toLowerCase().includes(q);
+        if (!matchesSearch) return false;
+      }
+
+      // 2. Issue Type
+      if (issueType && r.issue_type !== issueType) return false;
+
+      // 3. Status
+      if (status && r.status !== status) return false;
+
+      // 4. Recipient Name
+      if (recipientName && !r.recipient_name?.toLowerCase().includes(recipientName.toLowerCase())) return false;
+
+      // 5. Buyer Name
+      if (buyerName) {
+        const b = buyerName.toLowerCase();
+        const matchesBuyer = r.buyer_name?.toLowerCase() === b ||
+          (r.target_products && r.target_products.some(tp => tp.buyer_name?.toLowerCase() === b));
+        if (!matchesBuyer) return false;
+      }
+
+      // 6. Style Name
+      if (styleName) {
+        const s = styleName.toLowerCase();
+        const matchesStyle = r.style_name?.toLowerCase() === s ||
+          (r.target_products && r.target_products.some(tp => tp.style_name?.toLowerCase() === s));
+        if (!matchesStyle) return false;
+      }
+
+      // 7. Order Number
+      if (orderNumber) {
+        const o = orderNumber.toLowerCase();
+        const matchesOrder = r.order_number?.toLowerCase() === o ||
+          (r.target_products && r.target_products.some(tp => tp.order_number?.toLowerCase() === o));
+        if (!matchesOrder) return false;
+      }
+
+      // 8. Purchase No
+      if (purchaseNo) {
+        const p = purchaseNo.toLowerCase();
+        const matchesPurchase = r.purchase_no?.toLowerCase() === p ||
+          (r.target_products && r.target_products.some(tp => tp.purchase_no?.toLowerCase() === p));
+        if (!matchesPurchase) return false;
+      }
+
+      return true;
+    });
+  }, [data, searchQuery, issueType, status, recipientName, buyerName, styleName, orderNumber, purchaseNo]);
+
+  const hasActiveFilters = Boolean(
+    searchQuery || issueType || status || recipientName || buyerName || styleName || orderNumber || purchaseNo || dateFrom || dateTo
+  );
+
+  const resetFilters = () => {
+    setSearchQuery('');
+    setIssueType('');
+    setStatus('');
+    setRecipientName('');
+    setBuyerName('');
+    setStyleName('');
+    setOrderNumber('');
+    setPurchaseNo('');
+    setDateFrom('');
+    setDateTo('');
+  };
+
+  const exportExcel = async () => { const r = await window.kadal.reports.exportExcel(reportTab, filteredData); if (r?.success) addToast('success', 'Excel exported'); else addToast('error', 'Export failed'); };
+  const exportPdf = async () => { const r = await window.kadal.reports.exportPdf(reportTab, filteredData); if (r?.success) addToast('success', 'PDF exported'); else addToast('error', 'Export failed'); };
 
   const renderTable = () => {
     if (loading) return <div className="loading"><div className="spinner"></div></div>;
-    if (data.length === 0) return <div className="empty-state"><h3>No data</h3></div>;
+    if (filteredData.length === 0) return <div className="empty-state"><h3>No data</h3></div>;
     switch (reportTab) {
-      case 'issueReport': return (<table className="data-table"><thead><tr><th>Issue ID</th><th>Date</th><th>Type</th><th>Recipient</th><th>Item / Code</th><th>Style / Purchase / Order</th><th>Size / Color</th><th>Buyer</th><th style={{textAlign:'right'}}>Issued</th><th style={{textAlign:'right'}}>Returned</th><th style={{textAlign:'right'}}>Damaged</th><th style={{textAlign:'right'}}>Rejected</th><th style={{textAlign:'right'}}>Outstanding</th><th>Unit</th><th>Status</th></tr></thead>
-        <tbody>{data.map((r,i) => <tr key={i}><td className="text-mono" style={{fontSize:12,color:'var(--accent)'}}>{r.issue_id}</td><td style={{fontSize:12}}>{r.issue_date?new Date(r.issue_date).toLocaleDateString('en-GB'):''}</td><td><span className="badge badge-info">{r.issue_type}</span></td><td>{r.recipient_name}</td><td><div style={{fontWeight:600}}>{r.item_name}</div><div className="text-mono text-muted" style={{fontSize:10}}>{r.item_code}</div></td><td><div style={{fontSize:12}}>{r.style_name || '-'}</div><div className="text-muted" style={{fontSize:10}}>{r.purchase_no || '-'} / {r.order_number || '-'}</div></td><td>{[r.size, r.color].filter(Boolean).join(' / ') || '-'}</td><td>{r.buyer_name || '-'}</td><td className="text-right text-mono">{r.quantity}</td><td className="text-right text-mono text-success">{r.returned_quantity||0}</td><td className="text-right text-mono text-danger">{r.damage_quantity||0}</td><td className="text-right text-mono text-warning">{r.rejected_quantity||0}</td><td className="text-right text-mono fw-bold">{r.outstanding}</td><td>{r.unit || '-'}</td><td><span className={`badge badge-${r.status==='RETURNED'?'success':r.status==='PARTIAL'?'warning':'danger'}`}>{r.status}</span></td></tr>)}</tbody></table>);
-      case 'returnReport': return (<table className="data-table"><thead><tr><th>Issue ID</th><th>Return Date</th><th>Recipient</th><th>Item</th><th>Code</th><th style={{textAlign:'right'}}>Good</th><th style={{textAlign:'right'}}>Damaged</th><th style={{textAlign:'right'}}>Rejected</th><th>By</th></tr></thead>
-        <tbody>{data.map((r,i) => <tr key={i}><td className="text-mono" style={{fontSize:12}}>{r.issue_id}</td><td style={{fontSize:12}}>{r.return_date?new Date(r.return_date).toLocaleDateString('en-GB'):''}</td><td>{r.recipient_name}</td><td style={{fontWeight:600}}>{r.item_name}</td><td className="text-mono" style={{fontSize:11}}>{r.item_code}</td><td className="text-right text-mono text-success">{r.returned_quantity}</td><td className="text-right text-mono text-danger">{r.damage_quantity}</td><td className="text-right text-mono text-warning">{r.rejected_quantity}</td><td style={{fontSize:12}}>{r.created_by_name||'-'}</td></tr>)}</tbody></table>);
-      case 'employeeOutstanding': return (<table className="data-table"><thead><tr><th>Employee</th><th>Issue ID</th><th>Date</th><th>Item</th><th>Code</th><th style={{textAlign:'right'}}>Issued</th><th style={{textAlign:'right'}}>Outstanding</th><th>Due Date</th></tr></thead>
-        <tbody>{data.map((r,i) => <tr key={i}><td style={{fontWeight:600}}>{r.recipient_name}</td><td className="text-mono" style={{fontSize:12}}>{r.issue_id}</td><td style={{fontSize:12}}>{r.issue_date?new Date(r.issue_date).toLocaleDateString('en-GB'):''}</td><td>{r.item_name}</td><td className="text-mono" style={{fontSize:11}}>{r.item_code}</td><td className="text-right text-mono">{r.quantity}</td><td className="text-right text-mono fw-bold text-danger">{r.outstanding}</td><td style={{fontSize:12}}>{r.expected_return_date?new Date(r.expected_return_date).toLocaleDateString('en-GB'):'-'}</td></tr>)}</tbody></table>);
-      case 'issueReturnSummary': return (<table className="data-table"><thead><tr><th>Issue ID</th><th>Type</th><th>Recipient</th><th>Date</th><th style={{textAlign:'right'}}>Issued</th><th style={{textAlign:'right'}}>Returned</th><th style={{textAlign:'right'}}>Damaged</th><th style={{textAlign:'right'}}>Rejected</th><th style={{textAlign:'right'}}>Outstanding</th><th>Status</th></tr></thead>
-        <tbody>{data.map((r,i) => <tr key={i}><td className="text-mono" style={{fontSize:12,color:'var(--accent)'}}>{r.issue_id}</td><td><span className="badge badge-info">{r.issue_type}</span></td><td>{r.recipient_name}</td><td style={{fontSize:12}}>{r.issue_date?new Date(r.issue_date).toLocaleDateString('en-GB'):''}</td><td className="text-right text-mono">{r.total_issued}</td><td className="text-right text-mono text-success">{r.total_returned}</td><td className="text-right text-mono text-danger">{r.total_damaged}</td><td className="text-right text-mono text-warning">{r.total_rejected||0}</td><td className="text-right text-mono fw-bold">{r.outstanding}</td><td><span className={`badge badge-${r.status==='RETURNED'?'success':r.status==='PARTIAL'?'warning':'danger'}`}>{r.status}</span></td></tr>)}</tbody></table>);
+      case 'issueReport': return (
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Issue ID</th>
+              <th>Date</th>
+              <th>Type</th>
+              <th>Recipient</th>
+              <th>Issued Material / Code</th>
+              <th>Target Finished Item(s)</th>
+              <th>Style / Purchase / Order</th>
+              <th>Size / Color</th>
+              <th>Buyer</th>
+              <th style={{textAlign:'right'}}>Issued</th>
+              <th style={{textAlign:'right'}}>Returned</th>
+              <th style={{textAlign:'right'}}>Damaged</th>
+              <th style={{textAlign:'right'}}>Rejected</th>
+              <th style={{textAlign:'right'}}>Outstanding</th>
+              <th>Unit</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredData.map((r, i) => (
+              <tr key={i}>
+                <td className="text-mono" style={{fontSize:12,color:'var(--accent)'}}>{r.issue_id}</td>
+                <td style={{fontSize:12}}>{r.issue_date?new Date(r.issue_date).toLocaleDateString('en-GB'):''}</td>
+                <td><span className="badge badge-info">{r.issue_type}</span></td>
+                <td>{r.recipient_name}</td>
+                <td>
+                  <div style={{fontWeight:600}}>{r.item_name}</div>
+                  <div className="text-mono text-muted" style={{fontSize:10}}>{r.item_code}</div>
+                </td>
+                <td>
+                  {r.target_products && r.target_products.length > 0 ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {r.target_products.map((tp, idx) => (
+                        <div key={idx} style={{ fontSize: 12, lineHeight: 1.35, padding: '4px 0', borderBottom: idx < r.target_products.length - 1 ? '1px dashed var(--border)' : 'none' }}>
+                          <div>
+                            <span style={{ fontWeight: 600, color: 'var(--text)' }}>{tp.name}</span>
+                            {tp.item_code && <span className="text-mono text-muted" style={{ fontSize: 10, marginLeft: 4 }}>({tp.item_code})</span>}
+                          </div>
+                          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2, display: 'flex', flexWrap: 'wrap', gap: '4px 8px' }}>
+                            {tp.buyer_name && <span><strong>Buyer:</strong> {tp.buyer_name}</span>}
+                            {tp.color && tp.color !== 'N/A' && <span><strong>Color:</strong> {tp.color}</span>}
+                            {tp.order_number && <span><strong>Order:</strong> {tp.order_number}</span>}
+                            {tp.style_name && <span><strong>Style:</strong> {tp.style_name}</span>}
+                            {tp.size && tp.size !== 'N/A' && <span><strong>Size:</strong> {tp.size}</span>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-muted" style={{ fontSize: 12 }}>{r.target_products_summary || '-'}</span>
+                  )}
+                </td>
+                <td>
+                  <div style={{fontSize:12}}>{r.style_name || '-'}</div>
+                  <div className="text-muted" style={{fontSize:10}}>{r.purchase_no || '-'} / {r.order_number || '-'}</div>
+                </td>
+                <td>{[r.size, r.color].filter(Boolean).join(' / ') || '-'}</td>
+                <td>{r.buyer_name || '-'}</td>
+                <td className="text-right text-mono">{r.quantity}</td>
+                <td className="text-right text-mono text-success">{r.returned_quantity||0}</td>
+                <td className="text-right text-mono text-danger">{r.damage_quantity||0}</td>
+                <td className="text-right text-mono text-warning">{r.rejected_quantity||0}</td>
+                <td className="text-right text-mono fw-bold">{r.outstanding}</td>
+                <td>{r.unit || '-'}</td>
+                <td><span className={`badge badge-${r.status==='RETURNED'?'success':r.status==='PARTIAL'?'warning':'danger'}`}>{r.status}</span></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      );
+      case 'returnReport': return (
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Issue ID</th>
+              <th>Return Date</th>
+              <th>Recipient</th>
+              <th>Item</th>
+              <th>Code</th>
+              <th style={{textAlign:'right'}}>Good</th>
+              <th style={{textAlign:'right'}}>Damaged</th>
+              <th style={{textAlign:'right'}}>Rejected</th>
+              <th>By</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredData.map((r,i) => (
+              <tr key={i}>
+                <td className="text-mono" style={{fontSize:12}}>{r.issue_id}</td>
+                <td style={{fontSize:12}}>{r.return_date?new Date(r.return_date).toLocaleDateString('en-GB'):''}</td>
+                <td>{r.recipient_name}</td>
+                <td style={{fontWeight:600}}>{r.item_name}</td>
+                <td className="text-mono" style={{fontSize:11}}>{r.item_code}</td>
+                <td className="text-right text-mono text-success">{r.returned_quantity}</td>
+                <td className="text-right text-mono text-danger">{r.damage_quantity}</td>
+                <td className="text-right text-mono text-warning">{r.rejected_quantity}</td>
+                <td style={{fontSize:12}}>{r.created_by_name||'-'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      );
+      case 'employeeOutstanding': return (
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Employee</th>
+              <th>Issue ID</th>
+              <th>Date</th>
+              <th>Item</th>
+              <th>Code</th>
+              <th style={{textAlign:'right'}}>Issued</th>
+              <th style={{textAlign:'right'}}>Outstanding</th>
+              <th>Due Date</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredData.map((r,i) => (
+              <tr key={i}>
+                <td style={{fontWeight:600}}>{r.recipient_name}</td>
+                <td className="text-mono" style={{fontSize:12}}>{r.issue_id}</td>
+                <td style={{fontSize:12}}>{r.issue_date?new Date(r.issue_date).toLocaleDateString('en-GB'):''}</td>
+                <td>{r.item_name}</td>
+                <td className="text-mono" style={{fontSize:11}}>{r.item_code}</td>
+                <td className="text-right text-mono">{r.quantity}</td>
+                <td className="text-right text-mono fw-bold text-danger">{r.outstanding}</td>
+                <td style={{fontSize:12}}>{r.expected_return_date?new Date(r.expected_return_date).toLocaleDateString('en-GB'):'-'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      );
+      case 'issueReturnSummary': return (
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Issue ID</th>
+              <th>Type</th>
+              <th>Recipient</th>
+              <th>Date</th>
+              <th style={{textAlign:'right'}}>Issued</th>
+              <th style={{textAlign:'right'}}>Returned</th>
+              <th style={{textAlign:'right'}}>Damaged</th>
+              <th style={{textAlign:'right'}}>Rejected</th>
+              <th style={{textAlign:'right'}}>Outstanding</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredData.map((r,i) => (
+              <tr key={i}>
+                <td className="text-mono" style={{fontSize:12,color:'var(--accent)'}}>{r.issue_id}</td>
+                <td><span className="badge badge-info">{r.issue_type}</span></td>
+                <td>{r.recipient_name}</td>
+                <td style={{fontSize:12}}>{r.issue_date?new Date(r.issue_date).toLocaleDateString('en-GB'):''}</td>
+                <td className="text-right text-mono">{r.total_issued}</td>
+                <td className="text-right text-mono text-success">{r.total_returned}</td>
+                <td className="text-right text-mono text-danger">{r.total_damaged}</td>
+                <td className="text-right text-mono text-warning">{r.total_rejected||0}</td>
+                <td className="text-right text-mono fw-bold">{r.outstanding}</td>
+                <td><span className={`badge badge-${r.status==='RETURNED'?'success':r.status==='PARTIAL'?'warning':'danger'}`}>{r.status}</span></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      );
       default: return null;
     }
   };
 
   return (
     <div>
-      <div className="tabs" style={{marginBottom:12}}>{REPORT_TABS.map(t => <button key={t.id} className={`tab ${reportTab===t.id?'active':''}`} onClick={() => setReportTab(t.id)}>{t.label}</button>)}</div>
-      <div className="toolbar" style={{flexWrap:'wrap', gap:10}}>
-        <div className="toolbar-left" style={{display:'flex',gap:10,flexWrap:'wrap'}}>
-          <SearchableSelect className="form-input" style={{width:140}} value={issueType} onValueChange={value => setIssueType(value)}><option value="">All Types</option><option value="FACTORY">Factory</option><option value="EMPLOYEE">Employee</option></SearchableSelect>
-          <input type="date" className="form-input" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={{width:130}} />
-          <span className="text-muted">to</span>
-          <input type="date" className="form-input" value={dateTo} onChange={e => setDateTo(e.target.value)} style={{width:130}} />
-        </div>
-        <div className="toolbar-right">
-          <button className="btn btn-outline btn-sm" onClick={exportExcel} disabled={data.length===0}><FileSpreadsheet size={14}/> Excel</button>
-          <button className="btn btn-outline btn-sm" onClick={exportPdf} disabled={data.length===0}><FileText size={14}/> PDF</button>
-        </div>
+      <div className="tabs" style={{ marginBottom: 12 }}>
+        {REPORT_TABS.map(t => (
+          <button key={t.id} className={`tab ${reportTab === t.id ? 'active' : ''}`} onClick={() => setReportTab(t.id)}>
+            {t.label}
+          </button>
+        ))}
       </div>
+
+      <div className="card mb-3" style={{ padding: '12px 16px', background: 'var(--card-bg)', borderRadius: 8, border: '1px solid var(--border)' }}>
+        {/* Top Filter Row: Search, Type, Status, Recipient, Date Range, Export */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+            {/* Search Input */}
+            <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+              <Search size={14} style={{ position: 'absolute', left: 10, color: 'var(--text-muted)' }} />
+              <input 
+                type="text" 
+                className="form-input" 
+                placeholder="Search material, target item, recipient..." 
+                value={searchQuery} 
+                onChange={e => setSearchQuery(e.target.value)} 
+                style={{ paddingLeft: 30, width: 250, fontSize: 13 }} 
+              />
+              {searchQuery && (
+                <button 
+                  onClick={() => setSearchQuery('')}
+                  style={{ position: 'absolute', right: 8, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}
+                  title="Clear search"
+                >
+                  <X size={13} />
+                </button>
+              )}
+            </div>
+
+            {/* Issue Type */}
+            <SearchableSelect className="form-input" style={{ width: 130, fontSize: 13 }} value={issueType} onValueChange={value => setIssueType(value)}>
+              <option value="">All Types</option>
+              <option value="FACTORY">Factory</option>
+              <option value="EMPLOYEE">Employee</option>
+            </SearchableSelect>
+
+            {/* Status (for issueReport & summary) */}
+            {(reportTab === 'issueReport' || reportTab === 'issueReturnSummary') && (
+              <SearchableSelect className="form-input" style={{ width: 130, fontSize: 13 }} value={status} onValueChange={value => setStatus(value)}>
+                <option value="">All Statuses</option>
+                <option value="PENDING">Pending</option>
+                <option value="PARTIAL">Partial</option>
+                <option value="RETURNED">Returned</option>
+              </SearchableSelect>
+            )}
+
+            {/* Recipient */}
+            <SearchableSelect className="form-input" style={{ width: 150, fontSize: 13 }} value={recipientName} onValueChange={value => setRecipientName(value)}>
+              <option value="">All Recipients</option>
+              {recipientOptions.map((name, i) => <option key={i} value={name}>{name}</option>)}
+            </SearchableSelect>
+
+            {/* Date Range */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <input type="date" className="form-input" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={{ width: 130, fontSize: 13 }} title="From Date" />
+              <span className="text-muted" style={{ fontSize: 12 }}>to</span>
+              <input type="date" className="form-input" value={dateTo} onChange={e => setDateTo(e.target.value)} style={{ width: 130, fontSize: 13 }} title="To Date" />
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button className="btn btn-outline btn-sm" onClick={exportExcel} disabled={filteredData.length === 0}><FileSpreadsheet size={14} /> Excel</button>
+            <button className="btn btn-outline btn-sm" onClick={exportPdf} disabled={filteredData.length === 0}><FileText size={14} /> PDF</button>
+          </div>
+        </div>
+
+        {/* Product / Finished Item Details Row */}
+        {reportTab === 'issueReport' && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginTop: 10, paddingTop: 10, borderTop: '1px dashed var(--border)' }}>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                <Filter size={13} /> Product Filters:
+              </span>
+
+              {/* Buyer */}
+              <SearchableSelect className="form-input" style={{ width: 150, fontSize: 13 }} value={buyerName} onValueChange={value => setBuyerName(value)}>
+                <option value="">All Buyers</option>
+                {buyerOptions.map((v, i) => <option key={i} value={v}>{v}</option>)}
+              </SearchableSelect>
+
+              {/* Style */}
+              <SearchableSelect className="form-input" style={{ width: 150, fontSize: 13 }} value={styleName} onValueChange={value => setStyleName(value)}>
+                <option value="">All Styles</option>
+                {styleOptions.map((v, i) => <option key={i} value={v}>{v}</option>)}
+              </SearchableSelect>
+
+              {/* Order No */}
+              <SearchableSelect className="form-input" style={{ width: 140, fontSize: 13 }} value={orderNumber} onValueChange={value => setOrderNumber(value)}>
+                <option value="">All Orders</option>
+                {orderOptions.map((v, i) => <option key={i} value={v}>{v}</option>)}
+              </SearchableSelect>
+
+              {/* Purchase No */}
+              <SearchableSelect className="form-input" style={{ width: 150, fontSize: 13 }} value={purchaseNo} onValueChange={value => setPurchaseNo(value)}>
+                <option value="">All Purchase No</option>
+                {purchaseOptions.map((v, i) => <option key={i} value={v}>{v}</option>)}
+              </SearchableSelect>
+
+              {/* Reset Filters button */}
+              {hasActiveFilters && (
+                <button 
+                  className="btn btn-ghost btn-sm text-danger" 
+                  onClick={resetFilters} 
+                  style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, padding: '4px 8px' }}
+                  title="Reset all filters"
+                >
+                  <RotateCcw size={12} /> Clear Filters
+                </button>
+              )}
+            </div>
+
+            {/* Live Count Indicator */}
+            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+              {hasActiveFilters ? (
+                <span>Showing <strong>{filteredData.length}</strong> of <strong>{data.length}</strong> records</span>
+              ) : (
+                <span>Total: <strong>{data.length}</strong> records</span>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
       <div className="table-wrapper">{renderTable()}</div>
     </div>
   );
