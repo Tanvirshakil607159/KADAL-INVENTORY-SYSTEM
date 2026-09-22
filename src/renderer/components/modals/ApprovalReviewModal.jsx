@@ -98,6 +98,9 @@ export default function ApprovalReviewModal({ data, onSaved }) {
         else await window.kadal.challans.exportExcel(selectedRequest.entityId);
       } else if (selectedRequest.type === 'CREATE_GATE_PASS') {
         await window.kadal.gatePass.exportPdf(selectedRequest.entityId);
+      } else if (selectedRequest.type === 'CREATE_ISSUE') {
+        if (type === 'pdf') await window.kadal.issues.exportPdf(selectedRequest.entityId);
+        else await window.kadal.issues.exportExcel(selectedRequest.entityId);
       }
       addToast('success', 'Report exported successfully');
     } catch (err) { addToast('error', err.message); }
@@ -162,7 +165,7 @@ export default function ApprovalReviewModal({ data, onSaved }) {
                     <button className="btn btn-ghost btn-sm" onClick={() => handleDownload('pdf')}>
                       <FileText size={14} /> PDF
                     </button>
-                    {selectedRequest.type === 'CREATE_CHALLAN' && (
+                    {(selectedRequest.type === 'CREATE_CHALLAN' || selectedRequest.type === 'CREATE_ISSUE') && (
                       <button className="btn btn-ghost btn-sm" onClick={() => handleDownload('excel')}>
                         <Download size={14} /> Excel
                       </button>

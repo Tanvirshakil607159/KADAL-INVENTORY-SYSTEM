@@ -53,6 +53,10 @@ const ApprovalService = {
           const RequisitionService = require('./requisition-service');
           result = await RequisitionService._executeCreate(data);
           break;
+        case 'CREATE_ISSUE':
+          const IssueService = require('./issue-service');
+          result = await IssueService._executeCreate(data);
+          break;
         default:
           throw new Error('Unknown approval type: ' + request.type);
       }
@@ -62,7 +66,7 @@ const ApprovalService = {
         'APPROVED', 
         notes, 
         result?.id || null, 
-        result?.challanNumber || result?.gatePassNumber || null
+        result?.challanNumber || result?.gatePassNumber || result?.issueId || null
       );
       return { success: true, result };
     } catch (err) {

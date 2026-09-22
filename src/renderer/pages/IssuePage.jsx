@@ -1,7 +1,7 @@
 import SearchableSelect from '../components/ui/SearchableSelect';
 import React, { useState, useEffect, useCallback } from 'react';
 import useStore from '../store/useStore';
-import { Send, RotateCcw, BarChart3, Plus, Trash2, FileSpreadsheet, FileText, Search, Package, Eye } from 'lucide-react';
+import { Send, RotateCcw, BarChart3, Plus, Trash2, FileSpreadsheet, FileText, Search, Package, Eye, Clock } from 'lucide-react';
 
 const TABS = [
   { id: 'entry', label: 'Issue Entry', icon: Send },
@@ -45,7 +45,8 @@ function IssueEntryTab({ addToast, user }) {
   const [issues, setIssues] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [isReturnable, setIsReturnable] = useState(true);
-  const isSuperAdmin = user?.role_name === 'Super Admin';
+  const [pendingApprovalsCount, setPendingApprovalsCount] = useState(0);
+  const isSuperAdmin = user?.role_name === 'Super Admin' || user?.roleName === 'Super Admin';
 
   const loadData = useCallback(async () => {
     try { const r = await window.kadal.recipients.getAll(); if (r?.success) setRecipients(r.data); } catch (e) {}
@@ -53,6 +54,13 @@ function IssueEntryTab({ addToast, user }) {
     try { const r = await window.kadal.items.getDistinctValues(); if (r?.success) setDistinctValues(r.data); } catch (e) {}
     try { const r = await window.kadal.issues.getNextId(); if (r?.success) setNextId(r.data); } catch (e) {}
     try { const r = await window.kadal.issues.getAll({}); if (r?.success) setIssues(r.data); } catch (e) {}
+    try {
+      const a = await window.kadal.approvals.getAll({ status: 'PENDING' });
+      if (a?.success && Array.isArray(a.data)) {
+        const issueApprovals = a.data.filter(req => req.type === 'CREATE_ISSUE');
+        setPendingApprovalsCount(issueApprovals.length);
+      }
+    } catch (e) {}
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
@@ -129,10 +137,26 @@ function IssueEntryTab({ addToast, user }) {
         isReturnable: isReturnable,
         producedItemId: producedProducts[0]?.id,
         producedItemIds: producedProducts.map(p => p.id),
-        items: issueItems.map(i => ({ itemId: i.itemId, quantity: Number(i.quantity), unit: i.unit, styleNo: i.styleNo, orderNumber: i.orderNumber, purchaseNo: i.purchaseNo, notes: i.notes })),
+        items: issueItems.map(i => ({ 
+          itemId: i.itemId, 
+          name: i.name,
+          itemCode: i.itemCode,
+          buyerName: i.buyerName,
+          currentStock: i.currentStock,
+          quantity: Number(i.quantity), 
+          unit: i.unit, 
+          styleNo: i.styleNo, 
+          orderNumber: i.orderNumber, 
+          purchaseNo: i.purchaseNo, 
+          notes: i.notes 
+        })),
       });
       if (res?.success) { 
-        addToast('success', `Issue ${res.data.issueId} created!`); 
+        if (res.data?.pendingApproval) {
+          addToast('success', 'Issue request submitted for Admin approval');
+        } else {
+          addToast('success', `Issue ${res.data?.issueId || ''} created!`); 
+        }
         clearIssue(); 
         setProducedProducts([]);
         setSearchProductQuery('');
@@ -295,6 +319,23 @@ function IssueEntryTab({ addToast, user }) {
 
   return (
     <div>
+      {pendingApprovalsCount > 0 && (
+        <div style={{
+          marginBottom: 16,
+          padding: '10px 14px',
+          background: 'rgba(var(--warning-rgb, 245, 158, 11), 0.1)',
+          border: '1px solid var(--warning)',
+          borderRadius: 6,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          fontSize: 13,
+          color: 'var(--warning)'
+        }}>
+          <Clock size={16} />
+          <span>There {pendingApprovalsCount === 1 ? 'is 1 issue request' : `are ${pendingApprovalsCount} issue requests`} awaiting Admin approval in the <strong>Approvals</strong> module.</span>
+        </div>
+      )}
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
         <h3 style={{ margin: 0 }}>Recent Issues</h3>
         <button className="btn btn-primary" onClick={() => setShowForm(true)}><Plus size={14} /> New Issue</button>

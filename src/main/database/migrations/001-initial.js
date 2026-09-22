@@ -287,6 +287,23 @@ function runMigrations(db) {
     db.run("INSERT INTO _migrations (name) VALUES ('032-add-item-price-tiers')");
     console.log('[DB] Migration 032-add-item-price-tiers applied successfully');
   }
+
+  // NEW MIGRATION: 033-add-issue-approval-setting
+  const applied33 = db.exec("SELECT * FROM _migrations WHERE name = '033-add-issue-approval-setting'");
+  if (applied33.length === 0 || applied33[0].values.length === 0) {
+    console.log('[DB] Running migration: 033-add-issue-approval-setting');
+    applyThirtyThirdMigration(db);
+    db.run("INSERT INTO _migrations (name) VALUES ('033-add-issue-approval-setting')");
+    console.log('[DB] Migration 033-add-issue-approval-setting applied successfully');
+  }
+}
+
+function applyThirtyThirdMigration(db) {
+  try {
+    db.run("INSERT OR IGNORE INTO settings (key, value, description) VALUES ('require_issue_approval', 'true', 'Require admin approval for all issues')");
+  } catch (e) {
+    console.error('[DB] Migration 033 error:', e.message);
+  }
 }
 
 function applyTwentyNinthMigration(db) {

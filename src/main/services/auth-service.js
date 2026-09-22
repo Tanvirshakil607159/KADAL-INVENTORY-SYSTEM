@@ -19,7 +19,7 @@ const AuthService = {
 
     currentUser = {
       id: user.id, username: user.username, fullName: user.full_name,
-      roleId: user.role_id, roleName: user.role_name,
+      roleId: user.role_id, roleName: user.role_name, role_name: user.role_name,
       permissions: typeof user.permissions === 'string' ? JSON.parse(user.permissions || '{}') : (user.permissions || {}),
     };
     return { success: true, user: currentUser };

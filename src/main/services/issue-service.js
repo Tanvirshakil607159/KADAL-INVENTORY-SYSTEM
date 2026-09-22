@@ -20,6 +20,76 @@ const IssueService = {
     if (!data.recipientId) throw new Error('Recipient is required');
     if (!data.items || data.items.length === 0) throw new Error('At least one item is required');
 
+    const user = AuthService.getCurrentUser();
+    const isAdmin = user?.roleName === 'Admin' || user?.roleName === 'Super Admin' || user?.role_name === 'Admin' || user?.role_name === 'Super Admin';
+    const requireApproval = (await SettingsRepo.get('require_issue_approval')) === 'true';
+
+    if (!isAdmin && requireApproval) {
+      // 1. Pre-validate stock availability so an invalid issue cannot be queued
+      for (const item of data.items) {
+        const dbItem = await ItemsRepo.getById(item.itemId);
+        if (!dbItem) throw new Error(`Item not found: ${item.itemId}`);
+        if (dbItem.current_stock < item.quantity) {
+          throw new Error(`Insufficient stock for "${dbItem.name}". Available: ${dbItem.current_stock}, Requested: ${item.quantity}`);
+        }
+      }
+
+      // 2. Enrich item details for clear approval review display
+      for (const item of data.items) {
+        if (!item.name || !item.itemCode) {
+          const dbItem = await ItemsRepo.getById(item.itemId);
+          if (dbItem) {
+            item.name = item.name || dbItem.name;
+            item.itemCode = item.itemCode || dbItem.item_code;
+            item.unit = item.unit || dbItem.unit;
+            item.currentStock = item.currentStock ?? dbItem.current_stock;
+            item.buyerName = item.buyerName || dbItem.buyer_name;
+            item.styleNo = item.styleNo || dbItem.style_name;
+            item.orderNumber = item.orderNumber || dbItem.order_number;
+          }
+        }
+      }
+
+      // 3. Enrich produced items if any
+      const enrichedProducedProducts = [];
+      const prodIds = Array.isArray(data.producedItemIds) && data.producedItemIds.length > 0
+        ? data.producedItemIds
+        : (data.producedItemId ? [data.producedItemId] : []);
+      if (prodIds.length > 0) {
+        for (const pid of prodIds) {
+          const prod = await ItemsRepo.getById(pid);
+          if (prod) {
+            enrichedProducedProducts.push({
+              id: prod.id,
+              name: prod.name,
+              itemCode: prod.item_code,
+              unit: prod.unit,
+              styleName: prod.style_name,
+              orderQuantity: prod.order_quantity,
+              orderNumber: prod.order_number,
+              color: prod.color,
+              size: prod.size,
+            });
+          }
+        }
+      }
+
+      const ApprovalService = require('./approval-service');
+      return await ApprovalService.createRequest('CREATE_ISSUE', {
+        ...data,
+        producedProducts: enrichedProducedProducts,
+        createdBy: user?.id,
+        requesterName: user?.fullName || user?.full_name,
+      });
+    }
+
+    return await this._executeCreate(data);
+  },
+
+  async _executeCreate(data) {
+    if (!data.recipientId) throw new Error('Recipient is required');
+    if (!data.items || data.items.length === 0) throw new Error('At least one item is required');
+
     // 1. Validate initial stock availability and prepare stock changes
     const stockChanges = [];
     for (const item of data.items) {
@@ -84,7 +154,7 @@ const IssueService = {
         issueDate: data.issueDate || new Date().toISOString(),
         expectedReturnDate: data.expectedReturnDate,
         remarks: data.remarks,
-        createdBy: user?.id,
+        createdBy: data.createdBy || user?.id,
         items: data.items,
         isReturnable: data.isReturnable,
         producedItemId: data.producedItemId,
@@ -105,7 +175,7 @@ const IssueService = {
         stockBefore: deduction.stockBefore, stockAfter: deduction.stockAfter,
         reference: `Issue: ${issueId}`,
         notes: `Issued to ${data.recipientName} (${data.issueType})`,
-        createdBy: user?.id,
+        createdBy: data.createdBy || user?.id,
       });
     }
 
@@ -137,7 +207,8 @@ const IssueService = {
   // Delete issue (Super Admin only) — reverses outstanding stock, preserves item data
   async deleteIssue(id) {
     const user = AuthService.getCurrentUser();
-    if (user?.role_name !== 'Super Admin') throw new Error('Only Super Admin can delete issues');
+    const isSuperAdmin = user?.role_name === 'Super Admin' || user?.roleName === 'Super Admin';
+    if (!isSuperAdmin) throw new Error('Only Super Admin can delete issues');
 
     const issue = await IssuesRepo.getById(id);
     if (!issue) throw new Error('Issue not found');
