@@ -268,6 +268,10 @@ function registerIpcHandlers() {
     return ChallanService.getFieldSuggestions(field, query);
   }));
 
+  ipcMain.handle('challans:getAllTotalDelivered', wrapHandler(() => {
+    return ChallanService.getAllTotalDelivered();
+  }));
+
   ipcMain.handle('challans:getTotalDelivered', wrapHandler((itemId) => {
     return ChallanService.getTotalDelivered(itemId);
   }));
@@ -752,6 +756,7 @@ function registerIpcHandlers() {
   ipcMain.handle('issues:getAll', wrapHandler((filters) => IssueService.getAll(filters)));
   ipcMain.handle('issues:getById', wrapHandler((id) => IssueService.getById(id)));
   ipcMain.handle('issues:create', wrapHandler((data) => IssueService.create(data)));
+  ipcMain.handle('issues:addItems', wrapHandler((data) => IssueService.addItems(data)));
   ipcMain.handle('issues:getNextId', wrapHandler(() => IssueService.getNextId()));
   ipcMain.handle('issues:getOutstandingItems', wrapHandler((issueId) => IssueService.getOutstandingItems(issueId)));
   ipcMain.handle('issues:delete', wrapHandler((id) => IssueService.deleteIssue(id)));

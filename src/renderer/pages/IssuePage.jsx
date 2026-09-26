@@ -46,7 +46,7 @@ function IssueEntryTab({ addToast, user }) {
   const [showForm, setShowForm] = useState(false);
   const [isReturnable, setIsReturnable] = useState(true);
   const [pendingApprovalsCount, setPendingApprovalsCount] = useState(0);
-  const isSuperAdmin = user?.role_name === 'Super Admin' || user?.roleName === 'Super Admin';
+  const canDeleteIssue = ['Super Admin', 'Admin'].includes(user?.role_name) || ['Super Admin', 'Admin'].includes(user?.roleName);
 
   const loadData = useCallback(async () => {
     try { const r = await window.kadal.recipients.getAll(); if (r?.success) setRecipients(r.data); } catch (e) {}
@@ -70,10 +70,15 @@ function IssueEntryTab({ addToast, user }) {
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [producedProducts, setProducedProducts] = useState([]);
   const [searchProductQuery, setSearchProductQuery] = useState('');
+  const [isReissuing, setIsReissuing] = useState(false);
+  const [reissueItems, setReissueItems] = useState([]);
+  const [reissuing, setReissuing] = useState(false);
 
   useEffect(() => {
     if (!selectedDetailIssue) {
       setAssociatedProduction([]);
+      setIsReissuing(false);
+      setReissueItems([]);
       return;
     }
     const fetchDetails = async () => {
@@ -167,6 +172,46 @@ function IssueEntryTab({ addToast, user }) {
       else addToast('error', res?.error || 'Failed');
     } catch (e) { addToast('error', e.message); }
     setSubmitting(false);
+  };
+
+  const handleReissueSubmit = async () => {
+    if (reissueItems.length === 0) return addToast('error', 'Add at least one item to reissue');
+    for (const item of reissueItems) {
+      if (item.quantity <= 0) return addToast('error', `Invalid quantity for ${item.name}`);
+      if (item.quantity > (item.currentStock || item.current_stock)) return addToast('error', `Insufficient stock for ${item.name}`);
+    }
+    setReissuing(true);
+    try {
+      const res = await window.kadal.issues.addItems({
+        issueId: selectedDetailIssue.id,
+        items: reissueItems.map(i => ({
+          itemId: i.itemId || i.id,
+          name: i.name,
+          itemCode: i.itemCode || i.item_code,
+          currentStock: i.currentStock || i.current_stock,
+          quantity: Number(i.quantity),
+          unit: i.unit,
+          styleNo: i.styleNo || i.style_name,
+          orderNumber: i.orderNumber || i.order_number,
+          purchaseNo: i.purchaseNo || i.purchase_no,
+          notes: i.notes
+        }))
+      });
+      if (res?.success) {
+        addToast('success', `Items successfully added to issue ${selectedDetailIssue.issue_id}`);
+        setReissueItems([]);
+        setIsReissuing(false);
+        // Refresh detail view
+        const issueRes = await window.kadal.issues.getById(selectedDetailIssue.id);
+        if (issueRes?.success) setSelectedDetailIssue(issueRes.data);
+        loadData();
+      } else {
+        addToast('error', res?.error || 'Failed to add items');
+      }
+    } catch (e) {
+      addToast('error', e.message);
+    }
+    setReissuing(false);
   };
 
   const handleDelete = async (iss) => {
@@ -388,7 +433,7 @@ function IssueEntryTab({ addToast, user }) {
                   <button className="btn btn-ghost btn-icon btn-sm" onClick={() => setSelectedDetailIssue(iss)} title="View Details"><Eye size={14} /></button>
                   <button className="btn btn-ghost btn-icon btn-sm" onClick={() => window.kadal.issues.exportPdf(iss.id)} title="Download PDF"><FileText size={14} /></button>
                   <button className="btn btn-ghost btn-icon btn-sm" onClick={() => window.kadal.issues.exportExcel(iss.id)} title="Download Excel"><FileSpreadsheet size={14} /></button>
-                  {isSuperAdmin && <button className="btn btn-ghost btn-icon btn-sm" onClick={() => handleDelete(iss)} title="Delete"><Trash2 size={14} color="var(--danger)" /></button>}
+                  {canDeleteIssue && <button className="btn btn-ghost btn-icon btn-sm" onClick={() => handleDelete(iss)} title="Delete"><Trash2 size={14} color="var(--danger)" /></button>}
                 </div>
               </td>
             </tr>
@@ -409,6 +454,15 @@ function IssueEntryTab({ addToast, user }) {
             position: 'relative', boxShadow: '0 8px 32px rgba(0,0,0,0.4)'
           }}>
             <div style={{ position: 'absolute', top: 20, right: 20, display: 'flex', gap: 8 }}>
+              {!isReissuing && selectedDetailIssue.issue_type === 'FACTORY' && (
+                <button 
+                  className="btn btn-outline btn-sm" 
+                  onClick={() => setIsReissuing(true)}
+                  title="Add more items to this issue"
+                >
+                  <Plus size={14} style={{ marginRight: 4 }} /> Reissue Items
+                </button>
+              )}
               <button 
                 className="btn btn-primary btn-sm" 
                 onClick={() => window.kadal.issues.exportPdf(selectedDetailIssue.id)}
@@ -482,7 +536,103 @@ function IssueEntryTab({ addToast, user }) {
                   </div>
                 </div>
               )}
-            </div>
+              </div>
+
+            {isReissuing && (
+              <div className="card" style={{ padding: 16, marginBottom: 20, border: '1px solid var(--accent)', background: 'rgba(var(--accent-rgb, 59, 130, 246), 0.03)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                  <h4 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Plus size={16} color="var(--accent)" /> Add Items to Issue
+                  </h4>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button className="btn btn-outline btn-sm" onClick={() => openModal('ISSUE_BROWSER', { 
+                      items: allItems, 
+                      distinctValues,
+                      onSelect: (item) => setReissueItems(prev => {
+                        if (prev.some(p => (p.itemId || p.id) === item.id)) return prev;
+                        return [...prev, { ...item, quantity: 1, notes: '' }];
+                      }) 
+                    })}>
+                      <Search size={14} style={{ marginRight: 4 }} /> Browse Inventory
+                    </button>
+                    <button className="btn btn-ghost btn-sm" onClick={() => { setIsReissuing(false); setReissueItems([]); }}>Cancel</button>
+                  </div>
+                </div>
+
+                {reissueItems.length === 0 ? (
+                  <p className="text-muted" style={{ textAlign: 'center', padding: 16, margin: 0 }}>
+                    Click "Browse Inventory" to search and add new items to this issue.
+                  </p>
+                ) : (
+                  <div className="table-wrapper">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>Item</th>
+                          <th>Style / Order</th>
+                          <th style={{textAlign:'right'}}>Stock</th>
+                          <th style={{textAlign:'right',width:100}}>Qty *</th>
+                          <th>Notes</th>
+                          <th style={{width: 40}}></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {reissueItems.map((item, idx) => (
+                          <tr key={idx}>
+                            <td>
+                              <div style={{fontWeight:600}}>{item.name}</div>
+                              <div style={{fontSize:11,color:'var(--text-muted)'}}>{item.itemCode || item.item_code}</div>
+                            </td>
+                            <td style={{fontSize:12}}>{item.styleNo || item.style_name || '-'} / {item.orderNumber || item.order_number || '-'}</td>
+                            <td className="text-right text-mono fw-bold" style={{color: (item.currentStock || item.current_stock) <= 5 ? 'var(--danger)' : 'var(--success)'}}>
+                              {item.currentStock || item.current_stock}
+                            </td>
+                            <td>
+                              <input 
+                                type="number" 
+                                className="form-input" 
+                                style={{width:90,textAlign:'right'}} 
+                                value={item.quantity} 
+                                min={1} 
+                                max={item.currentStock || item.current_stock} 
+                                onChange={e => {
+                                  const u = [...reissueItems];
+                                  u[idx].quantity = e.target.value;
+                                  setReissueItems(u);
+                                }} 
+                              />
+                            </td>
+                            <td>
+                              <input 
+                                className="form-input" 
+                                style={{width: '100%'}} 
+                                value={item.notes} 
+                                onChange={e => {
+                                  const u = [...reissueItems];
+                                  u[idx].notes = e.target.value;
+                                  setReissueItems(u);
+                                }} 
+                                placeholder="Optional" 
+                              />
+                            </td>
+                            <td>
+                              <button className="btn btn-ghost btn-icon btn-sm" onClick={() => setReissueItems(reissueItems.filter((_, i) => i !== idx))}>
+                                <Trash2 size={14} color="var(--danger)" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
+                      <button className="btn btn-primary" onClick={handleReissueSubmit} disabled={reissuing}>
+                        {reissuing ? 'Adding...' : 'Submit Items'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {loadingDetails ? (
               <div style={{ textAlign: 'center', padding: 40 }}>

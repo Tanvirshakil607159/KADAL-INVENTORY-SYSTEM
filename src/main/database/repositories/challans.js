@@ -602,6 +602,31 @@ const ChallansRepo = {
     return rawResults.filter(val => !blacklist.includes(val)).sort().slice(0, 15);
   },
 
+  async getAllTotalDelivered() {
+    if (isCloudEnabled()) {
+      const { data, error } = await getSupabase()
+        .from('challan_items')
+        .select('item_id, quantity, challans!inner(status)')
+        .eq('challans.status', 'ACTIVE');
+      if (error) throw error;
+      const map = {};
+      (data || []).forEach(d => {
+        map[d.item_id] = (map[d.item_id] || 0) + d.quantity;
+      });
+      return map;
+    }
+    const rows = dbPrepare(`
+      SELECT ci.item_id, SUM(ci.quantity) as total 
+      FROM challan_items ci 
+      JOIN challans c ON ci.challan_id = c.id 
+      WHERE c.status = 'ACTIVE' 
+      GROUP BY ci.item_id
+    `).all();
+    const map = {};
+    rows.forEach(r => map[r.item_id] = r.total);
+    return map;
+  },
+
   async getTotalDelivered(itemId) {
     if (isCloudEnabled()) {
       const { data, error } = await getSupabase()

@@ -9,6 +9,15 @@ export default function ChallanBrowserModal({ data }) {
   const isMinimized = modal?.isMinimized;
 
   const [filters, setFilters] = useState({ search: '', style: '', order: '', purchase: '', buyer: '', category: '', size: '', color: '' });
+  const [deliveredMap, setDeliveredMap] = useState({});
+
+  React.useEffect(() => {
+    let mounted = true;
+    window.kadal.challans.getAllTotalDelivered().then(res => {
+      if (mounted && res.success) setDeliveredMap(res.data);
+    }).catch(e => console.error("Failed to load total delivered", e));
+    return () => { mounted = false; };
+  }, []);
 
   const sizes = [...new Set(allItems.map(i => i.size).filter(Boolean))];
   const colors = [...new Set(allItems.map(i => i.color).filter(Boolean))];
@@ -119,16 +128,21 @@ export default function ChallanBrowserModal({ data }) {
                   <th>Order No</th>
                   <th>Purchase</th>
                   <th style={{ textAlign: 'right' }}>Order Qty</th>
+                  <th style={{ textAlign: 'right' }}>Delivered</th>
+                  <th style={{ textAlign: 'right' }}>Balance</th>
                   <th style={{ textAlign: 'right' }}>Stock</th>
                   <th>Unit</th>
                   <th style={{ width: 70 }}></th>
                 </tr>
               </thead>
               <tbody>
-                {filteredItems.length === 0 && <tr><td colSpan={10} className="text-center text-muted" style={{ padding: 30 }}>No items match your filters</td></tr>}
+                {filteredItems.length === 0 && <tr><td colSpan={12} className="text-center text-muted" style={{ padding: 30 }}>No items match your filters</td></tr>}
                 {filteredItems.map(item => {
                   const added = challanItems.some(i => i.itemId === item.id);
                   const isLocked = data.lockedItemIds?.has(item.id);
+                  const delivered = deliveredMap[item.id] || 0;
+                  const balance = item.order_quantity ? (item.order_quantity - delivered) : null;
+                  
                   return (
                     <tr key={item.id} style={{ opacity: (added || isLocked) ? 0.5 : 1 }}>
                       <td>
@@ -141,6 +155,10 @@ export default function ChallanBrowserModal({ data }) {
                       <td style={{ fontSize: 12 }}>{item.order_number || '-'}</td>
                       <td style={{ fontSize: 12 }}>{item.purchase_no || '-'}</td>
                       <td className="text-right text-mono" style={{ fontSize: 12 }}>{item.order_quantity || '-'}</td>
+                      <td className="text-right text-mono" style={{ fontSize: 12 }}>{delivered}</td>
+                      <td className="text-right text-mono" style={{ fontSize: 12, fontWeight: 600, color: balance < 0 ? 'var(--danger)' : 'var(--primary)' }}>
+                        {balance !== null ? balance : '-'}
+                      </td>
                       <td className="text-right text-mono fw-bold" style={{ color: item.current_stock <= 0 ? 'var(--danger)' : item.current_stock <= (item.min_stock_level || 5) ? 'var(--warning)' : 'var(--success)' }}>
                         {item.current_stock}
                       </td>

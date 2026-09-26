@@ -28,6 +28,10 @@ const ChallanService = {
     return await ChallansRepo.getFieldSuggestions(field, query);
   },
 
+  async getAllTotalDelivered() {
+    return await ChallansRepo.getAllTotalDelivered();
+  },
+
   async getTotalDelivered(itemId) {
     return await ChallansRepo.getTotalDelivered(itemId);
   },

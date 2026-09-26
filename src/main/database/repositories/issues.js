@@ -325,6 +325,33 @@ const IssuesRepo = {
     return id;
   },
 
+  async addItemsToIssue(id, items) {
+    if (isCloudEnabled()) {
+      const supabase = getSupabase();
+      const issueItems = items.map(item => ({
+        issue_id: id,
+        item_id: item.itemId,
+        quantity: item.quantity,
+        unit: item.unit || 'pcs',
+        style_no: item.styleNo || null,
+        order_number: item.orderNumber || null,
+        purchase_no: item.purchaseNo || null,
+        notes: item.notes || null,
+      }));
+      const { error: iErr } = await supabase.from('issue_items').insert(issueItems);
+      if (iErr) throw iErr;
+      return true;
+    }
+
+    for (const item of items) {
+      dbPrepare(`
+        INSERT INTO issue_items (issue_id, item_id, quantity, unit, style_no, order_number, purchase_no, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(id, item.itemId, item.quantity, item.unit || 'pcs', item.styleNo || null, item.orderNumber || null, item.purchaseNo || null, item.notes || null);
+    }
+    return true;
+  },
+
   async getNextIssueId(prefix = 'ISS') {
     if (isCloudEnabled()) {
       const { data, error } = await getSupabase().from('issues')

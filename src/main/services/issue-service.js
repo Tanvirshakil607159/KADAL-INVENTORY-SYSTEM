@@ -189,6 +189,85 @@ const IssueService = {
     return { success: true, id, issueId };
   },
 
+  async addItems(data) {
+    if (!data.issueId) throw new Error('Issue ID is required');
+    if (!data.items || data.items.length === 0) throw new Error('At least one item is required');
+
+    const issue = await IssuesRepo.getById(data.issueId);
+    if (!issue) throw new Error('Issue not found');
+
+    const user = AuthService.getCurrentUser();
+
+    // 1. Validate initial stock availability and prepare stock changes
+    const stockChanges = [];
+    for (const item of data.items) {
+      const dbItem = await ItemsRepo.getById(item.itemId);
+      if (!dbItem) throw new Error(`Item not found: ${item.itemId}`);
+      
+      const stockBefore = dbItem.current_stock;
+      const stockAfter = stockBefore - item.quantity;
+      
+      if (stockAfter < 0) {
+        throw new Error(`Insufficient stock for "${dbItem.name}". Available: ${stockBefore}, Requested: ${item.quantity}`);
+      }
+      
+      stockChanges.push({ item, dbItem, stockBefore, stockAfter });
+    }
+
+    // 2. Deduct stock BEFORE saving issue items
+    const completedDeductions = [];
+    try {
+      for (const change of stockChanges) {
+        const freshItem = await ItemsRepo.getById(change.item.itemId);
+        if (freshItem.current_stock < change.item.quantity) {
+          throw new Error(`Insufficient stock for "${freshItem.name}". Available: ${freshItem.current_stock}, Requested: ${change.item.quantity}`);
+        }
+        
+        const freshStockBefore = freshItem.current_stock;
+        const freshStockAfter = freshStockBefore - change.item.quantity;
+        
+        await ItemsRepo.updateStock(change.item.itemId, freshStockAfter);
+        await ItemPriceTiersRepo.deductStockFIFO(change.item.itemId, change.item.quantity);
+        completedDeductions.push({ itemId: change.item.itemId, quantity: change.item.quantity, stockBefore: freshStockBefore, stockAfter: freshStockAfter });
+      }
+    } catch (err) {
+      for (const deduction of completedDeductions) {
+        await ItemsRepo.updateStock(deduction.itemId, deduction.stockBefore);
+      }
+      throw err;
+    }
+
+    try {
+      await IssuesRepo.addItemsToIssue(issue.id, data.items);
+    } catch (err) {
+      for (const deduction of completedDeductions) {
+        await ItemsRepo.updateStock(deduction.itemId, deduction.stockBefore);
+      }
+      throw err;
+    }
+
+    // 3. Create stock transactions
+    for (const deduction of completedDeductions) {
+      await StockTransactionsRepo.create({
+        itemId: deduction.itemId, type: 'OUT', quantity: deduction.quantity,
+        stockBefore: deduction.stockBefore, stockAfter: deduction.stockAfter,
+        reference: `Issue: ${issue.issue_id}`,
+        notes: `Re-issued to ${issue.recipient_name} (${issue.issue_type})`,
+        createdBy: user?.id,
+      });
+    }
+
+    AuditLogsRepo.create({
+      userId: user?.id, action: 'UPDATE', entityType: 'issue', entityId: issue.id,
+      newValue: { issueId: issue.issue_id, addedItemsCount: data.items.length },
+    });
+
+    // Update issue status if it was RETURNED but now has more items, it should become PENDING or PARTIAL
+    await IssuesRepo.updateStatus(issue.id);
+
+    return { success: true, id: issue.id, issueId: issue.issue_id };
+  },
+
   // Reports
   async issueReport(filters) { return await IssuesRepo.getIssueReport(filters); },
   async returnReport(filters) { return await IssuesRepo.getReturnReport(filters); },
@@ -206,11 +285,11 @@ const IssueService = {
     return { pendingReturns, overdueReturns, totalDamaged };
   },
 
-  // Delete issue (Super Admin only) — reverses outstanding stock, preserves item data
+  // Delete issue (Super Admin or Admin) — reverses outstanding stock, preserves item data
   async deleteIssue(id) {
     const user = AuthService.getCurrentUser();
-    const isSuperAdmin = user?.role_name === 'Super Admin' || user?.roleName === 'Super Admin';
-    if (!isSuperAdmin) throw new Error('Only Super Admin can delete issues');
+    const canDelete = ['Super Admin', 'Admin'].includes(user?.role_name) || ['Super Admin', 'Admin'].includes(user?.roleName);
+    if (!canDelete) throw new Error('Only Admin or Super Admin can delete issues');
 
     const issue = await IssuesRepo.getById(id);
     if (!issue) throw new Error('Issue not found');
