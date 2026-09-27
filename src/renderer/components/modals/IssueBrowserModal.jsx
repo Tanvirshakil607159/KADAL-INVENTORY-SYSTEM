@@ -30,6 +30,14 @@ export default function IssueBrowserModal({ data }) {
 
   const addItem = (item) => {
     if (item.current_stock <= 0) return addToast('error', `"${item.name}" has no stock`);
+    
+    if (data.onSelect) {
+      if (data.selectedItemIds && data.selectedItemIds.includes(item.id)) return addToast('warning', 'Already added');
+      data.onSelect(item);
+      addToast('success', `Added ${item.name}`);
+      return;
+    }
+
     if (issueItems.some(i => i.itemId === item.id)) return addToast('warning', 'Already added');
     setIssueItems([...issueItems, {
       itemId: item.id, name: item.name, itemCode: item.item_code,
@@ -110,7 +118,7 @@ export default function IssueBrowserModal({ data }) {
               <tbody>
                 {filteredItems.length === 0 && <tr><td colSpan={10} className="text-center text-muted" style={{ padding: 30 }}>No items match your filters</td></tr>}
                 {filteredItems.map(item => {
-                  const added = issueItems.some(i => i.itemId === item.id);
+                  const added = data.selectedItemIds ? data.selectedItemIds.includes(item.id) : issueItems.some(i => i.itemId === item.id);
                   return (
                     <tr key={item.id} style={{ opacity: added ? 0.5 : 1 }}>
                       <td>

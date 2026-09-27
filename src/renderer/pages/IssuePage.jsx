@@ -548,6 +548,7 @@ function IssueEntryTab({ addToast, user }) {
                     <button className="btn btn-outline btn-sm" onClick={() => openModal('ISSUE_BROWSER', { 
                       items: allItems, 
                       distinctValues,
+                      selectedItemIds: reissueItems.map(i => i.itemId || i.id),
                       onSelect: (item) => setReissueItems(prev => {
                         if (prev.some(p => (p.itemId || p.id) === item.id)) return prev;
                         return [...prev, { ...item, quantity: 1, notes: '' }];
