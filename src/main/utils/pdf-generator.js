@@ -1065,6 +1065,215 @@ const PdfGenerator = {
     return this._generateAndSave(docDefinition, `requisition-${req.requisition_no}`);
   },
 
+  async generateProformaInvoicePdf(pi, settings = {}) {
+    const formatDate = (dateStr) => {
+      if (!dateStr) return '';
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return dateStr;
+      const day = String(d.getDate()).padStart(2, '0');
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const year = d.getFullYear();
+      return `${day}.${month}.${year}`;
+    };
+
+    const logo = getLogoBase64();
+    const currencySym = pi.currency_symbol || '$';
+
+    const items = (pi.items || []).map((it, idx) => {
+      const slNo = it.sl_no !== undefined ? it.sl_no : (it.slNo !== undefined ? it.slNo : idx + 1);
+      const desc = it.item_description || it.itemDescription || it.item_name || it.name || '';
+      const poStyle = it.po_style_no || it.poStyleNo || it.style_name || it.order_number || it.purchase_no || it.purchaseNo || '-';
+      const qty = Number(it.quantity || 0);
+      const unit = (it.unit || 'PCS').toUpperCase();
+      const rate = Number(it.unit_price !== undefined ? it.unit_price : (it.unitPrice !== undefined ? it.unitPrice : 0));
+      const total = Number(it.total_amount !== undefined ? it.total_amount : (it.totalAmount !== undefined ? it.totalAmount : (qty * rate).toFixed(2)));
+
+      return [
+        { text: String(slNo), alignment: 'center', style: 'piTableCell' },
+        { text: desc, alignment: 'left', style: 'piTableCell' },
+        { text: poStyle, alignment: 'center', style: 'piTableCell' },
+        { text: qty.toLocaleString('en-US'), alignment: 'right', style: 'piTableCell' },
+        { text: unit, alignment: 'center', style: 'piTableCell' },
+        { text: `${currencySym} ${rate.toFixed(4)}`, alignment: 'right', style: 'piTableCell' },
+        { text: `${currencySym} ${total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, alignment: 'right', style: 'piTableCell' },
+      ];
+    });
+
+    // Total row
+    const totalRow = [
+      { text: 'TOTAL', colSpan: 3, alignment: 'right', bold: true, style: 'piTableTotal' },
+      {},
+      {},
+      { text: Number(pi.total_quantity || 0).toLocaleString('en-US'), alignment: 'right', bold: true, style: 'piTableTotal' },
+      { text: '', style: 'piTableTotal' },
+      { text: '', style: 'piTableTotal' },
+      { text: `${currencySym} ${Number(pi.total_amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, alignment: 'right', bold: true, style: 'piTableTotal' },
+    ];
+
+    const docDefinition = {
+      pageSize: 'A4',
+      pageMargins: [35, 30, 35, 35],
+      background: (currentPage, pageSize) => {
+        if (!logo) return null;
+        return {
+          image: logo,
+          width: 320,
+          opacity: 0.08,
+          absolutePosition: { x: (pageSize.width - 320) / 2, y: (pageSize.height - 320) / 2 }
+        };
+      },
+      content: [
+        // Top Letterhead
+        {
+          columns: [
+            logo ? { image: logo, width: 55, height: 55, margin: [0, 0, 10, 0] } : { text: '', width: 0 },
+            {
+              width: '*',
+              stack: [
+                { text: 'K.A. DESIGN ACCESSORIES LTD.', fontSize: 18, bold: true, color: '#1e293b' },
+                { text: 'A House of Quality Twill Tape, Herringbone Tape & Garments Accessories Manufacturer.', italics: true, fontSize: 9, color: '#475569', margin: [0, 2, 0, 0] }
+              ]
+            }
+          ],
+          margin: [0, 0, 0, 8]
+        },
+        { canvas: [{ type: 'line', x1: 0, y1: 0, x2: 525, y2: 0, lineWidth: 1, lineColor: '#94a3b8' }], margin: [0, 0, 0, 8] },
+
+        // Invoice Meta & Dates
+        {
+          columns: [
+            {
+              width: '*',
+              stack: [
+                { text: 'APPLICANT:', bold: true, fontSize: 8.5, color: '#000' },
+                { text: `${pi.applicant_name || ''}\n${pi.applicant_address || ''}`, fontSize: 8.5, color: '#1e293b', margin: [0, 2, 0, 6] },
+
+                { text: 'BENIFICARY:', bold: true, fontSize: 8.5, color: '#000' },
+                { text: `${pi.beneficiary_name || 'K.A. DESIGN ACCESSORIES LTD.'}\n${pi.beneficiary_address || '356/1, BLOCK-B, TEK KATHORA, SALNA\nGAZIPUR-1703, BANGLADESH'}${pi.beneficiary_bin ? '\nBIN: ' + pi.beneficiary_bin : ''}`, fontSize: 8.5, color: '#1e293b', margin: [0, 2, 0, 6] },
+
+                { text: 'BANK DETAIL:', bold: true, fontSize: 8.5, color: '#000' },
+                { text: pi.bank_details || 'UNITED COMMERCIAL BANK PLC.\nTONGI BRANCH\n18, S.K. MANNAN TOWER, CHERAG ALI\nGAZIPUR-1712, BANGLADESH\nSWIFT CODE: UCBLBDDHTNG', fontSize: 8.5, color: '#1e293b', margin: [0, 2, 0, 6] },
+
+                { text: [{ text: 'BUYER : ', bold: true, fontSize: 8.5 }, { text: pi.buyer || '', fontSize: 8.5 }], margin: [0, 2, 0, 6] }
+              ]
+            },
+            {
+              width: 210,
+              alignment: 'right',
+              stack: [
+                { text: 'BILL', bold: true, fontSize: 13, alignment: 'right', margin: [0, 0, 0, 4] },
+                { text: `Date : ${formatDate(pi.pi_date)}`, fontSize: 9, alignment: 'right', margin: [0, 0, 0, 4] },
+                { text: [{ text: 'BILL : ', bold: true }, { text: pi.bill_number || '-' }], fontSize: 9, alignment: 'right', margin: [0, 0, 0, 4] },
+                { text: `Date : ${formatDate(pi.bill_date || pi.pi_date)}`, fontSize: 9, alignment: 'right', margin: [0, 0, 0, 6] },
+                { text: [{ text: 'PROFORMA INVOICE NO. : ', bold: true }, { text: pi.pi_number || '-' }], fontSize: 9, bold: true, alignment: 'right', margin: [0, 0, 0, 4] }
+              ]
+            }
+          ],
+          margin: [0, 0, 0, 8]
+        },
+
+        // Goods Table Section
+        { text: 'DESCRIPTION OF GOODS :', bold: true, fontSize: 9, margin: [0, 4, 0, 4] },
+        {
+          table: {
+            headerRows: 1,
+            widths: [25, '*', 110, 45, 30, 48, 55],
+            body: [
+              [
+                { text: 'SL. NO', alignment: 'center', bold: true, style: 'piTableHeader' },
+                { text: 'ITEM DESCRIPTION', alignment: 'center', bold: true, style: 'piTableHeader' },
+                { text: 'PO & STYLE NO.', alignment: 'center', bold: true, style: 'piTableHeader' },
+                { text: 'QTY', alignment: 'center', bold: true, style: 'piTableHeader' },
+                { text: 'UNIT', alignment: 'center', bold: true, style: 'piTableHeader' },
+                { text: 'UNIT PRICE', alignment: 'center', bold: true, style: 'piTableHeader' },
+                { text: 'TOTAL', alignment: 'center', bold: true, style: 'piTableHeader' },
+              ],
+              ...items,
+              totalRow
+            ]
+          },
+          layout: {
+            hLineWidth: (i, node) => (i === 0 || i === 1 || i === node.table.body.length - 1 || i === node.table.body.length) ? 1 : 0.5,
+            vLineWidth: () => 0.5,
+            hLineColor: () => '#475569',
+            vLineColor: () => '#475569',
+            paddingLeft: () => 4,
+            paddingRight: () => 4,
+            paddingTop: () => 3,
+            paddingBottom: () => 3,
+          },
+          margin: [0, 0, 0, 8]
+        },
+
+        // Summary Details
+        { text: (pi.amount_in_words || '').toUpperCase(), bold: true, fontSize: 8.5, margin: [0, 3, 0, 3] },
+        { text: `NET WEIGHT: ${pi.net_weight || '250 KGS'}`, fontSize: 8.5, margin: [0, 1, 0, 1] },
+        { text: `GROSS WEIGHT: ${pi.gross_weight || '260 KGS'}`, fontSize: 8.5, margin: [0, 1, 0, 1] },
+        { text: `TERMS AND CONDITIONS : ${pi.terms_conditions || 'CASH ON DELIVERY.'}`, fontSize: 8.5, margin: [0, 1, 0, 12] },
+
+        // Signatures
+        {
+          columns: [
+            {
+              width: '32%',
+              stack: [
+                { text: 'Md. Ariful Rahman\nAccounts & Admin\nK. A. Design Accessories Ltd.', fontSize: 8, alignment: 'center', margin: [0, 15, 0, 3] },
+                { canvas: [{ type: 'line', x1: 10, y1: 0, x2: 140, y2: 0, lineWidth: 0.8, lineColor: '#64748b' }] },
+                { text: 'Prepared By\nFor KADAL', fontSize: 8, bold: true, alignment: 'center', margin: [0, 3, 0, 0] }
+              ]
+            },
+            {
+              width: '36%',
+              stack: [
+                { text: 'Maksudha Akter Kumu\nChairman\nK.A. DESIGN ACCESSORIES LTD.', fontSize: 8, alignment: 'center', margin: [0, 15, 0, 3] },
+                { canvas: [{ type: 'line', x1: 15, y1: 0, x2: 155, y2: 0, lineWidth: 0.8, lineColor: '#64748b' }] },
+                { text: 'Authorized By\nFor KADAL', fontSize: 8, bold: true, alignment: 'center', margin: [0, 3, 0, 0] }
+              ]
+            },
+            {
+              width: '32%',
+              stack: [
+                { text: '', margin: [0, 27, 0, 3] },
+                { canvas: [{ type: 'line', x1: 10, y1: 0, x2: 140, y2: 0, lineWidth: 0.8, lineColor: '#64748b' }] },
+                { text: `Accepted By\nBuyer Signature & Seal (${pi.applicant_name || 'KADWL'})`, fontSize: 8, bold: true, alignment: 'center', margin: [0, 3, 0, 0] }
+              ]
+            }
+          ],
+          margin: [0, 0, 0, 12]
+        },
+
+        // Clean Footer
+        { canvas: [{ type: 'line', x1: 0, y1: 0, x2: 525, y2: 0, lineWidth: 0.5, lineColor: '#94a3b8' }], margin: [0, 4, 0, 4] },
+        {
+          columns: [
+            {
+              width: '*',
+              stack: [
+                { text: 'Office & Factory :', bold: true, fontSize: 8, color: '#065f46' },
+                { text: '356/1, Block-B, Tek Kathora, Salna, Gazipur-1703, Bangladesh', fontSize: 7.5, color: '#334155' }
+              ]
+            },
+            {
+              width: 220,
+              alignment: 'right',
+              stack: [
+                { text: 'Contact Details:', bold: true, fontSize: 8, color: '#065f46' },
+                { text: 'Cell: +88 01766 671724  |  Web: www.kadesignaccessoriesltd.com\nE-mail: maksudakumu@kadesignaccessoriesltd.com', fontSize: 7.5, color: '#334155' }
+              ]
+            }
+          ]
+        }
+      ],
+      styles: {
+        piTableHeader: { fontSize: 8, color: '#000', margin: [1, 2, 1, 2] },
+        piTableCell: { fontSize: 7.5, color: '#1e293b', margin: [1, 2, 1, 2] },
+        piTableTotal: { fontSize: 8, color: '#000', margin: [1, 2, 1, 2] },
+      }
+    };
+
+    return this._generateAndSave(docDefinition, `PI-${(pi.pi_number || 'draft').replace(/[/\\?%*:|"<>]/g, '-')}`);
+  },
+
   async _generateAndSave(docDefinition, filename) {
     const pdfmake = require('pdfmake/build/pdfmake');
     let pdfFonts;

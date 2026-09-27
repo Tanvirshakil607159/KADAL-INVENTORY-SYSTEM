@@ -1334,6 +1334,307 @@ export const webBridge = {
     clearData: () => wrap(async () => { throw new Error('Not available in web version'); }),
   },
   
+  // Finance (Proforma Invoices)
+  finance: {
+    getAll: (filters = {}) => wrap(async () => {
+      const supabase = getSupabase();
+      if (!supabase) return [];
+      let query = supabase.from('proforma_invoices').select(`
+        *,
+        users!proforma_invoices_created_by_fkey (full_name),
+        recipients (name, receiver_address),
+        proforma_invoice_items (*)
+      `).order('pi_date', { ascending: false }).limit(500);
+
+      if (filters.status) query = query.eq('status', filters.status);
+      if (filters.recipientId) query = query.eq('recipient_id', filters.recipientId);
+      if (filters.dateFrom) query = query.gte('pi_date', filters.dateFrom);
+      if (filters.dateTo) query = query.lte('pi_date', filters.dateTo + 'T23:59:59.999Z');
+
+      const { data, error } = await query;
+      if (error) throw error;
+
+      const normalizePiItem = (it, idx) => {
+        const slNo = it.sl_no !== undefined ? it.sl_no : (it.slNo !== undefined ? it.slNo : idx + 1);
+        const desc = it.item_description || it.itemDescription || it.item_name || it.name || '';
+        const poStyle = it.po_style_no || it.poStyleNo || it.style_name || it.order_number || it.purchase_no || '-';
+        const qty = Number(it.quantity || 0);
+        const unit = (it.unit || 'PCS').toUpperCase();
+        const unitPrice = Number(it.unit_price !== undefined ? it.unit_price : (it.unitPrice !== undefined ? it.unitPrice : 0));
+        const totalAmount = Number(it.total_amount !== undefined ? it.total_amount : (it.totalAmount !== undefined ? it.totalAmount : (qty * unitPrice).toFixed(2)));
+        return {
+          ...it,
+          slNo,
+          sl_no: slNo,
+          challanId: it.challan_id || it.challanId || null,
+          challan_id: it.challan_id || it.challanId || null,
+          itemId: it.item_id || it.itemId || null,
+          item_id: it.item_id || it.itemId || null,
+          itemDescription: desc,
+          item_description: desc,
+          poStyleNo: poStyle,
+          po_style_no: poStyle,
+          quantity: qty,
+          unit,
+          unitPrice,
+          unit_price: unitPrice,
+          totalAmount,
+          total_amount: totalAmount,
+        };
+      };
+
+      let result = (data || []).map(pi => {
+        const items = (pi.proforma_invoice_items || []).map((it, idx) => normalizePiItem(it, idx));
+        return {
+          ...pi,
+          created_by_name: pi.users?.full_name,
+          items,
+          item_count: items.length
+        };
+      });
+
+      if (filters.search) {
+        const s = filters.search.toLowerCase();
+        result = result.filter(pi =>
+          pi.pi_number?.toLowerCase().includes(s) ||
+          pi.bill_number?.toLowerCase().includes(s) ||
+          pi.applicant_name?.toLowerCase().includes(s) ||
+          pi.buyer?.toLowerCase().includes(s) ||
+          pi.challan_numbers?.toLowerCase().includes(s)
+        );
+      }
+      return result;
+    }),
+
+    getById: (id) => wrap(async () => {
+      const supabase = getSupabase();
+      if (!supabase) return null;
+      const { data, error } = await supabase.from('proforma_invoices').select(`
+        *,
+        users!proforma_invoices_created_by_fkey (full_name),
+        recipients (name, receiver_address),
+        proforma_invoice_items (*)
+      `).eq('id', id).maybeSingle();
+      if (error) throw error;
+      if (!data) return null;
+      data.created_by_name = data.users?.full_name;
+      data.items = (data.proforma_invoice_items || []).sort((a, b) => a.sl_no - b.sl_no).map((it, idx) => {
+        const slNo = it.sl_no !== undefined ? it.sl_no : (it.slNo !== undefined ? it.slNo : idx + 1);
+        const desc = it.item_description || it.itemDescription || it.item_name || it.name || '';
+        const poStyle = it.po_style_no || it.poStyleNo || it.style_name || it.order_number || it.purchase_no || '-';
+        const qty = Number(it.quantity || 0);
+        const unit = (it.unit || 'PCS').toUpperCase();
+        const unitPrice = Number(it.unit_price !== undefined ? it.unit_price : (it.unitPrice !== undefined ? it.unitPrice : 0));
+        const totalAmount = Number(it.total_amount !== undefined ? it.total_amount : (it.totalAmount !== undefined ? it.totalAmount : (qty * unitPrice).toFixed(2)));
+        return {
+          ...it,
+          slNo, sl_no: slNo,
+          itemDescription: desc, item_description: desc,
+          poStyleNo: poStyle, po_style_no: poStyle,
+          quantity: qty, unit, unitPrice, unit_price: unitPrice,
+          totalAmount, total_amount: totalAmount
+        };
+      });
+      return data;
+    }),
+
+    getByNumber: (piNumber) => wrap(async () => {
+      const supabase = getSupabase();
+      if (!supabase) return null;
+      const { data, error } = await supabase.from('proforma_invoices').select(`
+        *,
+        users!proforma_invoices_created_by_fkey (full_name),
+        proforma_invoice_items (*)
+      `).eq('pi_number', piNumber).maybeSingle();
+      if (error) throw error;
+      if (!data) return null;
+      data.items = (data.proforma_invoice_items || []).sort((a, b) => a.sl_no - b.sl_no).map((it, idx) => {
+        const slNo = it.sl_no !== undefined ? it.sl_no : (it.slNo !== undefined ? it.slNo : idx + 1);
+        const desc = it.item_description || it.itemDescription || it.item_name || it.name || '';
+        const poStyle = it.po_style_no || it.poStyleNo || it.style_name || it.order_number || it.purchase_no || '-';
+        const qty = Number(it.quantity || 0);
+        const unit = (it.unit || 'PCS').toUpperCase();
+        const unitPrice = Number(it.unit_price !== undefined ? it.unit_price : (it.unitPrice !== undefined ? it.unitPrice : 0));
+        const totalAmount = Number(it.total_amount !== undefined ? it.total_amount : (it.totalAmount !== undefined ? it.totalAmount : (qty * unitPrice).toFixed(2)));
+        return {
+          ...it,
+          slNo, sl_no: slNo,
+          itemDescription: desc, item_description: desc,
+          poStyleNo: poStyle, po_style_no: poStyle,
+          quantity: qty, unit, unitPrice, unit_price: unitPrice,
+          totalAmount, total_amount: totalAmount
+        };
+      });
+      return data;
+    }),
+
+    create: (data) => wrap(async () => {
+      const supabase = getSupabase();
+      if (!supabase) throw new Error('Database not connected');
+      const currentUser = JSON.parse(sessionStorage.getItem('kadal_user') || '{}');
+
+      const { data: inserted, error: piErr } = await supabase.from('proforma_invoices').insert([{
+        pi_number: data.piNumber,
+        bill_number: data.billNumber || null,
+        pi_date: data.piDate || new Date().toISOString(),
+        bill_date: data.billDate || null,
+        recipient_id: data.recipientId || null,
+        applicant_name: data.applicantName,
+        applicant_address: data.applicantAddress || null,
+        beneficiary_name: data.beneficiaryName || 'K.A. DESIGN ACCESSORIES LTD.',
+        beneficiary_address: data.beneficiaryAddress || '356/1, BLOCK-B, TEK KATHORA, SALNA, GAZIPUR-1703, BANGLADESH',
+        beneficiary_bin: data.beneficiaryBin || null,
+        bank_details: data.bankDetails || null,
+        buyer: data.buyer || null,
+        challan_ids: data.challanIds || [],
+        challan_numbers: data.challanNumbers || null,
+        currency: data.currency || 'USD',
+        currency_symbol: data.currencySymbol || '$',
+        total_quantity: Number(data.totalQuantity) || 0,
+        total_amount: Number(data.totalAmount) || 0,
+        amount_in_words: data.amountInWords || null,
+        net_weight: data.netWeight || '250 KGS',
+        gross_weight: data.grossWeight || '260 KGS',
+        terms_conditions: data.termsConditions || 'CASH ON DELIVERY.',
+        prepared_by: data.preparedBy || 'Md. Ariful Rahman\nAccounts & Admin\nK. A. Design Accessories Ltd.',
+        authorized_by: data.authorizedBy || 'Maksudha Akter Kumu\nChairman\nK.A. DESIGN ACCESSORIES LTD.',
+        accepted_by: data.acceptedBy || null,
+        status: data.status || 'ACTIVE',
+        notes: data.notes || null,
+        created_by: currentUser.id || null
+      }]).select().single();
+
+      if (piErr) throw piErr;
+
+      if (data.items && data.items.length > 0) {
+        const itemRows = data.items.map((it, idx) => {
+          const desc = it.itemDescription || it.item_description || it.item_name || it.name || '';
+          const poStyle = it.poStyleNo || it.po_style_no || it.style_name || it.order_number || it.purchase_no || null;
+          const rate = Number(it.unitPrice !== undefined ? it.unitPrice : it.unit_price) || 0;
+          const lineTotal = Number(it.totalAmount !== undefined ? it.totalAmount : (it.total_amount !== undefined ? it.total_amount : 0));
+          return {
+            pi_id: inserted.id,
+            sl_no: it.slNo || it.sl_no || idx + 1,
+            challan_id: it.challanId || it.challan_id || null,
+            item_id: it.itemId || it.item_id || null,
+            item_description: desc,
+            po_style_no: poStyle,
+            quantity: Number(it.quantity) || 0,
+            unit: (it.unit || 'PCS').toUpperCase(),
+            unit_price: rate,
+            total_amount: lineTotal,
+            notes: it.notes || null
+          };
+        });
+        const { error: itemsErr } = await supabase.from('proforma_invoice_items').insert(itemRows);
+        if (itemsErr) throw itemsErr;
+      }
+
+      return { id: inserted.id, piNumber: data.piNumber };
+    }),
+
+    update: (id, data) => wrap(async () => {
+      const supabase = getSupabase();
+      if (!supabase) throw new Error('Database not connected');
+      const updateData = {};
+      if (data.billNumber !== undefined) updateData.bill_number = data.billNumber;
+      if (data.piDate !== undefined) updateData.pi_date = data.piDate;
+      if (data.billDate !== undefined) updateData.bill_date = data.billDate;
+      if (data.buyer !== undefined) updateData.buyer = data.buyer;
+      if (data.netWeight !== undefined) updateData.net_weight = data.netWeight;
+      if (data.grossWeight !== undefined) updateData.gross_weight = data.grossWeight;
+      if (data.termsConditions !== undefined) updateData.terms_conditions = data.termsConditions;
+      if (data.status !== undefined) updateData.status = data.status;
+      if (data.notes !== undefined) updateData.notes = data.notes;
+      if (data.totalAmount !== undefined) updateData.total_amount = Number(data.totalAmount);
+      if (data.totalQuantity !== undefined) updateData.total_quantity = Number(data.totalQuantity);
+      if (data.amountInWords !== undefined) updateData.amount_in_words = data.amountInWords;
+      updateData.updated_at = new Date().toISOString();
+
+      const { error } = await supabase.from('proforma_invoices').update(updateData).eq('id', id);
+      if (error) throw error;
+      return true;
+    }),
+
+    delete: (id) => wrap(async () => {
+      const supabase = getSupabase();
+      if (!supabase) throw new Error('Database not connected');
+      const { error } = await supabase.from('proforma_invoices').delete().eq('id', id);
+      if (error) throw error;
+      return true;
+    }),
+
+    getNextNumber: (applicantName) => wrap(async () => {
+      const supabase = getSupabase();
+      if (!supabase) return 'PI-001';
+      const year = new Date().getFullYear();
+      let prefix = 'PI';
+      if (applicantName) {
+        const clean = applicantName.replace(/[^a-zA-Z0-9\s]/g, '').trim();
+        const words = clean.split(/\s+/).filter(Boolean);
+        if (words.length >= 2) {
+          const letters = words.map(w => w[0].toUpperCase()).join('');
+          if (letters.length >= 2 && letters.length <= 6) prefix = letters;
+        }
+      }
+      const pattern = `${prefix}/KADAL/${year}/%`;
+      const { data } = await supabase.from('proforma_invoices').select('pi_number').ilike('pi_number', pattern);
+      let maxSeq = 0;
+      (data || []).forEach(row => {
+        const parts = (row.pi_number || '').split('/');
+        if (parts.length >= 4) {
+          const seq = parseInt(parts[3], 10);
+          if (!isNaN(seq) && seq > maxSeq) maxSeq = seq;
+        }
+      });
+      return `${prefix}/KADAL/${year}/${maxSeq + 1}`;
+    }),
+
+    getNextBillNumber: (applicantName) => wrap(async () => {
+      const supabase = getSupabase();
+      if (!supabase) return 'BILL-001';
+      const year = new Date().getFullYear();
+      let prefix = 'PI';
+      if (applicantName) {
+        const clean = applicantName.replace(/[^a-zA-Z0-9\s]/g, '').trim();
+        const words = clean.split(/\s+/).filter(Boolean);
+        if (words.length >= 2) {
+          const letters = words.map(w => w[0].toUpperCase()).join('');
+          if (letters.length >= 2 && letters.length <= 6) prefix = letters;
+        }
+      }
+      const pattern = `${prefix}/KADAL/${year}/%`;
+      const { data } = await supabase.from('proforma_invoices').select('bill_number').not('bill_number', 'is', null).ilike('bill_number', pattern);
+      let maxSeq = 0;
+      (data || []).forEach(row => {
+        const parts = (row.bill_number || '').split('/');
+        if (parts.length >= 4) {
+          const seq = parseInt(parts[3], 10);
+          if (!isNaN(seq) && seq > maxSeq) maxSeq = seq;
+        }
+      });
+      return `${prefix}/KADAL/${year}/${maxSeq + 1}`;
+    }),
+
+    getUsedChallanIds: () => wrap(async () => {
+      const supabase = getSupabase();
+      if (!supabase) return [];
+      const { data } = await supabase.from('proforma_invoices').select('challan_ids').neq('status', 'CANCELLED');
+      const used = new Set();
+      (data || []).forEach(row => {
+        try {
+          const ids = typeof row.challan_ids === 'string' ? JSON.parse(row.challan_ids) : row.challan_ids;
+          if (Array.isArray(ids)) ids.forEach(id => used.add(Number(id)));
+        } catch (e) {}
+      });
+      return Array.from(used);
+    }),
+
+    exportPdf: (id) => wrap(async () => {
+      throw new Error('Please use the browser Print button in the web version for high quality direct printing or saving as PDF');
+    })
+  },
+
   // Update (Mocked for web)
   update: {
     check: () => wrap(async () => { console.log('Update check mocked in web'); return true; }),

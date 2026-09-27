@@ -296,6 +296,76 @@ function runMigrations(db) {
     db.run("INSERT INTO _migrations (name) VALUES ('033-add-issue-approval-setting')");
     console.log('[DB] Migration 033-add-issue-approval-setting applied successfully');
   }
+
+  // NEW MIGRATION: 034-add-finance-module
+  const applied34 = db.exec("SELECT * FROM _migrations WHERE name = '034-add-finance-module'");
+  if (applied34.length === 0 || applied34[0].values.length === 0) {
+    console.log('[DB] Running migration: 034-add-finance-module');
+    applyThirtyFourthMigration(db);
+    db.run("INSERT INTO _migrations (name) VALUES ('034-add-finance-module')");
+    console.log('[DB] Migration 034-add-finance-module applied successfully');
+  }
+}
+
+function applyThirtyFourthMigration(db) {
+  try {
+    db.run(`CREATE TABLE IF NOT EXISTS proforma_invoices (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      pi_number TEXT NOT NULL UNIQUE,
+      bill_number TEXT,
+      pi_date DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      bill_date DATETIME,
+      recipient_id INTEGER REFERENCES recipients(id),
+      applicant_name TEXT NOT NULL,
+      applicant_address TEXT,
+      beneficiary_name TEXT NOT NULL DEFAULT 'K.A. DESIGN ACCESSORIES LTD.',
+      beneficiary_address TEXT DEFAULT '356/1, BLOCK-B, TEK KATHORA, SALNA, GAZIPUR-1703, BANGLADESH',
+      beneficiary_bin TEXT DEFAULT '',
+      bank_details TEXT DEFAULT 'UNITED COMMERCIAL BANK PLC.\nTONGI BRANCH\n18, S.K. MANNAN TOWER, CHERAG ALI\nGAZIPUR-1712, BANGLADESH\nSWIFT CODE: UCBLBDDHTNG',
+      buyer TEXT,
+      challan_ids TEXT,
+      challan_numbers TEXT,
+      currency TEXT DEFAULT 'USD',
+      currency_symbol TEXT DEFAULT '$',
+      total_quantity REAL DEFAULT 0,
+      total_amount REAL DEFAULT 0,
+      amount_in_words TEXT,
+      net_weight TEXT DEFAULT '250 KGS',
+      gross_weight TEXT DEFAULT '260 KGS',
+      terms_conditions TEXT DEFAULT 'CASH ON DELIVERY.',
+      prepared_by TEXT DEFAULT 'Md. Ariful Rahman\nAccounts & Admin\nK. A. Design Accessories Ltd.',
+      authorized_by TEXT DEFAULT 'Maksudha Akter Kumu\nChairman\nK.A. DESIGN ACCESSORIES LTD.',
+      accepted_by TEXT,
+      status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK(status IN ('ACTIVE', 'CANCELLED', 'PAID')),
+      notes TEXT,
+      created_by INTEGER REFERENCES users(id),
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`);
+
+    db.run(`CREATE INDEX IF NOT EXISTS idx_pi_number ON proforma_invoices(pi_number)`);
+    db.run(`CREATE INDEX IF NOT EXISTS idx_pi_date ON proforma_invoices(pi_date)`);
+    db.run(`CREATE INDEX IF NOT EXISTS idx_pi_recipient ON proforma_invoices(recipient_id)`);
+
+    db.run(`CREATE TABLE IF NOT EXISTS proforma_invoice_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      pi_id INTEGER NOT NULL REFERENCES proforma_invoices(id) ON DELETE CASCADE,
+      sl_no INTEGER NOT NULL,
+      challan_id INTEGER REFERENCES challans(id),
+      item_id INTEGER REFERENCES items(id),
+      item_description TEXT NOT NULL,
+      po_style_no TEXT,
+      quantity REAL NOT NULL DEFAULT 0,
+      unit TEXT NOT NULL DEFAULT 'PCS',
+      unit_price REAL NOT NULL DEFAULT 0,
+      total_amount REAL NOT NULL DEFAULT 0,
+      notes TEXT
+    )`);
+
+    db.run(`CREATE INDEX IF NOT EXISTS idx_pi_items_pi ON proforma_invoice_items(pi_id)`);
+  } catch (e) {
+    console.error('[DB] Migration 034 error:', e.message);
+  }
 }
 
 function applyThirtyThirdMigration(db) {

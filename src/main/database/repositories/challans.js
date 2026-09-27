@@ -8,7 +8,7 @@ const ChallansRepo = {
         *,
         users!challans_created_by_fkey (full_name),
         challan_items (quantity, items (name, buyer_name, style_name, order_number, purchase_no))
-      `).order('challan_date', { ascending: false }).limit(500);
+      `).order('challan_date', { ascending: false }).limit(filters.limit || 2000);
 
       if (filters.status) query = query.eq('status', filters.status);
       if (filters.dateFrom) query = query.gte('challan_date', filters.dateFrom);
@@ -25,7 +25,10 @@ const ChallansRepo = {
           item_count: ci.length,
           total_quantity: ci.reduce((sum, item) => sum + (item.quantity || 0), 0),
           item_names: ci.map(item => item.items?.name).filter(Boolean).join(', '),
-          buyer_names: [...new Set(ci.map(item => item.items?.buyer_name).filter(Boolean))].join(', ')
+          buyer_names: [...new Set(ci.map(item => item.items?.buyer_name).filter(Boolean))].join(', '),
+          style_names: [...new Set(ci.map(item => item.items?.style_name).filter(Boolean))].join(', '),
+          order_numbers: [...new Set(ci.map(item => item.items?.order_number).filter(Boolean))].join(', '),
+          purchase_nos: [...new Set(ci.map(item => item.items?.purchase_no).filter(Boolean))].join(', ')
         };
       });
 
@@ -95,12 +98,16 @@ const ChallansRepo = {
 
     const w = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
 
+    const limit = filters.limit || 2000;
     return dbPrepare(`SELECT c.*, u.full_name as created_by_name, 
       (SELECT COUNT(*) FROM challan_items ci WHERE ci.challan_id = c.id) as item_count, 
       (SELECT COALESCE(SUM(ci.quantity), 0) FROM challan_items ci WHERE ci.challan_id = c.id) as total_quantity,
       (SELECT GROUP_CONCAT(i.name, ', ') FROM challan_items ci JOIN items i ON ci.item_id = i.id WHERE ci.challan_id = c.id) as item_names,
-      (SELECT GROUP_CONCAT(DISTINCT i.buyer_name) FROM challan_items ci JOIN items i ON ci.item_id = i.id WHERE ci.challan_id = c.id) as buyer_names
-      FROM challans c LEFT JOIN users u ON c.created_by = u.id ${w} ORDER BY c.challan_date DESC LIMIT 500`).all(...params);
+      (SELECT GROUP_CONCAT(DISTINCT i.buyer_name) FROM challan_items ci JOIN items i ON ci.item_id = i.id WHERE ci.challan_id = c.id) as buyer_names,
+      (SELECT GROUP_CONCAT(DISTINCT i.style_name) FROM challan_items ci JOIN items i ON ci.item_id = i.id WHERE ci.challan_id = c.id) as style_names,
+      (SELECT GROUP_CONCAT(DISTINCT i.order_number) FROM challan_items ci JOIN items i ON ci.item_id = i.id WHERE ci.challan_id = c.id) as order_numbers,
+      (SELECT GROUP_CONCAT(DISTINCT i.purchase_no) FROM challan_items ci JOIN items i ON ci.item_id = i.id WHERE ci.challan_id = c.id) as purchase_nos
+      FROM challans c LEFT JOIN users u ON c.created_by = u.id ${w} ORDER BY c.challan_date DESC LIMIT ${limit}`).all(...params);
   },
 
   async getDetailedHistory(filters = {}) {
@@ -304,6 +311,8 @@ const ChallansRepo = {
             order_quantity: item.order_quantity,
             current_stock: item.current_stock,
             order_number: item.order_number,
+            unit_price: item.unit_price,
+            currency: item.currency,
             total_shipped
           };
         });
@@ -315,7 +324,7 @@ const ChallansRepo = {
     const challan = dbPrepare(`SELECT c.*, u.full_name as created_by_name, u2.full_name as cancelled_by_name FROM challans c LEFT JOIN users u ON c.created_by = u.id LEFT JOIN users u2 ON c.cancelled_by = u2.id WHERE c.challan_number = ?`).get(number);
     if (challan) {
       challan.items = dbPrepare(`
-        SELECT ci.*, i.name as item_name, i.item_code, i.size, i.color, i.buyer_name, i.style_name, i.purchase_no, i.order_quantity, i.current_stock, i.order_number,
+        SELECT ci.*, i.name as item_name, i.item_code, i.size, i.color, i.buyer_name, i.style_name, i.purchase_no, i.order_quantity, i.current_stock, i.order_number, i.unit_price, i.currency,
         (SELECT COALESCE(SUM(ci2.quantity), 0) FROM challan_items ci2 JOIN challans c2 ON ci2.challan_id = c2.id WHERE ci2.item_id = ci.item_id AND c2.status = 'ACTIVE') as total_shipped
         FROM challan_items ci 
         JOIN items i ON ci.item_id = i.id 
@@ -376,6 +385,8 @@ const ChallansRepo = {
             order_quantity: item.order_quantity,
             current_stock: item.current_stock,
             order_number: item.order_number,
+            unit_price: item.unit_price,
+            currency: item.currency,
             total_shipped
           };
         });
@@ -387,7 +398,7 @@ const ChallansRepo = {
     const challan = dbPrepare(`SELECT c.*, u.full_name as created_by_name, u2.full_name as cancelled_by_name FROM challans c LEFT JOIN users u ON c.created_by = u.id LEFT JOIN users u2 ON c.cancelled_by = u2.id WHERE c.id = ?`).get(id);
     if (challan) {
       challan.items = dbPrepare(`
-        SELECT ci.*, i.name as item_name, i.item_code, i.size, i.color, i.buyer_name, i.style_name, i.purchase_no, i.order_quantity, i.current_stock, i.order_number,
+        SELECT ci.*, i.name as item_name, i.item_code, i.size, i.color, i.buyer_name, i.style_name, i.purchase_no, i.order_quantity, i.current_stock, i.order_number, i.unit_price, i.currency,
         (SELECT COALESCE(SUM(ci2.quantity), 0) FROM challan_items ci2 JOIN challans c2 ON ci2.challan_id = c2.id WHERE ci2.item_id = ci.item_id AND c2.status = 'ACTIVE') as total_shipped
         FROM challan_items ci 
         JOIN items i ON ci.item_id = i.id 

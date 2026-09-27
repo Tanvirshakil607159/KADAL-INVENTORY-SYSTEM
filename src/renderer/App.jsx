@@ -20,6 +20,7 @@ import GatePassPage from './pages/GatePassPage';
 import IssuePage from './pages/IssuePage';
 import ProductionPage from './pages/ProductionPage';
 import RequisitionPage from './pages/RequisitionPage';
+import FinancePage from './pages/FinancePage';
 import StockInOutPage from './pages/StockInOutPage';
 import NotificationManager from './components/common/NotificationManager';
 import UpdateProgress from './components/common/UpdateProgress';
@@ -185,6 +186,7 @@ export default function App() {
       case 'reports': return <ReportsPage />;
       case 'approvals': return <ApprovalsPage />;
       case 'gate-pass': return <GatePassPage />;
+      case 'finance': return <FinancePage />;
       case 'issue': return <IssuePage />;
       case 'production': return <ProductionPage />;
       case 'requisition': return <RequisitionPage />;

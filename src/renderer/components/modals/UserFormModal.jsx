@@ -20,6 +20,7 @@ export default function UserFormModal({ data, onSaved }) {
         pending_items: form.perms.pending_items ? 'rw' : 'none',
         warehouses: form.perms.warehouses ? 'rw' : 'none',
         challan: form.perms.challan ? 'rw' : 'none',
+        finance: form.perms.finance ? 'rw' : 'none',
         approvals: form.perms.approvals ? 'rw' : 'none',
         gate_pass: form.perms.gate_pass ? 'rw' : 'none',
         requisition: form.perms.requisition ? 'rw' : 'none',
@@ -95,6 +96,7 @@ export default function UserFormModal({ data, onSaved }) {
                     pending_items: p.pending_items === 'rw' || p.pending_items === true,
                     warehouses: p.warehouses === 'rw' || p.warehouses === true,
                     challan: p.challan === 'rw' || p.challan === true,
+                    finance: p.finance === 'rw' || p.finance === true,
                     approvals: p.approvals === 'rw' || p.approvals === true,
                     gate_pass: p.gate_pass === 'rw' || p.gate_pass === true,
                     requisition: p.requisition === 'rw' || p.requisition === true,
@@ -143,6 +145,9 @@ export default function UserFormModal({ data, onSaved }) {
               </label>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
                 <input type="checkbox" checked={form.perms.challan} onChange={e=>setForm(f=>({...f, perms: {...f.perms, challan: e.target.checked}}))} /> Create Challan
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+                <input type="checkbox" checked={form.perms.finance} onChange={e=>setForm(f=>({...f, perms: {...f.perms, finance: e.target.checked}}))} /> Finance (PI)
               </label>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
                 <input type="checkbox" checked={form.perms.approvals} onChange={e=>setForm(f=>({...f, perms: {...f.perms, approvals: e.target.checked}}))} /> Approvals

@@ -280,5 +280,19 @@ contextBridge.exposeInMainWorld('kadal', {
     exportExcel: (id) => ipcRenderer.invoke('requisitions:exportExcel', id),
   },
 
+  // Finance (Proforma Invoices)
+  finance: {
+    getAll: (filters) => ipcRenderer.invoke('finance:getAll', filters),
+    getById: (id) => ipcRenderer.invoke('finance:getById', id),
+    getByNumber: (piNumber) => ipcRenderer.invoke('finance:getByNumber', piNumber),
+    create: (data) => ipcRenderer.invoke('finance:create', data),
+    update: (id, data) => ipcRenderer.invoke('finance:update', id, data),
+    delete: (id) => ipcRenderer.invoke('finance:delete', id),
+    getNextNumber: (applicantName) => ipcRenderer.invoke('finance:getNextNumber', applicantName),
+    getNextBillNumber: (applicantName) => ipcRenderer.invoke('finance:getNextBillNumber', applicantName),
+    getUsedChallanIds: () => ipcRenderer.invoke('finance:getUsedChallanIds'),
+    exportPdf: (id) => ipcRenderer.invoke('finance:exportPdf', id),
+  },
+
 });
 

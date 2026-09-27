@@ -34,6 +34,7 @@ const WarehouseBinsRepo = require('./database/repositories/warehouse-bins');
 const WarehouseService = require('./services/warehouse-service');
 const RequisitionService = require('./services/requisition-service');
 const RequisitionsRepo = require('./database/repositories/requisitions');
+const FinanceService = require('./services/finance-service');
 function wrapHandler(fn) {
   return async (event, ...args) => {
     try {
@@ -862,6 +863,47 @@ function registerIpcHandlers() {
       `Status: ${req.status} | Date: ${new Date(req.requisition_date).toLocaleDateString('en-GB')}`,
     ];
     return ExcelGenerator.generateReport(`Requisition-${req.requisition_no}`, columns, req.items || [], settingsData, { subtitles });
+  }));
+
+  // ==================== FINANCE (PROFORMA INVOICES) ====================
+  ipcMain.handle('finance:getAll', wrapHandler((filters) => {
+    return FinanceService.getAll(filters);
+  }));
+
+  ipcMain.handle('finance:getById', wrapHandler((id) => {
+    return FinanceService.getById(id);
+  }));
+
+  ipcMain.handle('finance:getByNumber', wrapHandler((piNumber) => {
+    return FinanceService.getByNumber(piNumber);
+  }));
+
+  ipcMain.handle('finance:create', wrapHandler((data) => {
+    return FinanceService.create(data);
+  }));
+
+  ipcMain.handle('finance:update', wrapHandler((id, data) => {
+    return FinanceService.update(id, data);
+  }));
+
+  ipcMain.handle('finance:delete', wrapHandler((id) => {
+    return FinanceService.delete(id);
+  }));
+
+  ipcMain.handle('finance:getNextNumber', wrapHandler((applicantName) => {
+    return FinanceService.getNextNumber(applicantName);
+  }));
+
+  ipcMain.handle('finance:getNextBillNumber', wrapHandler((applicantName) => {
+    return FinanceService.getNextBillNumber(applicantName);
+  }));
+
+  ipcMain.handle('finance:getUsedChallanIds', wrapHandler(() => {
+    return FinanceService.getUsedChallanIds();
+  }));
+
+  ipcMain.handle('finance:exportPdf', wrapHandler((id) => {
+    return FinanceService.exportPdf(id);
   }));
 
   console.log('[IPC] All handlers registered');

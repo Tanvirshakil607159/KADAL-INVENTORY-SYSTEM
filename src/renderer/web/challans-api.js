@@ -5,25 +5,52 @@ export const challansApi = {
     const supabase = getSupabase();
     let query = supabase.from('challans').select(`
       *,
-      items:challan_items(*),
+      challan_items:challan_items(quantity, items(name, buyer_name, style_name, order_number, purchase_no, unit_price, currency)),
       created_by_user:users!challans_created_by_fkey (full_name),
       cancelled_by_user:users!challans_cancelled_by_fkey (full_name)
     `).order('challan_date', { ascending: false });
+
+    if (filters.status) query = query.eq('status', filters.status);
     if (filters.receiverName) query = query.ilike('receiver_name', `%${filters.receiverName}%`);
-    const { data, error } = await query.limit(50);
+    if (filters.dateFrom) query = query.gte('challan_date', filters.dateFrom);
+    if (filters.dateTo) query = query.lte('challan_date', filters.dateTo + 'T23:59:59.999Z');
+
+    const limit = filters.limit || 2000;
+    const { data, error } = await query.limit(limit);
     if (error) throw error;
     if (data) {
       data.forEach(d => {
         d.created_by_name = d.created_by_user?.full_name;
         d.cancelled_by_name = d.cancelled_by_user?.full_name;
+        const ci = d.challan_items || [];
+        d.item_count = ci.length;
+        d.total_quantity = ci.reduce((sum, item) => sum + (item.quantity || 0), 0);
+        d.item_names = ci.map(item => item.items?.name).filter(Boolean).join(', ');
+        d.buyer_names = [...new Set(ci.map(item => item.items?.buyer_name).filter(Boolean))].join(', ');
+        d.style_names = [...new Set(ci.map(item => item.items?.style_name).filter(Boolean))].join(', ');
+        d.order_numbers = [...new Set(ci.map(item => item.items?.order_number).filter(Boolean))].join(', ');
+        d.purchase_nos = [...new Set(ci.map(item => item.items?.purchase_no).filter(Boolean))].join(', ');
       });
+
+      if (filters.search) {
+        const s = filters.search.toLowerCase();
+        return data.filter(d => 
+          (d.challan_number && d.challan_number.toLowerCase().includes(s)) ||
+          (d.receiver_name && d.receiver_name.toLowerCase().includes(s)) ||
+          (d.buyer_names && d.buyer_names.toLowerCase().includes(s)) ||
+          (d.item_names && d.item_names.toLowerCase().includes(s)) ||
+          (d.style_names && d.style_names.toLowerCase().includes(s)) ||
+          (d.order_numbers && d.order_numbers.toLowerCase().includes(s)) ||
+          (d.purchase_nos && d.purchase_nos.toLowerCase().includes(s))
+        );
+      }
     }
     return data;
   },
   getById: async (id) => {
     const { data, error } = await getSupabase().from('challans').select(`
       *,
-      items:challan_items(*),
+      items:challan_items(*, items(*)),
       created_by_user:users!challans_created_by_fkey (full_name),
       cancelled_by_user:users!challans_cancelled_by_fkey (full_name)
     `).eq('id', id).single();
@@ -31,6 +58,24 @@ export const challansApi = {
     if (data) {
       data.created_by_name = data.created_by_user?.full_name;
       data.cancelled_by_name = data.cancelled_by_user?.full_name;
+      data.items = (data.items || []).map(ci => {
+        const item = ci.items || {};
+        return {
+          ...ci,
+          item_name: item.name,
+          item_code: item.item_code,
+          size: item.size,
+          color: item.color,
+          buyer_name: item.buyer_name,
+          style_name: item.style_name,
+          purchase_no: item.purchase_no,
+          order_quantity: item.order_quantity,
+          current_stock: item.current_stock,
+          order_number: item.order_number,
+          unit_price: item.unit_price,
+          currency: item.currency,
+        };
+      });
     }
     return data;
   },
