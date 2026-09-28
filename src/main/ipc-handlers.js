@@ -227,6 +227,10 @@ function registerIpcHandlers() {
     return ItemsRepo.getNextCode();
   }));
 
+  ipcMain.handle('items:updateTier', wrapHandler((tierId, data) => {
+    return InventoryService.updateTier(tierId, data);
+  }));
+
   // ==================== STOCK ====================
   ipcMain.handle('stock:addMovement', wrapHandler((data) => {
     return InventoryService.addStockMovement(data);

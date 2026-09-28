@@ -4,7 +4,7 @@ import { Clock, CheckCircle, XCircle, ArrowUpDown, ArrowUp, ArrowDown, AlertCirc
 
 function IssueApprovalDetails({ safeData, renderProperty }) {
   const [prodItems, setProdItems] = useState(safeData?.producedProducts || []);
-  const issueItems = safeData?.items || [];
+  const [issueItems, setIssueItems] = useState(safeData?.items || []);
 
   useEffect(() => {
     let isMounted = true;
@@ -51,6 +51,25 @@ function IssueApprovalDetails({ safeData, renderProperty }) {
     } else {
       setProdItems(initial);
     }
+
+    const initialIssue = safeData?.items || [];
+    if (initialIssue.some(it => !it.color) && window.kadal?.items?.getById) {
+      Promise.all(initialIssue.map(async (it) => {
+        if (it.color) return it;
+        try {
+          const res = await window.kadal.items.getById(it.itemId);
+          if (res?.success && res?.data) {
+            return { ...it, color: res.data.color || '-' };
+          }
+        } catch (e) {}
+        return it;
+      })).then(results => {
+        if (isMounted) setIssueItems(results);
+      });
+    } else {
+      setIssueItems(initialIssue);
+    }
+
     return () => { isMounted = false; };
   }, [safeData]);
 

@@ -66,6 +66,7 @@ contextBridge.exposeInMainWorld('kadal', {
     search: (query) => ipcRenderer.invoke('items:search', query),
     getDistinctValues: () => ipcRenderer.invoke('items:getDistinctValues'),
     getNextCode: () => ipcRenderer.invoke('items:getNextCode'),
+    updateTier: (tierId, data) => ipcRenderer.invoke('items:updateTier', tierId, data),
   },
 
   // Stock

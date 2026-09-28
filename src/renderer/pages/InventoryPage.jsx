@@ -1,7 +1,7 @@
 import SearchableSelect from '../components/ui/SearchableSelect';
 import React, { useEffect, useState, useCallback } from 'react';
 import useStore from '../store/useStore';
-import { Plus, Search, Package, ArrowUpDown, ArrowUp, ArrowDown, Printer, Edit2, Trash2 } from 'lucide-react';
+import { Plus, Search, Package, ArrowUpDown, ArrowUp, ArrowDown, Printer, Edit2, Trash2, History } from 'lucide-react';
 
 export default function InventoryPage() {
   const { addToast, showConfirm, categories, setCategories, setSuppliers, setUnits, user, openModal } = useStore();
@@ -176,6 +176,7 @@ export default function InventoryPage() {
                 <SortHeader label="Code" field="item_code" />
                 <SortHeader label="Item Name" field="name" />
                 <SortHeader label="Order No" field="order_number" />
+                <SortHeader label="Issue No" field="issue_numbers" />
                 <SortHeader label="Category" field="category_name" />
                 <SortHeader label="Size" field="size" />
                 <SortHeader label="Color" field="color" />
@@ -194,6 +195,7 @@ export default function InventoryPage() {
                   <td className="text-mono" style={{ fontSize: 12, color: 'var(--accent)' }}>{item.item_code}</td>
                   <td style={{ fontWeight: 600 }}>{item.name}</td>
                   <td style={{ fontSize: 13 }}>{item.order_number || '-'}</td>
+                  <td style={{ fontSize: 13, color: 'var(--text-muted)' }}>{item.issue_numbers || '-'}</td>
                   <td><span className="badge badge-info">{item.category_name || '-'}</span></td>
                   <td>{item.size || '-'}</td>
                   <td>{item.color || '-'}</td>
@@ -285,7 +287,10 @@ export default function InventoryPage() {
                     <div className="table-actions">
                       <button className="btn btn-ghost btn-icon btn-sm" title="Print Barcode" onClick={() => openModal('BARCODE', item)}><Printer size={15} color="var(--text-color)" /></button>
                       {(user?.roleName === 'Admin' || user?.roleName === 'Super Admin') && (
-                        <button className="btn btn-ghost btn-icon btn-sm" title="Edit" onClick={() => openModal('ITEM_FORM', { item, buyers, distinctValues, onSaved: loadData })}><Edit2 size={15} /></button>
+                        <>
+                          <button className="btn btn-ghost btn-icon btn-sm" title="Edit Item Details" onClick={() => openModal('ITEM_FORM', { item, buyers, distinctValues, onSaved: loadData })}><Edit2 size={15} /></button>
+                          <button className="btn btn-ghost btn-icon btn-sm" title="Edit Stock-In Info" onClick={() => openModal('ITEM_TIERS', { item, onSaved: loadData })}><History size={15} color="var(--primary)" /></button>
+                        </>
                       )}
                       {user?.roleName === 'Super Admin' && (
                         <button className="btn btn-ghost btn-icon btn-sm" title="Delete" onClick={() => handleDelete(item)}><Trash2 size={15} color="var(--danger)" /></button>

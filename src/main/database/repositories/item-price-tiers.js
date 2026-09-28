@@ -290,6 +290,50 @@ const ItemPriceTiersRepo = {
       const curr = latestTier ? latestTier.currency : defaultCurrency;
       await this.addStockTier(parsedId, diff, price, curr);
     }
+  },
+
+  /**
+   * Update an existing price tier directly.
+   */
+  async updateTier(tierId, data) {
+    const parsedId = Number(tierId);
+    if (!parsedId) return false;
+
+    const numQty = Number(data.quantity);
+    const numPrice = Number(data.unit_price || 0);
+    const curr = data.currency || 'BDT';
+    const convRate = curr === 'USD' ? (Number(data.conversion_rate) || null) : null;
+
+    if (isCloudEnabled()) {
+      try {
+        const supabase = getSupabase();
+        const { error } = await supabase
+          .from('item_price_tiers')
+          .update({
+            quantity: numQty,
+            unit_price: numPrice,
+            currency: curr,
+            conversion_rate: convRate,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', parsedId);
+        if (error) throw error;
+        return true;
+      } catch (e) {
+        console.warn('[ItemPriceTiersRepo] Cloud updateTier error:', e.message);
+        return false;
+      }
+    }
+
+    try {
+      dbPrepare(
+        'UPDATE item_price_tiers SET quantity = ?, unit_price = ?, currency = ?, conversion_rate = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
+      ).run(numQty, numPrice, curr, convRate, parsedId);
+      return true;
+    } catch (e) {
+      console.warn('[ItemPriceTiersRepo] Local updateTier error:', e.message);
+      return false;
+    }
   }
 };
 

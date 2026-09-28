@@ -11,6 +11,7 @@ import ProductionEntryModal from './ProductionEntryModal';
 import BarcodeModal from './BarcodeModal';
 import TargetProductBrowserModal from './TargetProductBrowserModal';
 import RecipientFormModal from './RecipientFormModal';
+import ItemTiersModal from './ItemTiersModal';
 
 export default function GlobalModalManager() {
   const { modal } = useStore();
@@ -40,6 +41,8 @@ export default function GlobalModalManager() {
       return <BarcodeModal isOpen={true} onClose={() => useStore.getState().closeModal()} item={modal.data} />;
     case 'TARGET_PRODUCT_BROWSER':
       return <TargetProductBrowserModal data={modal.data} />;
+    case 'ITEM_TIERS':
+      return <ItemTiersModal data={modal.data} onSaved={modal.data.onSaved} />;
     default:
       return null;
   }

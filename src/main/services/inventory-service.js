@@ -11,6 +11,7 @@ const InventoryService = {
   async getAll(filters) { return await ItemsRepo.getAll(filters); },
   async getById(id) { return await ItemsRepo.getById(id); },
   async search(query) { return await ItemsRepo.search(query); },
+  async updateTier(tierId, data) { return await ItemPriceTiersRepo.updateTier(tierId, data); },
 
   async create(data) {
     const user = AuthService.getCurrentUser();

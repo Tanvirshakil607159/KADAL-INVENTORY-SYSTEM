@@ -44,6 +44,22 @@ const ItemsRepo = {
       const data = await fetchAll(query.order('name', { ascending: true }).order('id', { ascending: true }));
       const tiersMap = await ItemPriceTiersRepo.getAllActiveGrouped();
       
+      // Fetch issue mapping for factory issues
+      const { data: issueItemsData } = await getSupabase()
+        .from('issue_items')
+        .select('item_id, issues!inner(issue_id, issue_type)')
+        .eq('issues.issue_type', 'FACTORY');
+      
+      const issueMap = {};
+      if (issueItemsData) {
+        issueItemsData.forEach(ii => {
+          if (ii.issues) {
+            if (!issueMap[ii.item_id]) issueMap[ii.item_id] = new Set();
+            issueMap[ii.item_id].add(ii.issues.issue_id);
+          }
+        });
+      }
+      
       // Map Supabase relation format to match local format
       return data.map(i => {
         const itemTiers = tiersMap[i.id] || [];
@@ -51,6 +67,7 @@ const ItemsRepo = {
           ...i,
           category_name: i.categories?.name,
           supplier_name: i.suppliers?.name,
+          issue_numbers: issueMap[i.id] ? [...issueMap[i.id]].join(', ') : null,
           price_tiers: itemTiers.length > 0 ? itemTiers : (Number(i.current_stock) > 0 ? [{ quantity: i.current_stock, unit_price: i.unit_price, currency: i.currency, conversion_rate: i.conversion_rate }] : [])
         };
       });
@@ -71,7 +88,18 @@ const ItemsRepo = {
     }
     if (filters.lowStock) { where.push('i.current_stock <= i.min_stock_level'); }
     const w = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
-    const rows = dbPrepare(`SELECT i.*, c.name as category_name, s.name as supplier_name FROM items i LEFT JOIN categories c ON i.category_id = c.id LEFT JOIN suppliers s ON i.supplier_id = s.id ${w} ORDER BY i.name ASC`).all(...params);
+    const rows = dbPrepare(`
+      SELECT i.*, c.name as category_name, s.name as supplier_name,
+        (SELECT GROUP_CONCAT(DISTINCT iss.issue_id) 
+         FROM issue_items ii 
+         JOIN issues iss ON ii.issue_id = iss.id 
+         WHERE ii.item_id = i.id AND iss.issue_type = 'FACTORY') as issue_numbers
+      FROM items i 
+      LEFT JOIN categories c ON i.category_id = c.id 
+      LEFT JOIN suppliers s ON i.supplier_id = s.id 
+      ${w} 
+      ORDER BY i.name ASC
+    `).all(...params);
     const tiersMap = await ItemPriceTiersRepo.getAllActiveGrouped();
     return rows.map(i => {
       const itemTiers = tiersMap[i.id] || [];
