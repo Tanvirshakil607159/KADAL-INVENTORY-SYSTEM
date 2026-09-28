@@ -47,27 +47,70 @@ const ItemsRepo = {
       // Fetch issue mapping for factory issues
       const { data: issueItemsData } = await getSupabase()
         .from('issue_items')
-        .select('item_id, issues!inner(issue_id, issue_type)')
+        .select('item_id, issues!inner(issue_id, issue_type), items!inner(order_number)')
         .eq('issues.issue_type', 'FACTORY');
       
       const issueMap = {};
+      const orderIssueMap = {};
       if (issueItemsData) {
         issueItemsData.forEach(ii => {
           if (ii.issues) {
             if (!issueMap[ii.item_id]) issueMap[ii.item_id] = new Set();
             issueMap[ii.item_id].add(ii.issues.issue_id);
+            
+            if (ii.items && ii.items.order_number) {
+               if (!orderIssueMap[ii.items.order_number]) orderIssueMap[ii.items.order_number] = new Set();
+               orderIssueMap[ii.items.order_number].add(ii.issues.issue_id);
+            }
           }
+        });
+      }
+      
+      // Fetch issues directly to get target products mapping
+      const { data: targetIssuesData } = await getSupabase()
+        .from('issues')
+        .select('*')
+        .eq('issue_type', 'FACTORY');
+
+      if (targetIssuesData) {
+        targetIssuesData.forEach(iss => {
+          let prodIds = [];
+          if (iss.produced_item_ids) {
+            try {
+              const parsed = typeof iss.produced_item_ids === 'string' ? JSON.parse(iss.produced_item_ids) : iss.produced_item_ids;
+              if (Array.isArray(parsed)) prodIds = parsed.map(Number).filter(Boolean);
+            } catch(e){}
+          }
+          if (prodIds.length === 0 && iss.remarks) {
+            const match = String(iss.remarks).match(/\[PRODUCED_ITEM_IDS:([0-9,\s]+)\]/);
+            if (match && match[1]) prodIds = match[1].split(',').map(s => Number(s.trim())).filter(Boolean);
+          }
+          if (prodIds.length === 0 && iss.produced_item_id) {
+            prodIds = [Number(iss.produced_item_id)];
+          }
+          
+          prodIds.forEach(id => {
+            if (!issueMap[id]) issueMap[id] = new Set();
+            issueMap[id].add(iss.issue_id);
+          });
         });
       }
       
       // Map Supabase relation format to match local format
       return data.map(i => {
         const itemTiers = tiersMap[i.id] || [];
+        const set = new Set();
+        if (issueMap[i.id]) {
+          issueMap[i.id].forEach(n => set.add(n));
+        }
+        if (i.order_number && orderIssueMap[i.order_number]) {
+          orderIssueMap[i.order_number].forEach(n => set.add(n));
+        }
         return {
           ...i,
           category_name: i.categories?.name,
           supplier_name: i.suppliers?.name,
-          issue_numbers: issueMap[i.id] ? [...issueMap[i.id]].join(', ') : null,
+          issue_numbers: set.size > 0 ? [...set].join(', ') : null,
           price_tiers: itemTiers.length > 0 ? itemTiers : (Number(i.current_stock) > 0 ? [{ quantity: i.current_stock, unit_price: i.unit_price, currency: i.currency, conversion_rate: i.conversion_rate }] : [])
         };
       });
@@ -93,18 +136,52 @@ const ItemsRepo = {
         (SELECT GROUP_CONCAT(DISTINCT iss.issue_id) 
          FROM issue_items ii 
          JOIN issues iss ON ii.issue_id = iss.id 
-         WHERE ii.item_id = i.id AND iss.issue_type = 'FACTORY') as issue_numbers
+         JOIN items ii_item ON ii.item_id = ii_item.id
+         WHERE (ii.item_id = i.id OR (ii_item.order_number = i.order_number AND i.order_number IS NOT NULL AND i.order_number != ''))
+           AND iss.issue_type = 'FACTORY') as raw_issue_numbers
       FROM items i 
       LEFT JOIN categories c ON i.category_id = c.id 
       LEFT JOIN suppliers s ON i.supplier_id = s.id 
       ${w} 
       ORDER BY i.name ASC
     `).all(...params);
+    
+    const factoryIssues = dbPrepare(`SELECT issue_id, produced_item_id, produced_item_ids, remarks FROM issues WHERE issue_type = 'FACTORY' AND (produced_item_id IS NOT NULL OR produced_item_ids IS NOT NULL OR remarks LIKE '%[PRODUCED_ITEM_IDS:%')`).all();
+    const issueMap = {};
+    factoryIssues.forEach(iss => {
+      let prodIds = [];
+      if (iss.produced_item_ids) {
+        try {
+          const parsed = typeof iss.produced_item_ids === 'string' ? JSON.parse(iss.produced_item_ids) : iss.produced_item_ids;
+          if (Array.isArray(parsed)) prodIds = parsed.map(Number).filter(Boolean);
+        } catch(e){}
+      }
+      if (prodIds.length === 0 && iss.remarks) {
+        const match = String(iss.remarks).match(/\[PRODUCED_ITEM_IDS:([0-9,\s]+)\]/);
+        if (match && match[1]) prodIds = match[1].split(',').map(s => Number(s.trim())).filter(Boolean);
+      }
+      if (prodIds.length === 0 && iss.produced_item_id) {
+        prodIds = [Number(iss.produced_item_id)];
+      }
+      prodIds.forEach(id => {
+        if (!issueMap[id]) issueMap[id] = new Set();
+        issueMap[id].add(iss.issue_id);
+      });
+    });
+
     const tiersMap = await ItemPriceTiersRepo.getAllActiveGrouped();
     return rows.map(i => {
       const itemTiers = tiersMap[i.id] || [];
+      const set = new Set();
+      if (i.raw_issue_numbers) {
+        i.raw_issue_numbers.split(',').forEach(n => set.add(n));
+      }
+      if (issueMap[i.id]) {
+        issueMap[i.id].forEach(n => set.add(n));
+      }
       return {
         ...i,
+        issue_numbers: set.size > 0 ? [...set].join(', ') : null,
         price_tiers: itemTiers.length > 0 ? itemTiers : (Number(i.current_stock) > 0 ? [{ quantity: i.current_stock, unit_price: i.unit_price, currency: i.currency, conversion_rate: i.conversion_rate }] : [])
       };
     });
