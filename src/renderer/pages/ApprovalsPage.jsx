@@ -127,6 +127,7 @@ function IssueApprovalDetails({ safeData, renderProperty }) {
               <th>Item Name</th>
               <th>Code</th>
               <th>Buyer</th>
+              <th>Color</th>
               <th>Style / Order</th>
               <th className="text-right">Stock</th>
               <th className="text-right">Issued Qty</th>
@@ -140,6 +141,7 @@ function IssueApprovalDetails({ safeData, renderProperty }) {
                 <td style={{ fontWeight: 600 }}>{it.name || `Item #${it.itemId}`}</td>
                 <td className="text-mono" style={{ fontSize: 11 }}>{it.itemCode || '-'}</td>
                 <td style={{ fontSize: 11 }}>{it.buyerName || '-'}</td>
+                <td style={{ fontSize: 11 }}>{it.color || '-'}</td>
                 <td style={{ fontSize: 11 }}>{[it.styleNo, it.orderNumber].filter(Boolean).join(' / ') || '-'}</td>
                 <td className="text-right text-mono" style={{ fontSize: 11 }}>{it.currentStock ?? '-'}</td>
                 <td className="text-right fw-bold" style={{ color: 'var(--primary)' }}>{it.quantity}</td>
