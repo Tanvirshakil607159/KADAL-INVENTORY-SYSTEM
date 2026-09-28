@@ -11,6 +11,9 @@ const ChallansRepo = {
       `).order('challan_date', { ascending: false }).limit(filters.limit || 2000);
 
       if (filters.status) query = query.eq('status', filters.status);
+      if (filters.receivedStatus) query = query.eq('received_status', filters.receivedStatus);
+      if (filters.piId) query = query.eq('pi_id', filters.piId);
+      if (filters.onlyWithPi) query = query.not('pi_id', 'is', null);
       if (filters.dateFrom) query = query.gte('challan_date', filters.dateFrom);
       if (filters.dateTo) query = query.lte('challan_date', filters.dateTo + 'T23:59:59.999Z');
 
@@ -96,18 +99,34 @@ const ChallansRepo = {
       }
     }
 
+    if (filters.receivedStatus) {
+      where.push('c.received_status = ?');
+      params.push(filters.receivedStatus);
+    }
+    if (filters.piId) {
+      where.push('c.pi_id = ?');
+      params.push(filters.piId);
+    }
+    if (filters.onlyWithPi) {
+      where.push('c.pi_id IS NOT NULL');
+    }
+
     const w = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
 
     const limit = filters.limit || 2000;
-    return dbPrepare(`SELECT c.*, u.full_name as created_by_name, 
+    return dbPrepare(`SELECT c.*, u.full_name as created_by_name, pi.pi_number,
       (SELECT COUNT(*) FROM challan_items ci WHERE ci.challan_id = c.id) as item_count, 
       (SELECT COALESCE(SUM(ci.quantity), 0) FROM challan_items ci WHERE ci.challan_id = c.id) as total_quantity,
+      (SELECT COALESCE(SUM(ci.received_quantity), 0) FROM challan_items ci WHERE ci.challan_id = c.id) as total_received_quantity,
       (SELECT GROUP_CONCAT(i.name, ', ') FROM challan_items ci JOIN items i ON ci.item_id = i.id WHERE ci.challan_id = c.id) as item_names,
       (SELECT GROUP_CONCAT(DISTINCT i.buyer_name) FROM challan_items ci JOIN items i ON ci.item_id = i.id WHERE ci.challan_id = c.id) as buyer_names,
       (SELECT GROUP_CONCAT(DISTINCT i.style_name) FROM challan_items ci JOIN items i ON ci.item_id = i.id WHERE ci.challan_id = c.id) as style_names,
       (SELECT GROUP_CONCAT(DISTINCT i.order_number) FROM challan_items ci JOIN items i ON ci.item_id = i.id WHERE ci.challan_id = c.id) as order_numbers,
       (SELECT GROUP_CONCAT(DISTINCT i.purchase_no) FROM challan_items ci JOIN items i ON ci.item_id = i.id WHERE ci.challan_id = c.id) as purchase_nos
-      FROM challans c LEFT JOIN users u ON c.created_by = u.id ${w} ORDER BY c.challan_date DESC LIMIT ${limit}`).all(...params);
+      FROM challans c 
+      LEFT JOIN users u ON c.created_by = u.id 
+      LEFT JOIN proforma_invoices pi ON c.pi_id = pi.id
+      ${w} ORDER BY c.challan_date DESC LIMIT ${limit}`).all(...params);
   },
 
   async getDetailedHistory(filters = {}) {
@@ -321,7 +340,7 @@ const ChallansRepo = {
       return challan;
     }
 
-    const challan = dbPrepare(`SELECT c.*, u.full_name as created_by_name, u2.full_name as cancelled_by_name FROM challans c LEFT JOIN users u ON c.created_by = u.id LEFT JOIN users u2 ON c.cancelled_by = u2.id WHERE c.challan_number = ?`).get(number);
+    const challan = dbPrepare(`SELECT c.*, u.full_name as created_by_name, u2.full_name as cancelled_by_name, pi.pi_number FROM challans c LEFT JOIN users u ON c.created_by = u.id LEFT JOIN users u2 ON c.cancelled_by = u2.id LEFT JOIN proforma_invoices pi ON c.pi_id = pi.id WHERE c.challan_number = ?`).get(number);
     if (challan) {
       challan.items = dbPrepare(`
         SELECT ci.*, i.name as item_name, i.item_code, i.size, i.color, i.buyer_name, i.style_name, i.purchase_no, i.order_quantity, i.current_stock, i.order_number, i.unit_price, i.currency,
@@ -395,7 +414,7 @@ const ChallansRepo = {
       return challan;
     }
 
-    const challan = dbPrepare(`SELECT c.*, u.full_name as created_by_name, u2.full_name as cancelled_by_name FROM challans c LEFT JOIN users u ON c.created_by = u.id LEFT JOIN users u2 ON c.cancelled_by = u2.id WHERE c.id = ?`).get(id);
+    const challan = dbPrepare(`SELECT c.*, u.full_name as created_by_name, u2.full_name as cancelled_by_name, pi.pi_number FROM challans c LEFT JOIN users u ON c.created_by = u.id LEFT JOIN users u2 ON c.cancelled_by = u2.id LEFT JOIN proforma_invoices pi ON c.pi_id = pi.id WHERE c.id = ?`).get(id);
     if (challan) {
       challan.items = dbPrepare(`
         SELECT ci.*, i.name as item_name, i.item_code, i.size, i.color, i.buyer_name, i.style_name, i.purchase_no, i.order_quantity, i.current_stock, i.order_number, i.unit_price, i.currency,
@@ -409,7 +428,8 @@ const ChallansRepo = {
     return challan;
   },
 
-  async create({ challanNumber, receiverName, receiverContact, receiverAddress, notes, challanDate, createdBy, items }) {
+  async create({ challanNumber, receiverName, receiverContact, receiverAddress, notes, challanDate, createdBy, items, piId, pi_id }) {
+    const linkedPiId = piId || pi_id || null;
     // Check for duplicate challan number
     if (isCloudEnabled()) {
       const { data: existing } = await getSupabase().from('challans').select('id').eq('challan_number', challanNumber).single();
@@ -420,9 +440,8 @@ const ChallansRepo = {
     }
 
     if (isCloudEnabled()) {
-
       const supabase = getSupabase();
-      const { data: challan, error } = await supabase.from('challans').insert([{
+      const insertObj = {
         challan_number: challanNumber,
         receiver_name: receiverName,
         receiver_contact: receiverContact || null,
@@ -430,8 +449,10 @@ const ChallansRepo = {
         notes: notes || null,
         challan_date: challanDate,
         created_by: createdBy
-      }]).select().single();
-      
+      };
+      if (linkedPiId) insertObj.pi_id = linkedPiId;
+
+      const { data: challan, error } = await supabase.from('challans').insert([insertObj]).select().single();
       if (error) throw error;
       
       const challanItems = items.map(item => ({
@@ -439,7 +460,9 @@ const ChallansRepo = {
         item_id: item.itemId,
         quantity: item.quantity,
         unit: item.unit,
-        notes: item.notes || null
+        notes: item.notes || null,
+        pi_item_id: item.piItemId || item.pi_item_id || null,
+        received_quantity: 0
       }));
       
       const { error: itemsError } = await supabase.from('challan_items').insert(challanItems);
@@ -448,14 +471,95 @@ const ChallansRepo = {
       return challan.id;
     }
 
-    const r = dbPrepare(`INSERT INTO challans (challan_number, receiver_name, receiver_contact, receiver_address, notes, challan_date, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)`).run(
-      challanNumber, receiverName, receiverContact||null, receiverAddress||null, notes||null, challanDate, createdBy
+    const r = dbPrepare(`INSERT INTO challans (challan_number, receiver_name, receiver_contact, receiver_address, notes, challan_date, created_by, pi_id, received_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PENDING')`).run(
+      challanNumber, receiverName, receiverContact||null, receiverAddress||null, notes||null, challanDate, createdBy, linkedPiId
     );
     const challanId = r.lastInsertRowid;
     for (const item of items) {
-      dbPrepare(`INSERT INTO challan_items (challan_id, item_id, quantity, unit, notes) VALUES (?, ?, ?, ?, ?)`).run(challanId, item.itemId, item.quantity, item.unit, item.notes||null);
+      dbPrepare(`INSERT INTO challan_items (challan_id, item_id, quantity, unit, notes, pi_item_id, received_quantity) VALUES (?, ?, ?, ?, ?, ?, 0)`).run(
+        challanId, item.itemId, item.quantity, item.unit, item.notes||null, item.piItemId || item.pi_item_id || null
+      );
     }
+
+    if (linkedPiId) {
+      try {
+        const FinanceRepo = require('./finance');
+        await FinanceRepo.checkAndUpdatePiStatus(linkedPiId);
+      } catch (e) {
+        console.warn('[ChallansRepo] Error checking linked PI status:', e.message);
+      }
+    }
+
     return challanId;
+  },
+
+  async receiveChallan(id, receiptData) {
+    const { receivedBy, receivedAt, receivedNotes, items } = receiptData;
+    const dateVal = receivedAt || new Date().toISOString();
+
+    if (isCloudEnabled()) {
+      try {
+        const supabase = getSupabase();
+        if (items && Array.isArray(items)) {
+          for (const it of items) {
+            await supabase.from('challan_items').update({
+              received_quantity: Number(it.receivedQuantity) || 0,
+              rejection_quantity: Number(it.rejectionQuantity) || 0
+            }).eq('id', it.id);
+          }
+        }
+        await supabase.from('challans').update({
+          received_status: receiptData.receivedStatus || 'RECEIVED',
+          received_at: dateVal,
+          received_by: receivedBy || 'Recipient',
+          received_notes: receivedNotes || null,
+          updated_at: new Date().toISOString()
+        }).eq('id', id);
+      } catch (cloudErr) {
+        console.warn('[ChallansRepo] Cloud receiveChallan failed:', cloudErr.message);
+      }
+    }
+
+    if (items && Array.isArray(items)) {
+      for (const it of items) {
+        dbPrepare(`
+          UPDATE challan_items 
+          SET received_quantity = ?, rejection_quantity = ? 
+          WHERE id = ?
+        `).run(Number(it.receivedQuantity) || 0, Number(it.rejectionQuantity) || 0, it.id);
+      }
+    }
+
+    // Determine overall received_status
+    const updatedItems = dbPrepare(`SELECT quantity, received_quantity FROM challan_items WHERE challan_id = ?`).all(id);
+    let allFull = true;
+    let anyReceived = false;
+    for (const it of updatedItems) {
+      const q = Number(it.quantity) || 0;
+      const r = Number(it.received_quantity) || 0;
+      if (r < q) allFull = false;
+      if (r > 0) anyReceived = true;
+    }
+    const finalStatus = allFull ? 'RECEIVED' : (anyReceived ? 'PARTIAL' : 'PENDING');
+
+    dbPrepare(`
+      UPDATE challans 
+      SET received_status = ?, received_at = ?, received_by = ?, received_notes = ?, updated_at = CURRENT_TIMESTAMP 
+      WHERE id = ?
+    `).run(finalStatus, dateVal, receivedBy || 'Recipient', receivedNotes || null, id);
+
+    // If linked to a PI, automatically check if PI is 100% fulfilled
+    const ch = dbPrepare(`SELECT pi_id FROM challans WHERE id = ?`).get(id);
+    if (ch && ch.pi_id) {
+      try {
+        const FinanceRepo = require('./finance');
+        await FinanceRepo.checkAndUpdatePiStatus(ch.pi_id);
+      } catch (e) {
+        console.warn('[ChallansRepo] Error checking linked PI status:', e.message);
+      }
+    }
+
+    return { success: true, receivedStatus: finalStatus };
   },
 
   async cancel(id, cancelledBy, reason) {

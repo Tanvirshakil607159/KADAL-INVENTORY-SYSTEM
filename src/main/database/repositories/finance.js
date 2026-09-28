@@ -1,15 +1,71 @@
 const { dbPrepare, dbTransaction, getSupabase, isCloudEnabled } = require('../connection');
 
 function extractPrefix(name) {
-  if (!name) return 'PI';
-  // If name has common words like "K.A. DESIGN WEAR LTD." -> KADWL
-  const clean = name.replace(/[^a-zA-Z0-9\s]/g, '').trim();
-  const words = clean.split(/\s+/).filter(Boolean);
-  if (words.length >= 2) {
-    const letters = words.map(w => w[0].toUpperCase()).join('');
+  if (!name) return 'KADAL';
+  // Handle initials like "K.A. DESIGN WEAR LTD." -> tokens: K, A, DESIGN, WEAR, LTD
+  const tokens = name.split(/[\s./\\_-]+/).filter(Boolean);
+  if (tokens.length >= 2) {
+    const letters = tokens.map(t => t[0].toUpperCase()).join('');
     if (letters.length >= 2 && letters.length <= 6) return letters;
   }
-  return 'PI';
+  return 'KADAL';
+}
+
+function ensureProformaInvoicesSchema() {
+  try {
+    const row = dbPrepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='proforma_invoices'").get();
+    if (row && row.sql && row.sql.includes("CHECK(status IN ('ACTIVE', 'CANCELLED', 'PAID'))")) {
+      console.warn('[FinanceRepo] Removing legacy restrictive CHECK constraint on proforma_invoices table...');
+      const { dbExec } = require('../connection');
+      dbExec(`
+        PRAGMA foreign_keys = OFF;
+        DROP TABLE IF EXISTS proforma_invoices_v2;
+        CREATE TABLE proforma_invoices_v2 (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          pi_number TEXT NOT NULL UNIQUE,
+          bill_number TEXT,
+          pi_date DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          bill_date DATETIME,
+          recipient_id INTEGER,
+          applicant_name TEXT NOT NULL,
+          applicant_address TEXT,
+          beneficiary_name TEXT NOT NULL DEFAULT 'K.A. DESIGN ACCESSORIES LTD.',
+          beneficiary_address TEXT DEFAULT '356/1, BLOCK-B, TEK KATHORA, SALNA, GAZIPUR-1703, BANGLADESH',
+          beneficiary_bin TEXT DEFAULT '',
+          bank_details TEXT DEFAULT 'UNITED COMMERCIAL BANK PLC.\nTONGI BRANCH\n18, S.K. MANNAN TOWER, CHERAG ALI\nGAZIPUR-1712, BANGLADESH\nSWIFT CODE: UCBLBDDHTNG',
+          buyer TEXT,
+          challan_ids TEXT,
+          challan_numbers TEXT,
+          currency TEXT DEFAULT 'USD',
+          currency_symbol TEXT DEFAULT '$',
+          total_quantity REAL DEFAULT 0,
+          total_amount REAL DEFAULT 0,
+          amount_in_words TEXT,
+          net_weight TEXT DEFAULT '250 KGS',
+          gross_weight TEXT DEFAULT '260 KGS',
+          terms_conditions TEXT DEFAULT 'CASH ON DELIVERY.',
+          prepared_by TEXT DEFAULT 'Md. Ariful Rahman\nAccounts & Admin\nK. A. Design Accessories Ltd.',
+          authorized_by TEXT DEFAULT 'Maksudha Akter Kumu\nChairman\nK.A. DESIGN ACCESSORIES LTD.',
+          accepted_by TEXT,
+          status TEXT NOT NULL DEFAULT 'APPROVED',
+          notes TEXT,
+          created_by INTEGER,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        INSERT INTO proforma_invoices_v2 SELECT * FROM proforma_invoices;
+        DROP TABLE proforma_invoices;
+        ALTER TABLE proforma_invoices_v2 RENAME TO proforma_invoices;
+        CREATE INDEX IF NOT EXISTS idx_pi_number ON proforma_invoices(pi_number);
+        CREATE INDEX IF NOT EXISTS idx_pi_date ON proforma_invoices(pi_date);
+        CREATE INDEX IF NOT EXISTS idx_pi_recipient ON proforma_invoices(recipient_id);
+        PRAGMA foreign_keys = ON;
+      `);
+      console.log('[FinanceRepo] Table proforma_invoices recreated with full status support!');
+    }
+  } catch (err) {
+    console.warn('[FinanceRepo] ensureProformaInvoicesSchema warning:', err.message);
+  }
 }
 
 function normalizePiItem(it, idx) {
@@ -55,6 +111,99 @@ function normalizePi(pi) {
     total_quantity: Number(pi.total_quantity !== undefined ? pi.total_quantity : items.reduce((s, i) => s + i.quantity, 0)),
     total_amount: Number(pi.total_amount !== undefined ? pi.total_amount : items.reduce((s, i) => s + i.totalAmount, 0))
   };
+}
+
+async function getTrackedSequence(seqKey) {
+  let tracked = 0;
+  if (isCloudEnabled()) {
+    try {
+      const { data } = await getSupabase()
+        .from('settings')
+        .select('value')
+        .eq('key', seqKey)
+        .maybeSingle();
+      if (data && data.value) {
+        const val = parseInt(data.value, 10);
+        if (!isNaN(val) && val > tracked) tracked = val;
+      }
+    } catch (e) {
+      console.warn('[FinanceRepo] Cloud getTrackedSequence warning:', e.message);
+    }
+  }
+
+  try {
+    const row = dbPrepare('SELECT value FROM settings WHERE key = ?').get(seqKey);
+    if (row && row.value) {
+      const val = parseInt(row.value, 10);
+      if (!isNaN(val) && val > tracked) tracked = val;
+    }
+  } catch (e) {}
+
+  return tracked;
+}
+
+async function saveTrackedSequence(seqKey, nextSeq) {
+  const strVal = nextSeq.toString();
+
+  // Local SQLite settings
+  try {
+    const existing = dbPrepare('SELECT id FROM settings WHERE key = ?').get(seqKey);
+    if (existing) {
+      dbPrepare('UPDATE settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ?').run(strVal, seqKey);
+    } else {
+      dbPrepare('INSERT INTO settings (key, value) VALUES (?, ?)').run(seqKey, strVal);
+    }
+    const { saveDatabase } = require('../connection');
+    if (typeof saveDatabase === 'function') saveDatabase();
+  } catch (e) {
+    console.warn('[FinanceRepo] Local saveTrackedSequence warning:', e.message);
+  }
+
+  // Cloud Supabase settings
+  if (isCloudEnabled()) {
+    try {
+      await getSupabase().from('settings').upsert({
+        key: seqKey,
+        value: strVal,
+        updated_at: new Date().toISOString()
+      });
+    } catch (e) {
+      console.warn('[FinanceRepo] Cloud saveTrackedSequence warning:', e.message);
+    }
+  }
+}
+
+async function syncSavedSequence(piNumber, billNumber) {
+  if (piNumber) {
+    const parts = (piNumber || '').split('/');
+    if (parts.length >= 4) {
+      const prefix = parts[0];
+      const year = parts[2];
+      const seq = parseInt(parts[3], 10);
+      if (!isNaN(seq) && prefix && year) {
+        const seqKey = `seq:pi:${prefix}:${year}`;
+        const current = await getTrackedSequence(seqKey);
+        if (seq >= current) {
+          await saveTrackedSequence(seqKey, seq);
+        }
+      }
+    }
+  }
+  if (billNumber) {
+    const parts = (billNumber || '').split('/');
+    if (parts.length >= 4) {
+      const prefix = parts[0];
+      const year = parts[2];
+      const seq = parseInt(parts[3], 10);
+      if (!isNaN(seq) && prefix && year) {
+        const seqKey = `seq:bill:${prefix}:${year}`;
+        const current = await getTrackedSequence(seqKey);
+        if (seq >= current) {
+          await saveTrackedSequence(seqKey, seq);
+        }
+      }
+    }
+  }
 }
 
 const FinanceRepo = {
@@ -105,6 +254,11 @@ const FinanceRepo = {
     let where = [];
     let params = [];
     if (filters.status) { where.push('pi.status = ?'); params.push(filters.status); }
+    if (filters.type === 'pi') {
+      where.push("(pi.bill_number IS NULL OR pi.status IN ('DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'IN_PRODUCTION', 'PARTIALLY_DELIVERED', 'DELIVERED', 'BILLED'))");
+    } else if (filters.type === 'bill') {
+      where.push("pi.bill_number IS NOT NULL");
+    }
     if (filters.recipientId) { where.push('pi.recipient_id = ?'); params.push(filters.recipientId); }
     if (filters.dateFrom && filters.dateFrom.trim()) { where.push('pi.pi_date >= ?'); params.push(filters.dateFrom); }
     if (filters.dateTo && filters.dateTo.trim()) { where.push('pi.pi_date <= ?'); params.push(filters.dateTo + 'T23:59:59.999Z'); }
@@ -128,12 +282,33 @@ const FinanceRepo = {
     `;
     const rows = dbPrepare(sql).all(...params);
 
-    // Fetch items for each PI
+    // Fetch items for each PI and compute fulfillment
     return rows.map(pi => {
       const items = dbPrepare(`SELECT * FROM proforma_invoice_items WHERE pi_id = ? ORDER BY sl_no ASC, id ASC`).all(pi.id);
+      
+      const challanStats = dbPrepare(`
+        SELECT 
+          COALESCE(SUM(ci.quantity), 0) as dispatched_qty,
+          COALESCE(SUM(ci.received_quantity), 0) as received_qty
+        FROM challan_items ci
+        JOIN challans c ON ci.challan_id = c.id
+        WHERE c.pi_id = ? AND c.status = 'ACTIVE'
+      `).get(pi.id) || { dispatched_qty: 0, received_qty: 0 };
+
+      const totalOrdered = Number(pi.total_quantity) || items.reduce((s, i) => s + (Number(i.quantity) || 0), 0);
+      const totalDispatched = Number(challanStats.dispatched_qty) || 0;
+      const totalReceived = Number(challanStats.received_qty) || 0;
+      const fulfillmentPct = totalOrdered > 0 ? Math.min(100, Math.round((totalReceived / totalOrdered) * 100)) : (pi.bill_number ? 100 : 0);
+      const is100PercentReceived = totalOrdered > 0 && totalReceived >= totalOrdered;
+
       return normalizePi({
         ...pi,
-        items
+        items,
+        dispatched_quantity: totalDispatched,
+        received_quantity: totalReceived,
+        fulfillment_pct: fulfillmentPct,
+        is_100_percent_received: is100PercentReceived,
+        can_transfer_to_bill: is100PercentReceived && pi.status !== 'BILLED'
       });
     });
   },
@@ -299,6 +474,7 @@ const FinanceRepo = {
           if (itemsErr) throw itemsErr;
         }
 
+        await syncSavedSequence(piNumber, billNumber);
         return { id: piId, piNumber };
       } catch (cloudErr) {
         console.warn('[FinanceRepo] Cloud create failed, falling back to SQLite:', cloudErr.message);
@@ -306,50 +482,105 @@ const FinanceRepo = {
     }
 
     // Local SQLite insert
-    const res = dbPrepare(`
-      INSERT INTO proforma_invoices (
-        pi_number, bill_number, pi_date, bill_date, recipient_id,
-        applicant_name, applicant_address, beneficiary_name, beneficiary_address, beneficiary_bin,
-        bank_details, buyer, challan_ids, challan_numbers, currency, currency_symbol,
-        total_quantity, total_amount, amount_in_words, net_weight, gross_weight,
-        terms_conditions, prepared_by, authorized_by, accepted_by, status, notes, created_by
-      ) VALUES (
-        ?, ?, ?, ?, ?,
-        ?, ?, ?, ?, ?,
-        ?, ?, ?, ?, ?, ?,
-        ?, ?, ?, ?, ?,
-        ?, ?, ?, ?, ?, ?, ?
-      )
-    `).run(
-      piNumber,
-      billNumber || null,
-      piDate || new Date().toISOString(),
-      billDate || null,
-      recipientId || null,
-      applicantName,
-      applicantAddress || null,
-      beneficiaryName || 'K.A. DESIGN ACCESSORIES LTD.',
-      beneficiaryAddress || '356/1, BLOCK-B, TEK KATHORA, SALNA, GAZIPUR-1703, BANGLADESH',
-      beneficiaryBin || null,
-      bankDetails || null,
-      buyer || null,
-      challanIdsJson,
-      challanNumbers || null,
-      safeCurrency,
-      safeCurrencySymbol,
-      Number(totalQuantity) || 0,
-      Number(totalAmount) || 0,
-      amountInWords || null,
-      netWeight || '250 KGS',
-      grossWeight || '260 KGS',
-      termsConditions || 'CASH ON DELIVERY.',
-      preparedBy || 'Md. Ariful Rahman\nAccounts & Admin\nK. A. Design Accessories Ltd.',
-      authorizedBy || 'Maksudha Akter Kumu\nChairman\nK.A. DESIGN ACCESSORIES LTD.',
-      acceptedBy || null,
-      safeStatus,
-      notes || null,
-      createdBy || null
-    );
+    ensureProformaInvoicesSchema();
+
+    let res;
+    try {
+      res = dbPrepare(`
+        INSERT INTO proforma_invoices (
+          pi_number, bill_number, pi_date, bill_date, recipient_id,
+          applicant_name, applicant_address, beneficiary_name, beneficiary_address, beneficiary_bin,
+          bank_details, buyer, challan_ids, challan_numbers, currency, currency_symbol,
+          total_quantity, total_amount, amount_in_words, net_weight, gross_weight,
+          terms_conditions, prepared_by, authorized_by, accepted_by, status, notes, created_by
+        ) VALUES (
+          ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?, ?, ?
+        )
+      `).run(
+        piNumber,
+        billNumber || null,
+        piDate || new Date().toISOString(),
+        billDate || null,
+        recipientId || null,
+        applicantName,
+        applicantAddress || null,
+        beneficiaryName || 'K.A. DESIGN ACCESSORIES LTD.',
+        beneficiaryAddress || '356/1, BLOCK-B, TEK KATHORA, SALNA, GAZIPUR-1703, BANGLADESH',
+        beneficiaryBin || null,
+        bankDetails || null,
+        buyer || null,
+        challanIdsJson,
+        challanNumbers || null,
+        safeCurrency,
+        safeCurrencySymbol,
+        Number(totalQuantity) || 0,
+        Number(totalAmount) || 0,
+        amountInWords || null,
+        netWeight || '250 KGS',
+        grossWeight || '260 KGS',
+        termsConditions || 'CASH ON DELIVERY.',
+        preparedBy || 'Md. Ariful Rahman\nAccounts & Admin\nK. A. Design Accessories Ltd.',
+        authorizedBy || 'Maksudha Akter Kumu\nChairman\nK.A. DESIGN ACCESSORIES LTD.',
+        acceptedBy || null,
+        safeStatus,
+        notes || null,
+        createdBy || null
+      );
+    } catch (insertErr) {
+      if (insertErr.message && insertErr.message.includes('CHECK constraint failed')) {
+        console.warn('[FinanceRepo] Retrying insert with ACTIVE status due to legacy CHECK constraint...');
+        res = dbPrepare(`
+          INSERT INTO proforma_invoices (
+            pi_number, bill_number, pi_date, bill_date, recipient_id,
+            applicant_name, applicant_address, beneficiary_name, beneficiary_address, beneficiary_bin,
+            bank_details, buyer, challan_ids, challan_numbers, currency, currency_symbol,
+            total_quantity, total_amount, amount_in_words, net_weight, gross_weight,
+            terms_conditions, prepared_by, authorized_by, accepted_by, status, notes, created_by
+          ) VALUES (
+            ?, ?, ?, ?, ?,
+            ?, ?, ?, ?, ?,
+            ?, ?, ?, ?, ?, ?,
+            ?, ?, ?, ?, ?,
+            ?, ?, ?, ?, ?, ?, ?
+          )
+        `).run(
+          piNumber,
+          billNumber || null,
+          piDate || new Date().toISOString(),
+          billDate || null,
+          recipientId || null,
+          applicantName,
+          applicantAddress || null,
+          beneficiaryName || 'K.A. DESIGN ACCESSORIES LTD.',
+          beneficiaryAddress || '356/1, BLOCK-B, TEK KATHORA, SALNA, GAZIPUR-1703, BANGLADESH',
+          beneficiaryBin || null,
+          bankDetails || null,
+          buyer || null,
+          challanIdsJson,
+          challanNumbers || null,
+          safeCurrency,
+          safeCurrencySymbol,
+          Number(totalQuantity) || 0,
+          Number(totalAmount) || 0,
+          amountInWords || null,
+          netWeight || '250 KGS',
+          grossWeight || '260 KGS',
+          termsConditions || 'CASH ON DELIVERY.',
+          preparedBy || 'Md. Ariful Rahman\nAccounts & Admin\nK. A. Design Accessories Ltd.',
+          authorizedBy || 'Maksudha Akter Kumu\nChairman\nK.A. DESIGN ACCESSORIES LTD.',
+          acceptedBy || null,
+          'ACTIVE',
+          notes || null,
+          createdBy || null
+        );
+      } else {
+        throw insertErr;
+      }
+    }
 
     const piId = res.lastInsertRowid;
 
@@ -376,6 +607,7 @@ const FinanceRepo = {
       }
     }
 
+    await syncSavedSequence(piNumber, billNumber);
     return { id: piId, piNumber };
   },
 
@@ -393,6 +625,8 @@ const FinanceRepo = {
         if (data.termsConditions !== undefined) updateData.terms_conditions = data.termsConditions;
         if (data.status !== undefined) updateData.status = data.status;
         if (data.notes !== undefined) updateData.notes = data.notes;
+        if (data.challanIds !== undefined) updateData.challan_ids = typeof data.challanIds === 'string' ? data.challanIds : JSON.stringify(data.challanIds);
+        if (data.challanNumbers !== undefined) updateData.challan_numbers = data.challanNumbers;
         if (data.totalAmount !== undefined) updateData.total_amount = Number(data.totalAmount);
         if (data.totalQuantity !== undefined) updateData.total_quantity = Number(data.totalQuantity);
         if (data.amountInWords !== undefined) updateData.amount_in_words = data.amountInWords;
@@ -412,6 +646,11 @@ const FinanceRepo = {
     if (data.piDate !== undefined) { sets.push('pi_date = ?'); params.push(data.piDate); }
     if (data.billDate !== undefined) { sets.push('bill_date = ?'); params.push(data.billDate); }
     if (data.buyer !== undefined) { sets.push('buyer = ?'); params.push(data.buyer); }
+    if (data.challanIds !== undefined) {
+      sets.push('challan_ids = ?');
+      params.push(typeof data.challanIds === 'string' ? data.challanIds : JSON.stringify(data.challanIds));
+    }
+    if (data.challanNumbers !== undefined) { sets.push('challan_numbers = ?'); params.push(data.challanNumbers); }
     if (data.netWeight !== undefined) { sets.push('net_weight = ?'); params.push(data.netWeight); }
     if (data.grossWeight !== undefined) { sets.push('gross_weight = ?'); params.push(data.grossWeight); }
     if (data.termsConditions !== undefined) { sets.push('terms_conditions = ?'); params.push(data.termsConditions); }
@@ -445,8 +684,9 @@ const FinanceRepo = {
     const year = new Date().getFullYear();
     const prefix = extractPrefix(applicantName); // e.g. KADWL
     const pattern = `${prefix}/KADAL/${year}/%`;
+    const seqKey = `seq:pi:${prefix}:${year}`;
 
-    let maxSeq = 0;
+    let maxDbSeq = 0;
     if (isCloudEnabled()) {
       try {
         const { data } = await getSupabase()
@@ -458,26 +698,65 @@ const FinanceRepo = {
           const parts = (row.pi_number || '').split('/');
           if (parts.length >= 4) {
             const seq = parseInt(parts[3], 10);
-            if (!isNaN(seq) && seq > maxSeq) maxSeq = seq;
+            if (!isNaN(seq) && seq > maxDbSeq) maxDbSeq = seq;
           }
         });
-        const nextSeq = maxSeq + 1;
-        return `${prefix}/KADAL/${year}/${nextSeq}`;
       } catch (cloudErr) {
         console.warn('[FinanceRepo] Cloud getNextNumber failed, falling back to SQLite:', cloudErr.message);
       }
     }
 
-    const rows = dbPrepare(`SELECT pi_number FROM proforma_invoices WHERE pi_number LIKE ?`).all(pattern);
-    rows.forEach(row => {
-      const parts = (row.pi_number || '').split('/');
-      if (parts.length >= 4) {
-        const seq = parseInt(parts[3], 10);
-        if (!isNaN(seq) && seq > maxSeq) maxSeq = seq;
-      }
-    });
+    try {
+      const rows = dbPrepare(`SELECT pi_number FROM proforma_invoices WHERE pi_number LIKE ?`).all(pattern);
+      rows.forEach(row => {
+        const parts = (row.pi_number || '').split('/');
+        if (parts.length >= 4) {
+          const seq = parseInt(parts[3], 10);
+          if (!isNaN(seq) && seq > maxDbSeq) maxDbSeq = seq;
+        }
+      });
+    } catch (e) {}
 
-    const nextSeq = maxSeq + 1;
+    // Highest ever recorded sequence in persistent settings
+    const trackedSeq = await getTrackedSequence(seqKey);
+
+    // Candidates start strictly after the maximum ever generated or stored
+    let nextSeq = Math.max(maxDbSeq, trackedSeq) + 1;
+
+    // Safety loop: ensure uniqueness across both cloud and local DB
+    let isUnique = false;
+    while (!isUnique) {
+      const candidate = `${prefix}/KADAL/${year}/${nextSeq}`;
+      let exists = false;
+
+      if (isCloudEnabled()) {
+        try {
+          const { data } = await getSupabase()
+            .from('proforma_invoices')
+            .select('id')
+            .eq('pi_number', candidate)
+            .limit(1);
+          if (data && data.length > 0) exists = true;
+        } catch (e) {}
+      }
+
+      if (!exists) {
+        try {
+          const row = dbPrepare('SELECT id FROM proforma_invoices WHERE pi_number = ?').get(candidate);
+          if (row) exists = true;
+        } catch (e) {}
+      }
+
+      if (!exists) {
+        isUnique = true;
+      } else {
+        nextSeq++;
+      }
+    }
+
+    // Persist immediately: once generated, this sequence number is reserved and will not generate again!
+    await saveTrackedSequence(seqKey, nextSeq);
+
     return `${prefix}/KADAL/${year}/${nextSeq}`;
   },
 
@@ -485,8 +764,9 @@ const FinanceRepo = {
     const year = new Date().getFullYear();
     const prefix = extractPrefix(applicantName);
     const pattern = `${prefix}/KADAL/${year}/%`;
+    const seqKey = `seq:bill:${prefix}:${year}`;
 
-    let maxSeq = 0;
+    let maxDbSeq = 0;
     if (isCloudEnabled()) {
       try {
         const { data } = await getSupabase()
@@ -499,26 +779,61 @@ const FinanceRepo = {
           const parts = (row.bill_number || '').split('/');
           if (parts.length >= 4) {
             const seq = parseInt(parts[3], 10);
-            if (!isNaN(seq) && seq > maxSeq) maxSeq = seq;
+            if (!isNaN(seq) && seq > maxDbSeq) maxDbSeq = seq;
           }
         });
-        const nextSeq = maxSeq + 1;
-        return `${prefix}/KADAL/${year}/${nextSeq}`;
       } catch (cloudErr) {
         console.warn('[FinanceRepo] Cloud getNextBillNumber failed, falling back to SQLite:', cloudErr.message);
       }
     }
 
-    const rows = dbPrepare(`SELECT bill_number FROM proforma_invoices WHERE bill_number LIKE ?`).all(pattern);
-    rows.forEach(row => {
-      const parts = (row.bill_number || '').split('/');
-      if (parts.length >= 4) {
-        const seq = parseInt(parts[3], 10);
-        if (!isNaN(seq) && seq > maxSeq) maxSeq = seq;
-      }
-    });
+    try {
+      const rows = dbPrepare(`SELECT bill_number FROM proforma_invoices WHERE bill_number LIKE ?`).all(pattern);
+      rows.forEach(row => {
+        const parts = (row.bill_number || '').split('/');
+        if (parts.length >= 4) {
+          const seq = parseInt(parts[3], 10);
+          if (!isNaN(seq) && seq > maxDbSeq) maxDbSeq = seq;
+        }
+      });
+    } catch (e) {}
 
-    const nextSeq = maxSeq + 1;
+    const trackedSeq = await getTrackedSequence(seqKey);
+    let nextSeq = Math.max(maxDbSeq, trackedSeq) + 1;
+
+    let isUnique = false;
+    while (!isUnique) {
+      const candidate = `${prefix}/KADAL/${year}/${nextSeq}`;
+      let exists = false;
+
+      if (isCloudEnabled()) {
+        try {
+          const { data } = await getSupabase()
+            .from('proforma_invoices')
+            .select('id')
+            .eq('bill_number', candidate)
+            .limit(1);
+          if (data && data.length > 0) exists = true;
+        } catch (e) {}
+      }
+
+      if (!exists) {
+        try {
+          const row = dbPrepare('SELECT id FROM proforma_invoices WHERE bill_number = ?').get(candidate);
+          if (row) exists = true;
+        } catch (e) {}
+      }
+
+      if (!exists) {
+        isUnique = true;
+      } else {
+        nextSeq++;
+      }
+    }
+
+    // Persist immediately: once generated, this sequence number is reserved and will not generate again!
+    await saveTrackedSequence(seqKey, nextSeq);
+
     return `${prefix}/KADAL/${year}/${nextSeq}`;
   },
 
@@ -555,6 +870,125 @@ const FinanceRepo = {
       } catch (e) {}
     });
     return Array.from(used);
+  },
+
+  async getPiReconciliation(id) {
+    const pi = await this.getById(id);
+    if (!pi) return null;
+
+    // Get all challans linked to this PI
+    const challans = dbPrepare(`
+      SELECT c.id, c.challan_number, c.challan_date, c.receiver_name, c.received_status, c.received_at, c.received_by, c.received_notes
+      FROM challans c
+      WHERE c.pi_id = ? AND c.status = 'ACTIVE'
+      ORDER BY c.challan_date DESC
+    `).all(id);
+
+    // Get item breakdown
+    const piItems = pi.items || [];
+    let totalOrdered = 0;
+    let totalDispatched = 0;
+    let totalReceived = 0;
+
+    const reconciledItems = piItems.map(item => {
+      const orderQty = Number(item.quantity) || 0;
+      totalOrdered += orderQty;
+
+      let dispatched = 0;
+      let received = 0;
+
+      const chItemRows = dbPrepare(`
+        SELECT ci.quantity, ci.received_quantity 
+        FROM challan_items ci
+        JOIN challans c ON ci.challan_id = c.id
+        WHERE c.pi_id = ? AND c.status = 'ACTIVE' AND (ci.item_id = ? OR ci.pi_item_id = ?)
+      `).all(id, item.item_id || -1, item.id || -1);
+
+      chItemRows.forEach(row => {
+        dispatched += Number(row.quantity) || 0;
+        received += Number(row.received_quantity) || 0;
+      });
+
+      totalDispatched += dispatched;
+      totalReceived += received;
+
+      const shortage = Math.max(0, dispatched - received);
+      const remainingToReceive = Math.max(0, orderQty - received);
+      const pct = orderQty > 0 ? Math.min(100, Math.round((received / orderQty) * 100)) : 100;
+
+      return {
+        ...item,
+        orderQuantity: orderQty,
+        dispatchedQuantity: dispatched,
+        receivedQuantity: received,
+        shortageQuantity: shortage,
+        remainingToReceive,
+        fulfillmentPct: pct,
+        isFullyReceived: received >= orderQty && orderQty > 0
+      };
+    });
+
+    const is100PercentReceived = totalOrdered > 0 && reconciledItems.every(i => i.isFullyReceived);
+    const overallPct = totalOrdered > 0 ? Math.min(100, Math.round((totalReceived / totalOrdered) * 100)) : 100;
+
+    return {
+      pi,
+      items: reconciledItems,
+      challans,
+      totalOrdered,
+      totalDispatched,
+      totalReceived,
+      overallFulfillmentPct: overallPct,
+      is100PercentReceived,
+      canTransferToBill: is100PercentReceived && pi.status !== 'BILLED'
+    };
+  },
+
+  async checkAndUpdatePiStatus(id) {
+    const pi = await this.getById(id);
+    if (!pi || pi.status === 'BILLED' || pi.status === 'CANCELLED') return;
+
+    const recon = await this.getPiReconciliation(id);
+    if (!recon) return;
+
+    if (recon.is100PercentReceived) {
+      dbPrepare(`UPDATE proforma_invoices SET status = 'DELIVERED', updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(id);
+    } else if (recon.totalReceived > 0) {
+      dbPrepare(`UPDATE proforma_invoices SET status = 'PARTIALLY_DELIVERED', updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(id);
+    } else if (recon.totalDispatched > 0) {
+      dbPrepare(`UPDATE proforma_invoices SET status = 'IN_PRODUCTION', updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(id);
+    }
+  },
+
+  async transferPiToBill(id) {
+    const recon = await this.getPiReconciliation(id);
+    if (!recon) throw new Error('Proforma Invoice not found');
+    if (!recon.is100PercentReceived) {
+      throw new Error('PI cannot be transferred to Bill: 100% of order quantities must be received from Recipient side first.');
+    }
+    if (recon.pi.status === 'BILLED' || recon.pi.bill_number) {
+      throw new Error(`This PI has already been transferred to Bill (${recon.pi.bill_number}).`);
+    }
+
+    const nextBillNumber = await this.getNextBillNumber(recon.pi.applicant_name);
+    const billDate = new Date().toISOString();
+    const challanIds = recon.challans.map(c => c.id);
+    const challanNumbers = recon.challans.map(c => c.challan_number).join(', ');
+
+    await this.update(id, {
+      billNumber: nextBillNumber,
+      billDate,
+      challanIds,
+      challanNumbers,
+      status: 'BILLED'
+    });
+
+    return {
+      id,
+      billNumber: nextBillNumber,
+      billDate,
+      challanNumbers
+    };
   }
 };
 

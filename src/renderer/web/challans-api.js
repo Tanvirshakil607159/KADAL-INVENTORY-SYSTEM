@@ -11,6 +11,9 @@ export const challansApi = {
     `).order('challan_date', { ascending: false });
 
     if (filters.status) query = query.eq('status', filters.status);
+    if (filters.receivedStatus) query = query.eq('received_status', filters.receivedStatus);
+    if (filters.piId) query = query.eq('pi_id', filters.piId);
+    if (filters.onlyWithPi) query = query.not('pi_id', 'is', null);
     if (filters.receiverName) query = query.ilike('receiver_name', `%${filters.receiverName}%`);
     if (filters.dateFrom) query = query.gte('challan_date', filters.dateFrom);
     if (filters.dateTo) query = query.lte('challan_date', filters.dateTo + 'T23:59:59.999Z');
@@ -172,5 +175,38 @@ export const challansApi = {
     const last = data[0]?.challan_number || 'CH-0000';
     const num = parseInt(last.replace('CH-', '')) + 1;
     return `CH-${num.toString().padStart(4, '0')}`;
+  },
+  receive: async (id, receiptData) => {
+    const supabase = getSupabase();
+    const { receivedBy, receivedAt, receivedNotes, items } = receiptData;
+    const dateVal = receivedAt || new Date().toISOString();
+
+    if (items && Array.isArray(items)) {
+      for (const it of items) {
+        await supabase.from('challan_items').update({
+          received_quantity: Number(it.receivedQuantity) || 0,
+          rejection_quantity: Number(it.rejectionQuantity) || 0
+        }).eq('id', it.id);
+      }
+    }
+
+    let finalStatus = 'RECEIVED';
+    if (items && items.some(it => (Number(it.receivedQuantity) || 0) < (Number(it.quantity) || 0))) {
+      finalStatus = 'PARTIAL';
+    }
+
+    const { error } = await supabase.from('challans').update({
+      received_status: finalStatus,
+      received_at: dateVal,
+      received_by: receivedBy || 'Recipient',
+      received_notes: receivedNotes || null,
+      updated_at: new Date().toISOString()
+    }).eq('id', id);
+
+    if (error) throw error;
+    return { success: true, receivedStatus: finalStatus };
+  },
+  getPendingReceipt: async (filters = {}) => {
+    return challansApi.getAll({ ...filters, onlyWithPi: true, receivedStatus: filters.receivedStatus || 'PENDING' });
   }
 };

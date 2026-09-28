@@ -139,6 +139,23 @@ const FinanceService = {
     return await FinanceRepo.getUsedChallanIds();
   },
 
+  async getPiReconciliation(id) {
+    return await FinanceRepo.getPiReconciliation(id);
+  },
+
+  async transferPiToBill(id) {
+    const user = await AuthService.getCurrentUser();
+    const res = await FinanceRepo.transferPiToBill(id);
+    await AuditLogsRepo.create({
+      userId: user?.id,
+      action: 'UPDATE',
+      entityType: 'proforma_invoice',
+      entityId: id,
+      newValue: { status: 'BILLED', billNumber: res.billNumber, billDate: res.billDate }
+    });
+    return res;
+  },
+
   async exportPdf(target) {
     let pi;
     if (typeof target === 'object' && target !== null) {

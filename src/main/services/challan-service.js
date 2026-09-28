@@ -235,5 +235,31 @@ const ChallanService = {
     return { success: true };
   },
 
+  async receiveChallan(id, receiptData) {
+    const user = await AuthService.getCurrentUser();
+    const res = await ChallansRepo.receiveChallan(id, {
+      ...receiptData,
+      receivedBy: receiptData.receivedBy || user?.fullName || 'Receiving Officer'
+    });
+
+    await AuditLogsRepo.create({
+      userId: user?.id,
+      action: 'UPDATE',
+      entityType: 'challan_receipt',
+      entityId: id,
+      newValue: { receivedStatus: res.receivedStatus, receivedBy: receiptData.receivedBy }
+    });
+
+    return res;
+  },
+
+  async getPendingReceipt(filters = {}) {
+    return await ChallansRepo.getAll({
+      ...filters,
+      onlyWithPi: true,
+      receivedStatus: filters.receivedStatus || 'PENDING'
+    });
+  }
+
 };
 module.exports = ChallanService;

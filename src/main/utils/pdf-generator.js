@@ -107,6 +107,9 @@ const PdfGenerator = {
       { text: `Date: ${new Date(challan.challan_date).toLocaleDateString('en-GB')}`, style: 'challanDate' },
       { text: `Status: ${challan.status}`, style: challan.status === 'CANCELLED' ? 'statusCancelled' : 'statusActive' },
     ];
+    if (challan.pi_number) {
+      rightStack.push({ text: `Ref PI: ${challan.pi_number}`, style: 'challanDate', bold: true, color: '#4338ca' });
+    }
 
     if (barcodeSvg) {
       const isQR = format === 'QR';

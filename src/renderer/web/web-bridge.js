@@ -451,6 +451,8 @@ export const webBridge = {
     }),
     exportPdf: () => wrap(async () => { alert('PDF Export coming soon to web version'); return true; }),
     exportExcel: () => wrap(async () => { alert('Excel Export coming soon to web version'); return true; }),
+    receive: (id, receiptData) => wrap(() => challansApi.receive(id, receiptData)),
+    getPendingReceipt: (filters) => wrap(() => challansApi.getPendingReceipt(filters)),
   },
 
   // Warehouses
@@ -1568,18 +1570,19 @@ export const webBridge = {
       const supabase = getSupabase();
       if (!supabase) return 'PI-001';
       const year = new Date().getFullYear();
-      let prefix = 'PI';
+      let prefix = 'KADAL';
       if (applicantName) {
-        const clean = applicantName.replace(/[^a-zA-Z0-9\s]/g, '').trim();
-        const words = clean.split(/\s+/).filter(Boolean);
-        if (words.length >= 2) {
-          const letters = words.map(w => w[0].toUpperCase()).join('');
+        const tokens = applicantName.split(/[\s./\\_-]+/).filter(Boolean);
+        if (tokens.length >= 2) {
+          const letters = tokens.map(t => t[0].toUpperCase()).join('');
           if (letters.length >= 2 && letters.length <= 6) prefix = letters;
         }
       }
       const pattern = `${prefix}/KADAL/${year}/%`;
-      const { data } = await supabase.from('proforma_invoices').select('pi_number').ilike('pi_number', pattern);
+      const seqKey = `seq:pi:${prefix}:${year}`;
+
       let maxSeq = 0;
+      const { data } = await supabase.from('proforma_invoices').select('pi_number').ilike('pi_number', pattern);
       (data || []).forEach(row => {
         const parts = (row.pi_number || '').split('/');
         if (parts.length >= 4) {
@@ -1587,25 +1590,60 @@ export const webBridge = {
           if (!isNaN(seq) && seq > maxSeq) maxSeq = seq;
         }
       });
-      return `${prefix}/KADAL/${year}/${maxSeq + 1}`;
+
+      // Tracked sequence
+      let tracked = 0;
+      try {
+        const { data: sRow } = await supabase.from('settings').select('value').eq('key', seqKey).maybeSingle();
+        if (sRow && sRow.value) {
+          const val = parseInt(sRow.value, 10);
+          if (!isNaN(val) && val > tracked) tracked = val;
+        }
+      } catch (e) {}
+
+      let nextSeq = Math.max(maxSeq, tracked) + 1;
+
+      // Ensure uniqueness
+      let isUnique = false;
+      while (!isUnique) {
+        const candidate = `${prefix}/KADAL/${year}/${nextSeq}`;
+        const { data: exist } = await supabase.from('proforma_invoices').select('id').eq('pi_number', candidate).limit(1);
+        if (!exist || exist.length === 0) {
+          isUnique = true;
+        } else {
+          nextSeq++;
+        }
+      }
+
+      // Persist immediately
+      try {
+        await supabase.from('settings').upsert({
+          key: seqKey,
+          value: nextSeq.toString(),
+          updated_at: new Date().toISOString()
+        });
+      } catch (e) {}
+
+      return `${prefix}/KADAL/${year}/${nextSeq}`;
     }),
 
     getNextBillNumber: (applicantName) => wrap(async () => {
       const supabase = getSupabase();
       if (!supabase) return 'BILL-001';
       const year = new Date().getFullYear();
-      let prefix = 'PI';
+      let prefix = 'KADAL';
       if (applicantName) {
-        const clean = applicantName.replace(/[^a-zA-Z0-9\s]/g, '').trim();
-        const words = clean.split(/\s+/).filter(Boolean);
-        if (words.length >= 2) {
-          const letters = words.map(w => w[0].toUpperCase()).join('');
+        const tokens = applicantName.split(/[\s./\\_-]+/).filter(Boolean);
+        if (tokens.length >= 2) {
+          const letters = tokens.map(t => t[0].toUpperCase()).join('');
           if (letters.length >= 2 && letters.length <= 6) prefix = letters;
         }
       }
       const pattern = `${prefix}/KADAL/${year}/%`;
-      const { data } = await supabase.from('proforma_invoices').select('bill_number').not('bill_number', 'is', null).ilike('bill_number', pattern);
+      const seqKey = `seq:bill:${prefix}:${year}`;
+
       let maxSeq = 0;
+      const { data } = await supabase.from('proforma_invoices').select('bill_number').not('bill_number', 'is', null).ilike('bill_number', pattern);
       (data || []).forEach(row => {
         const parts = (row.bill_number || '').split('/');
         if (parts.length >= 4) {
@@ -1613,7 +1651,38 @@ export const webBridge = {
           if (!isNaN(seq) && seq > maxSeq) maxSeq = seq;
         }
       });
-      return `${prefix}/KADAL/${year}/${maxSeq + 1}`;
+
+      let tracked = 0;
+      try {
+        const { data: sRow } = await supabase.from('settings').select('value').eq('key', seqKey).maybeSingle();
+        if (sRow && sRow.value) {
+          const val = parseInt(sRow.value, 10);
+          if (!isNaN(val) && val > tracked) tracked = val;
+        }
+      } catch (e) {}
+
+      let nextSeq = Math.max(maxSeq, tracked) + 1;
+
+      let isUnique = false;
+      while (!isUnique) {
+        const candidate = `${prefix}/KADAL/${year}/${nextSeq}`;
+        const { data: exist } = await supabase.from('proforma_invoices').select('id').eq('bill_number', candidate).limit(1);
+        if (!exist || exist.length === 0) {
+          isUnique = true;
+        } else {
+          nextSeq++;
+        }
+      }
+
+      try {
+        await supabase.from('settings').upsert({
+          key: seqKey,
+          value: nextSeq.toString(),
+          updated_at: new Date().toISOString()
+        });
+      } catch (e) {}
+
+      return `${prefix}/KADAL/${year}/${nextSeq}`;
     }),
 
     getUsedChallanIds: () => wrap(async () => {
@@ -1632,6 +1701,98 @@ export const webBridge = {
 
     exportPdf: (id) => wrap(async () => {
       throw new Error('Please use the browser Print button in the web version for high quality direct printing or saving as PDF');
+    }),
+
+    getPiReconciliation: (id) => wrap(async () => {
+      const supabase = getSupabase();
+      if (!supabase) return null;
+      const { data: pi, error: pErr } = await supabase.from('proforma_invoices').select('*, items:proforma_invoice_items(*)').eq('id', id).single();
+      if (pErr) throw pErr;
+
+      const { data: challans } = await supabase.from('challans').select('*').eq('pi_id', id).eq('status', 'ACTIVE');
+      const piItems = pi.items || [];
+      let totalOrdered = 0;
+      let totalDispatched = 0;
+      let totalReceived = 0;
+
+      const chIds = (challans || []).map(c => c.id);
+      let chItems = [];
+      if (chIds.length > 0) {
+        const { data: ciData } = await supabase.from('challan_items').select('*').in('challan_id', chIds);
+        chItems = ciData || [];
+      }
+
+      const reconciledItems = piItems.map(item => {
+        const orderQty = Number(item.quantity) || 0;
+        totalOrdered += orderQty;
+        let dispatched = 0;
+        let received = 0;
+        chItems.filter(ci => ci.item_id === item.item_id || ci.pi_item_id === item.id).forEach(row => {
+          dispatched += Number(row.quantity) || 0;
+          received += Number(row.received_quantity) || 0;
+        });
+        totalDispatched += dispatched;
+        totalReceived += received;
+        const shortage = Math.max(0, dispatched - received);
+        const remainingToReceive = Math.max(0, orderQty - received);
+        const pct = orderQty > 0 ? Math.min(100, Math.round((received / orderQty) * 100)) : 100;
+        return {
+          ...item,
+          orderQuantity: orderQty,
+          dispatchedQuantity: dispatched,
+          receivedQuantity: received,
+          shortageQuantity: shortage,
+          remainingToReceive,
+          fulfillmentPct: pct,
+          isFullyReceived: received >= orderQty && orderQty > 0
+        };
+      });
+
+      const is100PercentReceived = totalOrdered > 0 && reconciledItems.every(i => i.isFullyReceived);
+      const overallPct = totalOrdered > 0 ? Math.min(100, Math.round((totalReceived / totalOrdered) * 100)) : 100;
+
+      return {
+        pi,
+        items: reconciledItems,
+        challans: challans || [],
+        totalOrdered,
+        totalDispatched,
+        totalReceived,
+        overallFulfillmentPct: overallPct,
+        is100PercentReceived,
+        canTransferToBill: is100PercentReceived && pi.status !== 'BILLED'
+      };
+    }),
+
+    transferToBill: (id) => wrap(async () => {
+      const recon = await webBridge.finance.getPiReconciliation(id);
+      if (!recon?.data) throw new Error('PI not found or reconciliation failed');
+      if (!recon.data.is100PercentReceived) {
+        throw new Error('PI cannot be transferred to Bill: 100% of order quantities must be received from Recipient side first.');
+      }
+      const pi = recon.data.pi;
+      if (pi.status === 'BILLED' || pi.bill_number) {
+        throw new Error(`This PI has already been transferred to Bill (${pi.bill_number}).`);
+      }
+
+      const supabase = getSupabase();
+      if (!supabase) throw new Error('Supabase not configured');
+
+      const nextBillNumber = await webBridge.finance.getNextBillNumber(pi.applicant_name);
+      const billDate = new Date().toISOString();
+      const challanIds = (recon.data.challans || []).map(c => c.id);
+      const challanNumbers = (recon.data.challans || []).map(c => c.challan_number).join(', ');
+
+      const { error: upErr } = await supabase.from('proforma_invoices').update({
+        bill_number: nextBillNumber.data || nextBillNumber,
+        bill_date: billDate,
+        challan_ids: challanIds,
+        challan_numbers: challanNumbers,
+        status: 'BILLED'
+      }).eq('id', id);
+      if (upErr) throw upErr;
+
+      return { id, billNumber: nextBillNumber.data || nextBillNumber, billDate, challanNumbers };
     })
   },
 

@@ -305,6 +305,96 @@ function runMigrations(db) {
     db.run("INSERT INTO _migrations (name) VALUES ('034-add-finance-module')");
     console.log('[DB] Migration 034-add-finance-module applied successfully');
   }
+
+  // NEW MIGRATION: 035-add-pi-challan-lifecycle
+  const applied35 = db.exec("SELECT * FROM _migrations WHERE name = '035-add-pi-challan-lifecycle'");
+  if (applied35.length === 0 || applied35[0].values.length === 0) {
+    console.log('[DB] Running migration: 035-add-pi-challan-lifecycle');
+    applyThirtyFifthMigration(db);
+    db.run("INSERT INTO _migrations (name) VALUES ('035-add-pi-challan-lifecycle')");
+    console.log('[DB] Migration 035-add-pi-challan-lifecycle applied successfully');
+  }
+}
+
+function applyThirtyFifthMigration(db) {
+  try {
+    // 1. Add columns to challans table
+    try { db.run(`ALTER TABLE challans ADD COLUMN pi_id INTEGER REFERENCES proforma_invoices(id)`); } catch (e) {}
+    try { db.run(`ALTER TABLE challans ADD COLUMN received_status TEXT DEFAULT 'PENDING'`); } catch (e) {}
+    try { db.run(`ALTER TABLE challans ADD COLUMN received_at DATETIME`); } catch (e) {}
+    try { db.run(`ALTER TABLE challans ADD COLUMN received_by TEXT`); } catch (e) {}
+    try { db.run(`ALTER TABLE challans ADD COLUMN received_notes TEXT`); } catch (e) {}
+
+    // 2. Add columns to challan_items table
+    try { db.run(`ALTER TABLE challan_items ADD COLUMN received_quantity REAL DEFAULT 0`); } catch (e) {}
+    try { db.run(`ALTER TABLE challan_items ADD COLUMN rejection_quantity REAL DEFAULT 0`); } catch (e) {}
+    try { db.run(`ALTER TABLE challan_items ADD COLUMN pi_item_id INTEGER`); } catch (e) {}
+
+    // 3. Relax status check constraint on proforma_invoices table
+    db.run("PRAGMA foreign_keys = OFF;");
+    db.run(`CREATE TABLE IF NOT EXISTS proforma_invoices_v2 (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      pi_number TEXT NOT NULL UNIQUE,
+      bill_number TEXT,
+      pi_date DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      bill_date DATETIME,
+      recipient_id INTEGER REFERENCES recipients(id),
+      applicant_name TEXT NOT NULL,
+      applicant_address TEXT,
+      beneficiary_name TEXT NOT NULL DEFAULT 'K.A. DESIGN ACCESSORIES LTD.',
+      beneficiary_address TEXT DEFAULT '356/1, BLOCK-B, TEK KATHORA, SALNA, GAZIPUR-1703, BANGLADESH',
+      beneficiary_bin TEXT DEFAULT '',
+      bank_details TEXT DEFAULT 'UNITED COMMERCIAL BANK PLC.\nTONGI BRANCH\n18, S.K. MANNAN TOWER, CHERAG ALI\nGAZIPUR-1712, BANGLADESH\nSWIFT CODE: UCBLBDDHTNG',
+      buyer TEXT,
+      challan_ids TEXT,
+      challan_numbers TEXT,
+      currency TEXT DEFAULT 'USD',
+      currency_symbol TEXT DEFAULT '$',
+      total_quantity REAL DEFAULT 0,
+      total_amount REAL DEFAULT 0,
+      amount_in_words TEXT,
+      net_weight TEXT DEFAULT '250 KGS',
+      gross_weight TEXT DEFAULT '260 KGS',
+      terms_conditions TEXT DEFAULT 'CASH ON DELIVERY.',
+      prepared_by TEXT DEFAULT 'Md. Ariful Rahman\nAccounts & Admin\nK. A. Design Accessories Ltd.',
+      authorized_by TEXT DEFAULT 'Maksudha Akter Kumu\nChairman\nK.A. DESIGN ACCESSORIES LTD.',
+      accepted_by TEXT,
+      status TEXT NOT NULL DEFAULT 'DRAFT',
+      notes TEXT,
+      created_by INTEGER REFERENCES users(id),
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`);
+
+    const checkPi = db.exec("SELECT count(*) FROM proforma_invoices");
+    if (checkPi.length > 0) {
+      db.run(`INSERT INTO proforma_invoices_v2 SELECT * FROM proforma_invoices`);
+      db.run(`DROP TABLE proforma_invoices`);
+      db.run(`ALTER TABLE proforma_invoices_v2 RENAME TO proforma_invoices`);
+      db.run(`CREATE INDEX IF NOT EXISTS idx_pi_number ON proforma_invoices(pi_number)`);
+      db.run(`CREATE INDEX IF NOT EXISTS idx_pi_date ON proforma_invoices(pi_date)`);
+      db.run(`CREATE INDEX IF NOT EXISTS idx_pi_recipient ON proforma_invoices(recipient_id)`);
+    }
+    db.run("PRAGMA foreign_keys = ON;");
+
+    // 4. Backfill existing historical challans that were already invoiced/billed as 'RECEIVED'
+    const usedChallanRows = db.exec("SELECT challan_ids FROM proforma_invoices WHERE challan_ids IS NOT NULL AND status != 'CANCELLED'");
+    if (usedChallanRows.length > 0 && usedChallanRows[0].values.length > 0) {
+      const usedIds = new Set();
+      for (const row of usedChallanRows[0].values) {
+        try {
+          const ids = JSON.parse(row[0] || '[]');
+          if (Array.isArray(ids)) ids.forEach(id => usedIds.add(id));
+        } catch (e) {}
+      }
+      for (const chId of usedIds) {
+        db.run(`UPDATE challans SET received_status = 'RECEIVED', received_at = CURRENT_TIMESTAMP, received_by = 'System (Historical)' WHERE id = ?`, [chId]);
+        db.run(`UPDATE challan_items SET received_quantity = quantity WHERE challan_id = ?`, [chId]);
+      }
+    }
+  } catch (err) {
+    console.error('[DB] Migration 035 error:', err.message);
+  }
 }
 
 function applyThirtyFourthMigration(db) {
@@ -336,7 +426,7 @@ function applyThirtyFourthMigration(db) {
       prepared_by TEXT DEFAULT 'Md. Ariful Rahman\nAccounts & Admin\nK. A. Design Accessories Ltd.',
       authorized_by TEXT DEFAULT 'Maksudha Akter Kumu\nChairman\nK.A. DESIGN ACCESSORIES LTD.',
       accepted_by TEXT,
-      status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK(status IN ('ACTIVE', 'CANCELLED', 'PAID')),
+      status TEXT NOT NULL DEFAULT 'APPROVED',
       notes TEXT,
       created_by INTEGER REFERENCES users(id),
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,

@@ -91,6 +91,8 @@ contextBridge.exposeInMainWorld('kadal', {
     delete: (id) => ipcRenderer.invoke('challans:delete', id),
     clearHistory: () => ipcRenderer.invoke('challans:clearHistory'),
     deleteSuggestion: (field, value) => ipcRenderer.invoke('challans:deleteSuggestion', field, value),
+    receive: (id, receiptData) => ipcRenderer.invoke('challans:receive', id, receiptData),
+    getPendingReceipt: (filters) => ipcRenderer.invoke('challans:getPendingReceipt', filters),
   },
 
   // Reports
@@ -292,6 +294,8 @@ contextBridge.exposeInMainWorld('kadal', {
     getNextBillNumber: (applicantName) => ipcRenderer.invoke('finance:getNextBillNumber', applicantName),
     getUsedChallanIds: () => ipcRenderer.invoke('finance:getUsedChallanIds'),
     exportPdf: (id) => ipcRenderer.invoke('finance:exportPdf', id),
+    getPiReconciliation: (id) => ipcRenderer.invoke('finance:getPiReconciliation', id),
+    transferToBill: (id) => ipcRenderer.invoke('finance:transferToBill', id),
   },
 
 });

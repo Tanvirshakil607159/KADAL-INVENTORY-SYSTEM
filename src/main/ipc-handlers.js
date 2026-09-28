@@ -321,6 +321,14 @@ function registerIpcHandlers() {
     return ChallansRepo.clearChallanHistory();
   }));
 
+  ipcMain.handle('challans:receive', wrapHandler(async (id, receiptData) => {
+    return ChallanService.receiveChallan(id, receiptData);
+  }));
+
+  ipcMain.handle('challans:getPendingReceipt', wrapHandler(async (filters) => {
+    return ChallanService.getPendingReceipt(filters);
+  }));
+
   ipcMain.handle('challans:deleteSuggestion', wrapHandler(async (field, value) => {
     const s = await SettingsRepo.getAll();
     let blacklist = {};
@@ -904,6 +912,14 @@ function registerIpcHandlers() {
 
   ipcMain.handle('finance:exportPdf', wrapHandler((id) => {
     return FinanceService.exportPdf(id);
+  }));
+
+  ipcMain.handle('finance:getPiReconciliation', wrapHandler((id) => {
+    return FinanceService.getPiReconciliation(id);
+  }));
+
+  ipcMain.handle('finance:transferToBill', wrapHandler((id) => {
+    return FinanceService.transferPiToBill(id);
   }));
 
   console.log('[IPC] All handlers registered');

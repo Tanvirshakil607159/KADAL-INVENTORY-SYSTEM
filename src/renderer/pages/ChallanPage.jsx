@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import useStore from '../store/useStore';
-import { Plus, Search, Trash2, FileText, ArrowLeft, Package, Clock, X, AlertCircle } from 'lucide-react';
+import { Plus, Search, Trash2, FileText, ArrowLeft, Package, Clock, X, AlertCircle, FileCheck, Layers } from 'lucide-react';
 
 export default function ChallanPage() {
   const { 
@@ -21,13 +21,15 @@ export default function ChallanPage() {
   const [challanNumber, setChallanNumber] = useState('...');
   const [addressSuggestions, setAddressSuggestions] = useState([]);
   const [contactSuggestions, setContactSuggestions] = useState([]);
+  const [availablePis, setAvailablePis] = useState([]);
+  const [selectedPiId, setSelectedPiId] = useState(challanForm?.piId || '');
 
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
       // Parallelize all fetches for maximum speed while maintaining individual resilience
       const [
-        itemsRes, dvRes, settingsRes, numberRes, recipientsRes, approvalsRes, addrRes, contRes
+        itemsRes, dvRes, settingsRes, numberRes, recipientsRes, approvalsRes, addrRes, contRes, pisRes
       ] = await Promise.all([
         window.kadal.items.getAll().catch(e => ({ success: false, error: e })),
         window.kadal.items.getDistinctValues().catch(e => ({ success: false, error: e })),
@@ -36,7 +38,8 @@ export default function ChallanPage() {
         window.kadal.recipients.getAll().catch(e => ({ success: false, error: e })),
         window.kadal.approvals.getAll({ status: 'PENDING' }).catch(e => ({ success: false, error: e })),
         window.kadal.challans.getFieldSuggestions('receiverAddress').catch(e => ({ success: false, error: e })),
-        window.kadal.challans.getFieldSuggestions('receiverContact').catch(e => ({ success: false, error: e }))
+        window.kadal.challans.getFieldSuggestions('receiverContact').catch(e => ({ success: false, error: e })),
+        window.kadal.finance?.getAll({ type: 'pi' }).catch(e => ({ success: false, error: e }))
       ]);
 
       if (itemsRes?.success) setItems(itemsRes.data || []);
@@ -46,6 +49,12 @@ export default function ChallanPage() {
       if (recipientsRes?.success) setRecipients(recipientsRes.data || []);
       if (addrRes?.success) setAddressSuggestions(addrRes.data || []);
       if (contRes?.success) setContactSuggestions(contRes.data || []);
+
+      if (pisRes?.success || Array.isArray(pisRes)) {
+        const rawPis = pisRes?.data || pisRes || [];
+        const activePis = rawPis.filter(p => p.status !== 'BILLED' && p.status !== 'CANCELLED');
+        setAvailablePis(activePis);
+      }
 
       if (approvalsRes?.success && Array.isArray(approvalsRes.data)) {
         const locked = new Set();
@@ -74,6 +83,85 @@ export default function ChallanPage() {
     setChallanItems((challanItems || []).filter((_, i) => i !== idx));
   };
 
+  const selectedPi = availablePis.find(p => p.id === Number(selectedPiId));
+
+  const handlePiSelect = (piIdStr) => {
+    const pId = piIdStr ? Number(piIdStr) : null;
+    setSelectedPiId(pId || '');
+    if (!pId) {
+      setChallanForm(prev => ({ ...prev, piId: null }));
+      return;
+    }
+
+    const pi = availablePis.find(p => p.id === pId);
+    if (pi) {
+      setChallanForm(prev => ({
+        ...prev,
+        piId: pi.id,
+        receiverId: pi.recipient_id || prev.receiverId,
+        receiverName: pi.applicant_name || prev.receiverName,
+        receiverAddress: pi.applicant_address || prev.receiverAddress,
+        notes: prev.notes || `Against PI #${pi.pi_number}${pi.buyer ? ` (Buyer: ${pi.buyer})` : ''}`
+      }));
+    }
+  };
+
+  const handleImportItemsFromPi = (pi) => {
+    if (!pi || !pi.items || pi.items.length === 0) {
+      addToast('info', 'No items found in selected PI');
+      return;
+    }
+
+    const imported = [];
+    let unmatchedCount = 0;
+
+    pi.items.forEach(piIt => {
+      let matched = null;
+      if (piIt.itemId || piIt.item_id) {
+        matched = items.find(i => i.id === (piIt.itemId || piIt.item_id));
+      }
+      if (!matched && piIt.itemDescription) {
+        const desc = piIt.itemDescription.trim().toLowerCase();
+        matched = items.find(i => (i.name || '').trim().toLowerCase() === desc);
+      }
+      if (!matched && piIt.poStyleNo && piIt.poStyleNo !== '-') {
+        matched = items.find(i => (i.style_name || '').trim().toLowerCase() === piIt.poStyleNo.trim().toLowerCase());
+      }
+
+      if (matched) {
+        imported.push({
+          itemId: matched.id,
+          itemName: matched.name,
+          itemCode: matched.item_code || '',
+          size: matched.size || '',
+          color: matched.color || '',
+          styleName: piIt.poStyleNo || matched.style_name || '',
+          orderNumber: matched.order_number || '',
+          buyerName: pi.buyer || matched.buyer_name || '',
+          orderQuantity: Number(piIt.quantity) || 0,
+          quantity: Math.min(Number(piIt.quantity) || 0, matched.current_stock || Number(piIt.quantity) || 0),
+          unit: (piIt.unit || matched.unit || 'PCS').toUpperCase(),
+          available: matched.current_stock || 0,
+          piItemId: piIt.id,
+          notes: `Ref PI #${pi.pi_number}`
+        });
+      } else {
+        unmatchedCount++;
+      }
+    });
+
+    if (imported.length > 0) {
+      setChallanItems(imported);
+      if (unmatchedCount > 0) {
+        addToast('warning', `Imported ${imported.length} items. ${unmatchedCount} item(s) could not be matched directly to inventory products.`);
+      } else {
+        addToast('success', `Imported ${imported.length} item(s) from PI #${pi.pi_number}!`);
+      }
+    } else {
+      addToast('warning', `Could not automatically match PI items to inventory products. Please add items via "Browse Inventory".`);
+    }
+  };
+
   const handleSave = async () => {
     if (!challanForm?.receiverName?.trim()) { addToast('error', 'Receiver name is required'); return; }
     if (!challanItems || challanItems.length === 0) { addToast('error', 'Add at least one item'); return; }
@@ -99,7 +187,6 @@ export default function ChallanPage() {
       seenItems.add(key);
     }
 
-
     if (hasDuplicate) {
       const confirmed = await showConfirm({
         title: 'Duplicate Items Detected',
@@ -111,11 +198,11 @@ export default function ChallanPage() {
       if (!confirmed) return;
     }
 
-
     setSaving(true);
     try {
       const res = await window.kadal.challans.create({
         ...challanForm,
+        piId: selectedPiId || challanForm?.piId || null,
         items: challanItems.map(i => ({ 
           itemId: i.itemId, 
           name: i.itemName, 
@@ -127,10 +214,12 @@ export default function ChallanPage() {
           buyerName: i.buyerName,
           quantity: i.quantity, 
           unit: i.unit, 
-          notes: i.notes 
+          notes: i.notes,
+          piItemId: i.piItemId || i.pi_item_id || null
         })),
       });
       if (res.success && res.data?.success) {
+        setSelectedPiId('');
         if (res.data.pendingApproval) {
           addToast('success', 'Request submitted for Admin approval');
           clearChallan();
@@ -196,6 +285,7 @@ export default function ChallanPage() {
               <h3 style={{ color: '#6366f1', fontSize: 16 }}>DELIVERY CHALLAN</h3>
               <p>No: {challanNumber}</p>
               <p>Date: {new Date().toLocaleDateString('en-GB')}</p>
+              {selectedPi && <p style={{ fontWeight: 600, color: 'var(--primary)', margin: '4px 0 0 0' }}>Ref PI: {selectedPi.pi_number}</p>}
             </div>
           </div>
           <div style={{ marginBottom: 16 }}>
@@ -276,6 +366,59 @@ export default function ChallanPage() {
         <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h3 className="card-title">New Delivery Challan</h3>
           <div className="text-muted text-mono" style={{ fontSize: 13 }}>Next No: {challanNumber}</div>
+        </div>
+
+        {/* Link to Proforma Invoice (PI) */}
+        <div style={{ 
+          marginBottom: 18, 
+          padding: '14px 16px', 
+          background: selectedPiId ? 'rgba(99,102,241,0.06)' : 'var(--bg-card-hover, rgba(0,0,0,0.02))', 
+          border: `1.5px solid ${selectedPiId ? 'var(--primary)' : 'var(--border)'}`, 
+          borderRadius: 8 
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+            <div style={{ flex: 1, minWidth: 260 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 700, color: 'var(--text)', marginBottom: 6 }}>
+                <FileCheck size={16} color="var(--primary)" />
+                Link to Proforma Invoice (PI) <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>(Optional / Required for 100% Receipt Billing Flow)</span>
+              </label>
+              <select
+                className="form-input"
+                value={selectedPiId || ''}
+                onChange={e => handlePiSelect(e.target.value)}
+                style={{ width: '100%', fontSize: 13, background: 'var(--bg-base)' }}
+              >
+                <option value="">-- No PI Linked (General Standalone Dispatch) --</option>
+                {availablePis.map(p => (
+                  <option key={p.id} value={p.id}>
+                    PI #{p.pi_number} — {p.applicant_name} {p.buyer ? `(Buyer: ${p.buyer})` : ''} [{p.status}]
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {selectedPi && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12 }}>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  onClick={() => handleImportItemsFromPi(selectedPi)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600 }}
+                >
+                  <Layers size={14} /> Import Items from PI ({selectedPi.items?.length || 0})
+                </button>
+              </div>
+            )}
+          </div>
+          {selectedPi && (
+            <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px dashed var(--border)', fontSize: 12, color: 'var(--text-muted)', display: 'flex', flexWrap: 'wrap', gap: 16 }}>
+              <span><strong>Applicant:</strong> {selectedPi.applicant_name}</span>
+              {selectedPi.buyer && <span><strong>Buyer:</strong> {selectedPi.buyer}</span>}
+              <span><strong>Ordered Items:</strong> {selectedPi.items?.length || 0}</span>
+              <span><strong>Total Qty:</strong> {selectedPi.total_quantity}</span>
+              <span><strong>Status:</strong> <span className="badge badge-info" style={{ fontSize: 10 }}>{selectedPi.status}</span></span>
+            </div>
+          )}
         </div>
 
         <div className="form-row">

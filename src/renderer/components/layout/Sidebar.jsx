@@ -1,6 +1,6 @@
 import React from 'react';
 import useStore from '../../store/useStore';
-import { Home, LayoutDashboard, Package, FileText, History, BarChart3, Settings, HardDrive, LogOut, CheckCircle, Send, Factory, ChevronRight, ArrowDownUp, Landmark } from 'lucide-react';
+import { Home, LayoutDashboard, Package, FileText, History, BarChart3, Settings, HardDrive, LogOut, CheckCircle, Send, Factory, ChevronRight, ArrowDownUp, Landmark, PackageCheck } from 'lucide-react';
 
 const navItems = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -9,6 +9,7 @@ const navItems = [
   { id: 'pending-items', label: 'Pending Items', icon: Package },
   { id: 'warehouses', label: 'Warehouses', icon: Package },
   { id: 'challan', label: 'Create Challan', icon: FileText },
+  { id: 'challan-receipt', label: 'Challan Receipt', icon: PackageCheck },
   { id: 'finance', label: 'Finance', icon: Landmark },
   { id: 'approvals', label: 'Approvals', icon: CheckCircle },
   { id: 'gate-pass', label: 'Gate Pass', icon: FileText },
@@ -93,14 +94,14 @@ export default function Sidebar() {
               if (!allowed.includes(item.id)) return null;
             }
             if (user?.roleName === 'Inventory') {
-              const allowed = ['dashboard', 'inventory', 'stock-in-out', 'pending-items', 'warehouses', 'requisition', 'reports', 'approvals', 'settings'];
+              const allowed = ['dashboard', 'inventory', 'stock-in-out', 'pending-items', 'warehouses', 'challan-receipt', 'requisition', 'reports', 'approvals', 'settings'];
               if (settings.allow_inventory_to_produce === 'true') {
                 allowed.push('production');
               }
               if (!allowed.includes(item.id)) return null;
             }
             if (user?.roleName === 'Challan') {
-              const allowed = ['dashboard', 'challan', 'finance', 'gate-pass', 'reports', 'approvals', 'settings'];
+              const allowed = ['dashboard', 'challan', 'challan-receipt', 'finance', 'gate-pass', 'reports', 'approvals', 'settings'];
               if (settings.allow_challan_to_issue === 'true') {
                 allowed.push('issue');
               }

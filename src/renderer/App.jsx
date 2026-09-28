@@ -6,6 +6,7 @@ import PendingItemsPage from './pages/PendingItemsPage';
 import WarehousePage from './pages/WarehousePage';
 import ChallanPage from './pages/ChallanPage';
 import ChallanHistoryPage from './pages/ChallanHistoryPage';
+import ChallanReceiptPage from './pages/ChallanReceiptPage';
 import ReportsPage from './pages/ReportsPage';
 import SettingsPage from './pages/SettingsPage';
 import BackupPage from './pages/BackupPage';
@@ -183,6 +184,7 @@ export default function App() {
       case 'warehouses': return <WarehousePage />;
       case 'challan': return <ChallanPage />;
       case 'challan-history': return <ChallanHistoryPage />;
+      case 'challan-receipt': return <ChallanReceiptPage />;
       case 'reports': return <ReportsPage />;
       case 'approvals': return <ApprovalsPage />;
       case 'gate-pass': return <GatePassPage />;

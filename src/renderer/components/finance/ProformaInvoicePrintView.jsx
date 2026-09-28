@@ -8,9 +8,12 @@ export default function ProformaInvoicePrintView({
   onPrint, 
   onExportPdf, 
   onClose,
-  isModal = false 
+  isModal = false,
+  mode = null // 'pi' or 'bill'
 }) {
   if (!pi) return null;
+
+  const isBill = mode === 'bill' || (mode !== 'pi' && !!pi.bill_number);
 
   const formatDate = (dateStr) => {
     if (!dateStr) return '';
@@ -52,7 +55,7 @@ export default function ProformaInvoicePrintView({
           border: '1px solid var(--border-color, #cbd5e1)'
         }}>
           <button className="btn btn-primary btn-sm" onClick={handleNativePrint}>
-            <Printer size={15} style={{ marginRight: 6 }} /> Print PI
+            <Printer size={15} style={{ marginRight: 6 }} /> {isBill ? 'Print Bill' : 'Print PI'}
           </button>
           {onExportPdf && (
             <button className="btn btn-outline btn-sm" onClick={onExportPdf}>
@@ -128,23 +131,43 @@ export default function ProformaInvoicePrintView({
             </div>
 
             <div className="pi-meta-right">
-              <div className="pi-bill-heading">BILL</div>
-              <div className="pi-meta-row">
-                <span>Date :</span>
-                <strong>{formatDate(pi.pi_date)}</strong>
-              </div>
-              <div className="pi-meta-row">
-                <span>BILL :</span>
-                <strong>{pi.bill_number || '-'}</strong>
-              </div>
-              <div className="pi-meta-row">
-                <span>Date :</span>
-                <strong>{formatDate(pi.bill_date || pi.pi_date)}</strong>
-              </div>
-              <div className="pi-meta-row" style={{ marginTop: 4 }}>
-                <span>PROFORMA INVOICE NO. :</span>
-                <strong>{pi.pi_number || '-'}</strong>
-              </div>
+              {isBill ? (
+                <>
+                  <div className="pi-bill-heading">BILL</div>
+                  <div className="pi-meta-row">
+                    <span>BILL NO. :</span>
+                    <strong>{pi.bill_number || '-'}</strong>
+                  </div>
+                  <div className="pi-meta-row">
+                    <span>Date :</span>
+                    <strong>{formatDate(pi.bill_date || pi.pi_date)}</strong>
+                  </div>
+                  {pi.pi_number && (
+                    <div className="pi-meta-row" style={{ marginTop: 4 }}>
+                      <span>PI REF NO. :</span>
+                      <strong>{pi.pi_number}</strong>
+                    </div>
+                  )}
+                  {pi.challan_numbers && (
+                    <div className="pi-meta-row" style={{ marginTop: 4 }}>
+                      <span>CHALLAN NO(S) :</span>
+                      <strong style={{ fontSize: 11 }}>{pi.challan_numbers}</strong>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  <div className="pi-bill-heading" style={{ fontSize: 15, letterSpacing: '1px' }}>PROFORMA INVOICE</div>
+                  <div className="pi-meta-row" style={{ marginTop: 6 }}>
+                    <span>PROFORMA INVOICE NO. :</span>
+                    <strong>{pi.pi_number || '-'}</strong>
+                  </div>
+                  <div className="pi-meta-row">
+                    <span>Date :</span>
+                    <strong>{formatDate(pi.pi_date)}</strong>
+                  </div>
+                </>
+              )}
             </div>
           </div>
 

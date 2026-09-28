@@ -4,7 +4,8 @@ import {
   Landmark, FileText, Plus, Trash2, Printer, Download, Eye, 
   Search, CheckCircle, RefreshCw, Layers, DollarSign, Calendar, 
   ChevronRight, Building, Truck, Edit3, X, AlertCircle,
-  Filter, RotateCcw, Check, CheckSquare, ChevronDown, ChevronUp
+  Filter, RotateCcw, Check, CheckSquare, ChevronDown, ChevronUp,
+  PackageCheck, Clock, ArrowRight, ShieldCheck, Hash, BarChart3
 } from 'lucide-react';
 import { numberToCurrencyWords } from '../utils/numberToWords';
 import ProformaInvoicePrintView from '../components/finance/ProformaInvoicePrintView';
@@ -12,90 +13,98 @@ import ProformaInvoicePrintView from '../components/finance/ProformaInvoicePrint
 export default function FinancePage() {
   const { addToast, user, showConfirm } = useStore();
 
-  const [activeTab, setActiveTab] = useState('create'); // 'create' or 'history'
+  // Primary section: 'pi' (Proforma Invoices) or 'bills' (Commercial Bills)
+  const [activeSection, setActiveSection] = useState('pi');
+  
+  // Under 'pi': 'orders' (PI list & reconciliation) or 'create' (create PI pre-production)
+  const [piSubTab, setPiSubTab] = useState('orders');
+
   const [loading, setLoading] = useState(false);
-  const [history, setHistory] = useState([]);
-  const [historySearch, setHistorySearch] = useState('');
-  const [historyRecipientFilter, setHistoryRecipientFilter] = useState('');
+  const [records, setRecords] = useState([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [recipientFilter, setRecipientFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
 
-  // Dropdown data
+  // Dropdown reference data
   const [recipients, setRecipients] = useState([]);
-  const [allChallans, setAllChallans] = useState([]);
-  const [usedChallanIds, setUsedChallanIds] = useState([]);
+  const [inventoryItems, setInventoryItems] = useState([]);
 
-  // Form State
+  // ==================== CREATE PI FORM STATE ====================
   const [selectedRecipientId, setSelectedRecipientId] = useState('');
   const [applicantName, setApplicantName] = useState('');
   const [applicantAddress, setApplicantAddress] = useState('');
-  
   const [beneficiaryName, setBeneficiaryName] = useState('K.A. DESIGN ACCESSORIES LTD.');
   const [beneficiaryAddress, setBeneficiaryAddress] = useState('356/1, BLOCK-B, TEK KATHORA, SALNA, GAZIPUR-1703, BANGLADESH');
   const [beneficiaryBin, setBeneficiaryBin] = useState('');
-
   const [bankDetails, setBankDetails] = useState(
     'UNITED COMMERCIAL BANK PLC.\nTONGI BRANCH\n18, S.K. MANNAN TOWER, CHERAG ALI\nGAZIPUR-1712, BANGLADESH\nSWIFT CODE: UCBLBDDHTNG'
   );
-
   const [buyer, setBuyer] = useState('');
+  const [buyersList, setBuyersList] = useState([]);
+  const [customBuyerMode, setCustomBuyerMode] = useState(false);
   const [piNumber, setPiNumber] = useState('');
-  const [billNumber, setBillNumber] = useState('');
   const [piDate, setPiDate] = useState(() => new Date().toISOString().split('T')[0]);
-  const [billDate, setBillDate] = useState(() => new Date().toISOString().split('T')[0]);
-
-  const [selectedChallans, setSelectedChallans] = useState([]);
-  const [challanSearch, setChallanSearch] = useState('');
-  const [showAllChallans, setShowAllChallans] = useState(false);
-  const [challanRecipientFilter, setChallanRecipientFilter] = useState('');
-  const [challanDateFrom, setChallanDateFrom] = useState('');
-  const [challanDateTo, setChallanDateTo] = useState('');
-  const [challanBuyerFilter, setChallanBuyerFilter] = useState('');
-  const [challanStyleFilter, setChallanStyleFilter] = useState('');
-  const [challanInvoiceStatus, setChallanInvoiceStatus] = useState('all'); // 'all', 'uninvoiced', 'invoiced'
-  const [challanSelectionStatus, setChallanSelectionStatus] = useState('all'); // 'all', 'unselected', 'selected'
-  const [isSearchingServer, setIsSearchingServer] = useState(false);
-
-  // Items in PI
-  const [piItems, setPiItems] = useState([]);
+  const [currency, setCurrency] = useState('USD');
+  const [currencySymbol, setCurrencySymbol] = useState('$');
   const [netWeight, setNetWeight] = useState('250 KGS');
   const [grossWeight, setGrossWeight] = useState('260 KGS');
   const [termsConditions, setTermsConditions] = useState('CASH ON DELIVERY.');
-  const [currency, setCurrency] = useState('USD');
-  const [currencySymbol, setCurrencySymbol] = useState('$');
+  const [piItems, setPiItems] = useState([]);
+  const [savingPi, setSavingPi] = useState(false);
 
-  // Preview Modal State
+  // ==================== RECONCILIATION MODAL STATE ====================
+  const [reconciliationModalPi, setReconciliationModalPi] = useState(null);
+  const [reconciliationData, setReconciliationData] = useState(null);
+  const [loadingRecon, setLoadingRecon] = useState(false);
+  const [transferring, setTransferring] = useState(false);
+
+  // ==================== PREVIEW PRINT STATE ====================
   const [previewPi, setPreviewPi] = useState(null);
-  const [saving, setSaving] = useState(false);
+  const [previewMode, setPreviewMode] = useState('pi'); // 'pi' or 'bill'
 
-  // Load Recipients, Challans, and History
+  // Auto-generate next PI number
+  const generateNextPiNumber = useCallback(async (applicant = '') => {
+    try {
+      const nextPi = await window.kadal.finance.getNextNumber(applicant);
+      const pNum = nextPi?.success ? nextPi.data : (typeof nextPi === 'string' ? nextPi : '');
+      if (pNum) setPiNumber(pNum);
+    } catch (e) {
+      console.error('Failed to generate PI number:', e);
+    }
+  }, []);
+
+  // Load initial data
   const loadInitialData = useCallback(async () => {
     setLoading(true);
     try {
-      const [recRes, chalRes, usedRes] = await Promise.all([
+      const [recRes, itemRes, finRes, buyersRes] = await Promise.all([
         window.kadal.recipients.getAll().catch(() => ({ success: false, data: [] })),
-        window.kadal.challans.getAll({ status: 'ACTIVE', limit: 2000 }).catch(() => ({ success: false, data: [] })),
-        window.kadal.finance?.getUsedChallanIds().catch(() => ({ success: false, data: [] }))
+        window.kadal.items.getAll({}).catch(() => ({ success: false, data: [] })),
+        window.kadal.finance.getAll().catch(() => ({ success: false, data: [] })),
+        window.kadal.buyers.getAll().catch(() => ({ success: false, data: [] }))
       ]);
 
       if (recRes?.success) setRecipients(recRes.data || []);
       else if (Array.isArray(recRes)) setRecipients(recRes);
 
-      if (chalRes?.success) setAllChallans(chalRes.data || []);
-      else if (Array.isArray(chalRes)) setAllChallans(chalRes);
+      if (itemRes?.success) setInventoryItems(itemRes.data || []);
+      else if (Array.isArray(itemRes)) setInventoryItems(itemRes);
 
-      if (usedRes?.success) setUsedChallanIds(usedRes.data || []);
-      else if (Array.isArray(usedRes)) setUsedChallanIds(usedRes);
-    } catch (e) {
-      console.error('Failed to load initial data:', e);
-    }
-    setLoading(false);
-  }, []);
+      if (finRes?.success) setRecords(finRes.data || []);
+      else if (Array.isArray(finRes)) setRecords(finRes);
 
-  const loadHistory = useCallback(async () => {
-    try {
-      const res = await window.kadal.finance.getAll();
-      if (res.success) setHistory(res.data || []);
+      const bRaw = buyersRes?.success ? (buyersRes.data || []) : (Array.isArray(buyersRes) ? buyersRes : []);
+      const bSet = new Set(bRaw.map(b => (b.name || '').trim()).filter(Boolean));
+      // Also collect any buyer names from items
+      const itArr = itemRes?.data || (Array.isArray(itemRes) ? itemRes : []);
+      itArr.forEach(it => {
+        if (it.buyer_name) bSet.add(it.buyer_name.trim());
+      });
+      setBuyersList(Array.from(bSet).sort());
     } catch (e) {
-      console.error('Failed to load PI history:', e);
+      console.error('Failed to load finance data:', e);
+    } finally {
+      setLoading(false);
     }
   }, []);
 
@@ -103,13 +112,14 @@ export default function FinancePage() {
     loadInitialData();
   }, [loadInitialData]);
 
+  // Auto-generate PI number when opening Create tab
   useEffect(() => {
-    if (activeTab === 'history') {
-      loadHistory();
+    if (piSubTab === 'create' && !piNumber) {
+      generateNextPiNumber(applicantName);
     }
-  }, [activeTab, loadHistory]);
+  }, [piSubTab, piNumber, applicantName, generateNextPiNumber]);
 
-  // When recipient changes, update applicant fields and auto-suggest PI and Bill numbers
+  // Handle Recipient selection in Create PI
   const handleRecipientChange = async (recId) => {
     const rId = Number(recId);
     setSelectedRecipientId(rId);
@@ -118,623 +128,119 @@ export default function FinancePage() {
     if (rec) {
       setApplicantName(rec.name);
       setApplicantAddress(rec.receiver_address || '');
-
-      // Generate next PI number and Bill number
-      try {
-        const [nextPi, nextBill] = await Promise.all([
-          window.kadal.finance.getNextNumber(rec.name),
-          window.kadal.finance.getNextBillNumber(rec.name)
-        ]);
-        if (nextPi.success) setPiNumber(nextPi.data);
-        if (nextBill.success) setBillNumber(nextBill.data);
-      } catch (err) {
-        console.error('Error generating numbers:', err);
-      }
+      await generateNextPiNumber(rec.name);
     } else {
       setApplicantName('');
       setApplicantAddress('');
+      await generateNextPiNumber('');
     }
   };
 
-  // Extract distinct buyers and recipients for filters
-  const distinctBuyers = useMemo(() => {
-    const set = new Set();
-    allChallans.forEach(c => {
-      if (c.buyer_names) {
-        c.buyer_names.split(',').forEach(b => {
-          const t = b.trim();
-          if (t) set.add(t);
-        });
-      }
-    });
-    return Array.from(set).sort();
-  }, [allChallans]);
-
-  const distinctRecipients = useMemo(() => {
-    const set = new Set();
-    recipients.forEach(r => { if (r.name) set.add(r.name.trim()); });
-    allChallans.forEach(c => { if (c.receiver_name) set.add(c.receiver_name.trim()); });
-    return Array.from(set).sort();
-  }, [recipients, allChallans]);
-
-  // Date filter presets
-  const setDatePresetToday = () => {
-    const today = new Date().toISOString().split('T')[0];
-    setChallanDateFrom(today);
-    setChallanDateTo(today);
-  };
-
-  const setDatePresetLast7Days = () => {
-    const d = new Date();
-    const to = d.toISOString().split('T')[0];
-    d.setDate(d.getDate() - 7);
-    const from = d.toISOString().split('T')[0];
-    setChallanDateFrom(from);
-    setChallanDateTo(to);
-  };
-
-  const setDatePresetThisMonth = () => {
-    const now = new Date();
-    const y = now.getFullYear();
-    const m = String(now.getMonth() + 1).padStart(2, '0');
-    const lastDay = new Date(y, now.getMonth() + 1, 0).getDate();
-    setChallanDateFrom(`${y}-${m}-01`);
-    setChallanDateTo(`${y}-${m}-${lastDay}`);
-  };
-
-  const setDatePresetThisYear = () => {
-    const y = new Date().getFullYear();
-    setChallanDateFrom(`${y}-01-01`);
-    setChallanDateTo(`${y}-12-31`);
-  };
-
-  const clearDatePreset = () => {
-    setChallanDateFrom('');
-    setChallanDateTo('');
-  };
-
-  const handleResetChallanFilters = () => {
-    setChallanSearch('');
-    setChallanRecipientFilter('');
-    setShowAllChallans(false);
-    setChallanDateFrom('');
-    setChallanDateTo('');
-    setChallanBuyerFilter('');
-    setChallanStyleFilter('');
-    setChallanInvoiceStatus('all');
-    setChallanSelectionStatus('all');
-  };
-
-  const hasActiveChallanFilters = Boolean(
-    challanSearch.trim() ||
-    challanRecipientFilter ||
-    showAllChallans ||
-    challanDateFrom ||
-    challanDateTo ||
-    challanBuyerFilter ||
-    challanStyleFilter.trim() ||
-    challanInvoiceStatus !== 'all' ||
-    challanSelectionStatus !== 'all'
-  );
-
-  const handleRemoteSearch = async () => {
-    if (!challanSearch.trim()) return;
-    setIsSearchingServer(true);
-    try {
-      const res = await window.kadal.challans.getAll({
-        search: challanSearch.trim(),
-        limit: 100
-      });
-      const data = res?.data || (Array.isArray(res) ? res : []);
-      if (data.length > 0) {
-        setAllChallans(prev => {
-          const existingIds = new Set(prev.map(c => c.id));
-          const newOnes = data.filter(c => !existingIds.has(c.id));
-          return newOnes.length > 0 ? [...newOnes, ...prev] : prev;
-        });
-        addToast('success', `Found ${data.length} challan(s) matching "${challanSearch.trim()}"`);
-      } else {
-        addToast('info', `No challans found in database for "${challanSearch.trim()}"`);
-      }
-    } catch (e) {
-      console.error('Remote search error:', e);
-      addToast('error', 'Search error: ' + e.message);
-    }
-    setIsSearchingServer(false);
-  };
-
-  // Filter available challans with multi-field search and robust filters
-  const availableChallans = useMemo(() => {
-    return allChallans.filter(c => {
-      const isSelected = selectedChallans.some(sc => sc.id === c.id);
-      const isUsed = usedChallanIds.includes(c.id);
-
-      // Selection filter:
-      if (challanSelectionStatus === 'selected' && !isSelected) return false;
-      if (challanSelectionStatus === 'unselected' && isSelected && !challanSearch.trim()) return false;
-
-      // Invoiced status filter:
-      if (challanInvoiceStatus === 'uninvoiced' && isUsed) return false;
-      if (challanInvoiceStatus === 'invoiced' && !isUsed) return false;
-
-      // Recipient filter:
-      if (challanRecipientFilter && challanRecipientFilter !== 'ALL') {
-        const matchesRec = (c.receiver_name || '').trim().toLowerCase() === challanRecipientFilter.trim().toLowerCase();
-        if (!matchesRec) return false;
-      } else if (!showAllChallans && applicantName && challanRecipientFilter !== 'ALL') {
-        const matchesApplicant = (c.receiver_name || '').trim().toLowerCase() === applicantName.trim().toLowerCase();
-        // If user typed a search query matching this challan number specifically, do not filter out by applicant
-        const searchMatchesNum = challanSearch.trim() && (c.challan_number || '').toLowerCase().includes(challanSearch.trim().toLowerCase());
-        if (!matchesApplicant && !searchMatchesNum) return false;
-      }
-
-      // Date Range filter:
-      if (challanDateFrom) {
-        const cDate = c.challan_date ? c.challan_date.split('T')[0] : '';
-        if (cDate && cDate < challanDateFrom) return false;
-      }
-      if (challanDateTo) {
-        const cDate = c.challan_date ? c.challan_date.split('T')[0] : '';
-        if (cDate && cDate > challanDateTo) return false;
-      }
-
-      // Buyer filter:
-      if (challanBuyerFilter) {
-        const b = (c.buyer_names || '').toLowerCase();
-        if (!b.includes(challanBuyerFilter.toLowerCase())) return false;
-      }
-
-      // Style / Order / PO filter:
-      if (challanStyleFilter.trim()) {
-        const sf = challanStyleFilter.toLowerCase();
-        const matchStyle = (c.style_names || '').toLowerCase().includes(sf);
-        const matchOrder = (c.order_numbers || '').toLowerCase().includes(sf);
-        const matchPurchase = (c.purchase_nos || '').toLowerCase().includes(sf);
-        if (!matchStyle && !matchOrder && !matchPurchase) return false;
-      }
-
-      // Search query (search across number, receiver, item, buyer, style, order, purchase)
-      if (challanSearch.trim()) {
-        const q = challanSearch.toLowerCase();
-        const matchNum = (c.challan_number || '').toLowerCase().includes(q);
-        const matchRec = (c.receiver_name || '').toLowerCase().includes(q);
-        const matchItem = (c.item_names || '').toLowerCase().includes(q);
-        const matchBuyer = (c.buyer_names || '').toLowerCase().includes(q);
-        const matchStyle = (c.style_names || '').toLowerCase().includes(q);
-        const matchOrder = (c.order_numbers || '').toLowerCase().includes(q);
-        const matchPurchase = (c.purchase_nos || '').toLowerCase().includes(q);
-        if (!matchNum && !matchRec && !matchItem && !matchBuyer && !matchStyle && !matchOrder && !matchPurchase) {
-          return false;
-        }
-      }
-
-      return true;
-    });
-  }, [
-    allChallans, selectedChallans, usedChallanIds, showAllChallans, 
-    applicantName, challanSearch, challanRecipientFilter, 
-    challanDateFrom, challanDateTo, challanInvoiceStatus, 
-    challanBuyerFilter, challanStyleFilter, challanSelectionStatus
-  ]);
-
-  // Toggle selection for all visible challans
-  const areAllVisibleSelected = useMemo(() => {
-    if (availableChallans.length === 0) return false;
-    return availableChallans.every(c => selectedChallans.some(sc => sc.id === c.id));
-  }, [availableChallans, selectedChallans]);
-
-  const handleToggleSelectAllVisible = async () => {
-    if (areAllVisibleSelected) {
-      const visibleIds = new Set(availableChallans.map(c => c.id));
-      const remaining = selectedChallans.filter(c => !visibleIds.has(c.id));
-      setSelectedChallans(remaining);
-      await syncItemsFromChallans(remaining);
-    } else {
-      const selectedIds = new Set(selectedChallans.map(c => c.id));
-      const toAdd = availableChallans.filter(c => !selectedIds.has(c.id));
-      const updated = [...selectedChallans, ...toAdd];
-      setSelectedChallans(updated);
-      await syncItemsFromChallans(updated);
-    }
-  };
-
-  const handleClearAllSelected = async () => {
-    setSelectedChallans([]);
-    await syncItemsFromChallans([]);
-  };
-
-  // Add a challan to selection
-  const handleSelectChallan = async (challan) => {
-    if (selectedChallans.some(sc => sc.id === challan.id)) return;
-    const updatedChallans = [...selectedChallans, challan];
-    setSelectedChallans(updatedChallans);
-    await syncItemsFromChallans(updatedChallans);
-  };
-
-  // Remove a challan from selection
-  const handleRemoveChallan = async (challanId) => {
-    const updatedChallans = selectedChallans.filter(c => c.id !== challanId);
-    setSelectedChallans(updatedChallans);
-    await syncItemsFromChallans(updatedChallans);
-  };
-
-  // Auto-aggregate / sync items from all selected challans
-  const syncItemsFromChallans = async (challans) => {
-    if (challans.length === 0) {
-      setPiItems([]);
-      return;
-    }
-
-    try {
-      // Fetch full details of each challan
-      const fullChallans = await Promise.all(
-        challans.map(async c => {
-          try {
-            const r = await window.kadal.challans.getById(c.id);
-            return r?.data || (r?.items ? r : c);
-          } catch (e) {
-            console.warn('Failed to get challan by id:', c.id, e);
-            return c;
-          }
-        })
-      );
-
-      // Collect all items and check if any need fallback lookup from inventory items
-      const rawItems = [];
-      const buyersList = [];
-      const purchaseNosList = [];
-      const billDatesList = [];
-      const missingItemIds = new Set();
-
-      for (const fc of fullChallans) {
-        if (fc.challan_date) billDatesList.push(fc.challan_date);
-        const items = fc.items || fc.challan_items || [];
-        for (const it of items) {
-          const itemId = it.item_id || it.itemId;
-          if (itemId && (!it.item_name || it.unit_price === undefined || !it.order_number || !it.style_name)) {
-            missingItemIds.add(itemId);
-          }
-        }
-      }
-
-      // If any items are missing details, fetch them directly from inventory
-      const fallbackItemMap = new Map();
-      if (missingItemIds.size > 0 && window.kadal?.items?.getById) {
-        try {
-          const fetchedItems = await Promise.all(
-            Array.from(missingItemIds).map(id => window.kadal.items.getById(id).catch(() => null))
-          );
-          for (const res of fetchedItems) {
-            const item = res?.data || res;
-            if (item && item.id) {
-              fallbackItemMap.set(item.id, item);
-            }
-          }
-        } catch (e) {
-          console.warn('Error fetching missing items fallback:', e);
-        }
-      }
-
-      for (const fc of fullChallans) {
-        const items = fc.items || fc.challan_items || [];
-        for (const it of items) {
-          const itemId = it.item_id || it.itemId;
-          const fallback = fallbackItemMap.get(itemId) || {};
-          const itemObj = it.items || fallback || {};
-
-          const name = it.item_name || itemObj.name || it.name || 'Item';
-          const size = it.size || itemObj.size || '';
-          const color = it.color || itemObj.color || '';
-          const styleName = it.style_name || itemObj.style_name || '';
-          const orderNumber = it.order_number || itemObj.order_number || '';
-          const purchaseNo = it.purchase_no || itemObj.purchase_no || '';
-          const buyerName = it.buyer_name || itemObj.buyer_name || '';
-          const quantity = Number(it.quantity) || 0;
-          const unit = (it.unit || itemObj.unit || 'PCS').toUpperCase();
-          const unitPrice = Number(it.unit_price !== undefined ? it.unit_price : (itemObj.unit_price !== undefined ? itemObj.unit_price : 0));
-
-          rawItems.push({
-            challanId: fc.id,
-            challanNumber: fc.challan_number,
-            itemId,
-            name,
-            size,
-            color,
-            styleName,
-            orderNumber,
-            purchaseNo,
-            buyerName,
-            quantity,
-            unit,
-            unitPrice,
-          });
-
-          if (buyerName) buyersList.push(buyerName);
-          if (purchaseNo && !['N/A', 'NA', 'NONE', '-'].includes(purchaseNo.trim().toUpperCase())) {
-            purchaseNosList.push(purchaseNo);
-          }
-        }
-      }
-
-      // Group items with identical item description and style
-      // or group by item description + unit
-      const groupedMap = new Map();
-
-      for (const item of rawItems) {
-        // Construct description
-        let desc = item.name || 'ACCESSORY ITEM';
-        const cleanSize = (item.size || '').trim();
-        if (cleanSize && !['N/A', 'NA', 'NONE', '-'].includes(cleanSize.toUpperCase())) {
-          if (!desc.toLowerCase().includes(cleanSize.toLowerCase())) {
-            desc += ` (${cleanSize})`;
-          }
-        }
-
-        // Construct PO & Style No
-        const poParts = [];
-        const cleanOrder = (item.orderNumber || '').trim();
-        const cleanStyle = (item.styleName || '').trim();
-        const cleanPurchase = (item.purchaseNo || '').trim();
-
-        if (cleanOrder && !['N/A', 'NA', 'NONE', '-'].includes(cleanOrder.toUpperCase())) {
-          poParts.push(cleanOrder);
-        }
-        if (cleanStyle && !['N/A', 'NA', 'NONE', 'ALL', '-'].includes(cleanStyle.toUpperCase())) {
-          poParts.push(cleanStyle);
-        }
-        if (poParts.length === 0 && cleanPurchase && !['N/A', 'NA', 'NONE', '-'].includes(cleanPurchase.toUpperCase())) {
-          poParts.push(cleanPurchase);
-        }
-
-        const poStyle = poParts.join('+') || '-';
-        const key = `${desc.trim().toLowerCase()}||${poStyle.trim().toLowerCase()}||${item.unit.trim().toLowerCase()}`;
-
-        if (groupedMap.has(key)) {
-          const existing = groupedMap.get(key);
-          existing.quantity += item.quantity;
-          if (poStyle !== '-' && !existing.poStyleNo.split('+').includes(poStyle)) {
-            existing.poStyleNo = existing.poStyleNo === '-' ? poStyle : `${existing.poStyleNo}+${poStyle}`;
-            existing.po_style_no = existing.poStyleNo;
-          }
-        } else {
-          groupedMap.set(key, {
-            challanId: item.challanId,
-            challan_id: item.challanId,
-            itemId: item.itemId,
-            item_id: item.itemId,
-            itemDescription: desc,
-            item_description: desc,
-            poStyleNo: poStyle,
-            po_style_no: poStyle,
-            quantity: item.quantity,
-            unit: item.unit,
-            unitPrice: item.unitPrice,
-            unit_price: item.unitPrice,
-            totalAmount: 0,
-            total_amount: 0
-          });
-        }
-      }
-
-      const aggregated = Array.from(groupedMap.values()).map((it, idx) => {
-        const rate = Number(it.unitPrice) || 0;
-        const total = Number((it.quantity * rate).toFixed(2));
-        return {
-          ...it,
-          slNo: idx + 1,
-          sl_no: idx + 1,
-          unitPrice: rate,
-          unit_price: rate,
-          totalAmount: total,
-          total_amount: total
-        };
-      });
-
-      setPiItems(aggregated);
-
-      // Pre-fill Buyer field if empty
-      const uniqueBuyers = [...new Set(buyersList.filter(Boolean))];
-      const uniquePurchases = [...new Set(purchaseNosList.filter(Boolean))];
-      if (!buyer.trim() && (uniqueBuyers.length > 0 || uniquePurchases.length > 0)) {
-        let buyerStr = uniqueBuyers.join(', ');
-        if (uniquePurchases.length > 0) {
-          buyerStr += ` // PURCHASE NO. ${uniquePurchases.join('+')}`;
-        }
-        setBuyer(buyerStr);
-      }
-
-      // Set Bill Date from first challan if available
-      if (billDatesList.length > 0 && !billDate) {
-        setBillDate(new Date(billDatesList[0]).toISOString().split('T')[0]);
-      }
-
-    } catch (err) {
-      console.error('Error syncing items from challans:', err);
-      addToast('error', 'Failed to load items from selected challan(s)');
-    }
-  };
-
-  // Modify unit price for an item
-  const handlePriceChange = (index, newPrice) => {
-    const priceNum = parseFloat(newPrice) || 0;
-    setPiItems(prev => prev.map((item, idx) => {
-      if (idx === index) {
-        const total = Number((item.quantity * priceNum).toFixed(2));
-        return { 
-          ...item, 
-          unitPrice: priceNum, 
-          unit_price: priceNum, 
-          totalAmount: total, 
-          total_amount: total 
-        };
-      }
-      return item;
-    }));
-  };
-
-  // Modify quantity for an item
-  const handleQuantityChange = (index, newQty) => {
-    const qtyNum = parseFloat(newQty) || 0;
-    setPiItems(prev => prev.map((item, idx) => {
-      if (idx === index) {
-        const rate = Number(item.unitPrice !== undefined ? item.unitPrice : item.unit_price) || 0;
-        const total = Number((qtyNum * rate).toFixed(2));
-        return { 
-          ...item, 
-          quantity: qtyNum, 
-          totalAmount: total, 
-          total_amount: total 
-        };
-      }
-      return item;
-    }));
-  };
-
-  // Modify PO/Style for an item
-  const handlePoStyleChange = (index, newPo) => {
-    setPiItems(prev => prev.map((item, idx) => 
-      idx === index ? { ...item, poStyleNo: newPo, po_style_no: newPo } : item
-    ));
-  };
-
-  // Modify Item Description
-  const handleDescriptionChange = (index, newDesc) => {
-    setPiItems(prev => prev.map((item, idx) => 
-      idx === index ? { ...item, itemDescription: newDesc, item_description: newDesc } : item
-    ));
-  };
-
-  // Add custom line item
+  // Add Item Line in Create PI
   const handleAddLineItem = () => {
     setPiItems(prev => [
       ...prev,
       {
         slNo: prev.length + 1,
-        sl_no: prev.length + 1,
-        itemDescription: 'NEW ACCESSORY ITEM',
-        item_description: 'NEW ACCESSORY ITEM',
-        poStyleNo: '-',
-        po_style_no: '-',
+        itemId: null,
+        itemDescription: '',
+        poStyleNo: '',
         quantity: 1000,
         unit: 'PCS',
         unitPrice: 0.05,
-        unit_price: 0.05,
-        totalAmount: 50.00,
-        total_amount: 50.00
+        totalAmount: 50.00
       }
     ]);
   };
 
-  // Remove a line item
-  const handleRemoveLineItem = (index) => {
-    setPiItems(prev => prev.filter((_, idx) => idx !== index).map((it, idx) => ({ ...it, slNo: idx + 1, sl_no: idx + 1 })));
+  const handleSelectInventoryItem = (index, itemId) => {
+    const it = inventoryItems.find(i => i.id === Number(itemId));
+    if (!it) return;
+
+    setPiItems(prev => prev.map((item, idx) => {
+      if (idx !== index) return item;
+      const rate = Number(it.unit_price) || 0;
+      const qty = Number(item.quantity) || 1000;
+      return {
+        ...item,
+        itemId: it.id,
+        itemDescription: it.name,
+        poStyleNo: it.style_name || it.order_number || it.purchase_no || item.poStyleNo,
+        unit: (it.unit || 'PCS').toUpperCase(),
+        unitPrice: rate,
+        totalAmount: Number((qty * rate).toFixed(2))
+      };
+    }));
   };
 
-  // Totals
+  const handleUpdateItemField = (index, field, val) => {
+    setPiItems(prev => prev.map((item, idx) => {
+      if (idx !== index) return item;
+      const updated = { ...item, [field]: val };
+      if (field === 'quantity' || field === 'unitPrice') {
+        const q = field === 'quantity' ? Number(val) || 0 : Number(item.quantity) || 0;
+        const p = field === 'unitPrice' ? Number(val) || 0 : Number(item.unitPrice) || 0;
+        updated.totalAmount = Number((q * p).toFixed(2));
+      }
+      return updated;
+    }));
+  };
+
+  const handleRemoveLineItem = (index) => {
+    setPiItems(prev => prev.filter((_, i) => i !== index).map((it, i) => ({ ...it, slNo: i + 1 })));
+  };
+
+  // Totals for Create PI
   const totalQuantity = useMemo(() => {
     return piItems.reduce((sum, it) => sum + (Number(it.quantity) || 0), 0);
   }, [piItems]);
 
   const totalAmount = useMemo(() => {
-    return Number(piItems.reduce((sum, it) => sum + (Number(it.totalAmount !== undefined ? it.totalAmount : it.total_amount) || 0), 0).toFixed(2));
+    return Number(piItems.reduce((sum, it) => sum + (Number(it.totalAmount) || 0), 0).toFixed(2));
   }, [piItems]);
 
   const amountInWords = useMemo(() => {
+    if (totalAmount <= 0) return 'ZERO ONLY';
     return `IN WORDS: ${numberToCurrencyWords(totalAmount, currency)}`;
   }, [totalAmount, currency]);
 
-  // Construct current PI payload for preview or saving
-  const buildCurrentPiPayload = () => {
-    const challanNums = selectedChallans.map(c => c.challan_number).join(', ');
-    return {
-      pi_number: piNumber || 'DRAFT-PI',
-      piNumber: piNumber || 'DRAFT-PI',
-      bill_number: billNumber || '',
-      billNumber: billNumber || '',
-      pi_date: piDate,
-      piDate: piDate,
-      bill_date: billDate,
-      billDate: billDate,
-      recipient_id: selectedRecipientId || null,
-      recipientId: selectedRecipientId || null,
-      applicant_name: applicantName || 'RECIPIENT COMPANY',
-      applicantName: applicantName || 'RECIPIENT COMPANY',
-      applicant_address: applicantAddress || '',
-      applicantAddress: applicantAddress || '',
-      beneficiary_name: beneficiaryName,
-      beneficiaryName: beneficiaryName,
-      beneficiary_address: beneficiaryAddress,
-      beneficiaryAddress: beneficiaryAddress,
-      beneficiary_bin: beneficiaryBin,
-      beneficiaryBin: beneficiaryBin,
-      bank_details: bankDetails,
-      bankDetails: bankDetails,
-      buyer: buyer || '-',
-      challan_ids: selectedChallans.map(c => c.id),
-      challanIds: selectedChallans.map(c => c.id),
-      challan_numbers: challanNums,
-      challanNumbers: challanNums,
-      currency,
-      currency_symbol: currencySymbol,
-      currencySymbol: currencySymbol,
-      total_quantity: totalQuantity,
-      totalQuantity: totalQuantity,
-      total_amount: totalAmount,
-      totalAmount: totalAmount,
-      amount_in_words: amountInWords,
-      amountInWords: amountInWords,
-      net_weight: netWeight,
-      netWeight: netWeight,
-      gross_weight: grossWeight,
-      grossWeight: grossWeight,
-      terms_conditions: termsConditions,
-      termsConditions: termsConditions,
-      status: 'ACTIVE',
-      items: piItems
-    };
+  // Currency handler
+  const handleCurrencyChange = (curr) => {
+    setCurrency(curr);
+    if (curr === 'USD') setCurrencySymbol('$');
+    else if (curr === 'BDT') setCurrencySymbol('৳');
+    else if (curr === 'EUR') setCurrencySymbol('€');
+    else setCurrencySymbol(curr);
   };
 
-  // Open Preview Modal
-  const handlePreview = () => {
+  // Submit / Save Proforma Invoice
+  const handleSavePi = async (initialStatus = 'APPROVED') => {
     if (!applicantName.trim()) {
-      addToast('error', 'Please select an Applicant (Recipient Company)');
+      addToast('error', 'Please select or enter Applicant Name / Recipient');
+      return;
+    }
+    if (!piNumber.trim()) {
+      addToast('error', 'Proforma Invoice Number is required');
       return;
     }
     if (piItems.length === 0) {
-      addToast('error', 'Please select at least one Challan to populate items');
-      return;
-    }
-    setPreviewPi(buildCurrentPiPayload());
-  };
-
-  // Save PI to Database
-  const handleSavePi = async () => {
-    if (!applicantName.trim()) {
-      addToast('error', 'Please select an Applicant (Recipient Company)');
-      return;
-    }
-    if (piItems.length === 0) {
-      addToast('error', 'Please select at least one Challan or add line items');
+      addToast('error', 'Please add at least one item to the Proforma Invoice');
       return;
     }
 
-    setSaving(true);
+    setSavingPi(true);
     try {
       const payload = {
-        piNumber,
-        billNumber,
-        piDate,
-        billDate,
-        recipientId: selectedRecipientId,
-        applicantName,
-        applicantAddress,
+        piNumber: piNumber.trim(),
+        piDate: piDate || new Date().toISOString(),
+        recipientId: selectedRecipientId || null,
+        applicantName: applicantName.trim(),
+        applicantAddress: applicantAddress.trim() || null,
         beneficiaryName,
         beneficiaryAddress,
         beneficiaryBin,
         bankDetails,
-        buyer,
-        challanIds: selectedChallans.map(c => c.id),
-        challanNumbers: selectedChallans.map(c => c.challan_number).join(', '),
+        buyer: buyer.trim() || null,
         currency,
         currencySymbol,
         totalQuantity,
@@ -743,808 +249,430 @@ export default function FinancePage() {
         netWeight,
         grossWeight,
         termsConditions,
-        items: piItems.map((it, idx) => ({
-          slNo: it.slNo || it.sl_no || idx + 1,
-          sl_no: it.slNo || it.sl_no || idx + 1,
-          challanId: it.challanId || it.challan_id || null,
-          challan_id: it.challanId || it.challan_id || null,
-          itemId: it.itemId || it.item_id || null,
-          item_id: it.itemId || it.item_id || null,
-          itemDescription: it.itemDescription || it.item_description || '',
-          item_description: it.itemDescription || it.item_description || '',
-          poStyleNo: it.poStyleNo || it.po_style_no || null,
-          po_style_no: it.poStyleNo || it.po_style_no || null,
+        status: initialStatus,
+        items: piItems.map(it => ({
+          itemId: it.itemId || null,
+          itemDescription: it.itemDescription.trim() || 'Custom Accessory Item',
+          poStyleNo: it.poStyleNo.trim() || '-',
           quantity: Number(it.quantity) || 0,
           unit: (it.unit || 'PCS').toUpperCase(),
-          unitPrice: Number(it.unitPrice !== undefined ? it.unitPrice : it.unit_price) || 0,
-          unit_price: Number(it.unitPrice !== undefined ? it.unitPrice : it.unit_price) || 0,
-          totalAmount: Number(it.totalAmount !== undefined ? it.totalAmount : it.total_amount) || 0,
-          total_amount: Number(it.totalAmount !== undefined ? it.totalAmount : it.total_amount) || 0,
+          unitPrice: Number(it.unitPrice) || 0,
+          totalAmount: Number(it.totalAmount) || 0
         }))
       };
 
       const res = await window.kadal.finance.create(payload);
-      if (res.success) {
+      if (res?.success) {
         addToast('success', `Proforma Invoice ${res.piNumber || piNumber} created successfully!`);
-        
-        // Prompt to open print view
-        const createdObj = {
-          ...payload,
-          id: res.id,
-          pi_number: res.piNumber || piNumber,
-          bill_number: billNumber,
-          pi_date: piDate,
-          bill_date: billDate,
-          applicant_name: applicantName,
-          applicant_address: applicantAddress,
-          beneficiary_name: beneficiaryName,
-          beneficiary_address: beneficiaryAddress,
-          bank_details: bankDetails,
-          buyer,
-          total_quantity: totalQuantity,
-          total_amount: totalAmount,
-          amount_in_words: amountInWords,
-          net_weight: netWeight,
-          gross_weight: grossWeight,
-          terms_conditions: termsConditions,
-          items: payload.items
-        };
-        setPreviewPi(createdObj);
-
         // Reset form
-        setSelectedChallans([]);
         setPiItems([]);
-        loadHistory();
+        setSelectedRecipientId('');
+        setApplicantName('');
+        setApplicantAddress('');
+        setBuyer('');
+        setPiNumber('');
+        setPiSubTab('orders');
+        await loadInitialData();
       } else {
-        addToast('error', res.error || 'Failed to create Proforma Invoice');
+        addToast('error', res?.error || 'Failed to create Proforma Invoice');
       }
-    } catch (err) {
-      console.error('Error creating PI:', err);
-      addToast('error', err.message || 'Error saving Proforma Invoice');
+    } catch (e) {
+      addToast('error', e.message || 'Error creating PI');
+    } finally {
+      setSavingPi(false);
     }
-    setSaving(false);
   };
 
-  // Export PDF from preview
-  const handleExportPdf = async (piToExport) => {
+  // Open Reconciliation Modal
+  const handleOpenReconciliation = async (pi) => {
+    setReconciliationModalPi(pi);
+    setLoadingRecon(true);
     try {
-      const payload = piToExport || buildCurrentPiPayload();
-      const res = await window.kadal.finance.exportPdf(payload.id ? payload.id : payload);
-      if (res && res.success) {
-        addToast('success', 'PDF exported successfully!');
+      const res = await window.kadal.finance.getPiReconciliation(pi.id);
+      const data = res?.success ? res.data : (res?.data || res);
+      setReconciliationData(data);
+    } catch (e) {
+      addToast('error', 'Failed to load reconciliation data');
+    } finally {
+      setLoadingRecon(false);
+    }
+  };
+
+  // Transfer PI to Bill
+  const handleTransferToBill = async (piId) => {
+    const confirmed = await showConfirm({
+      title: 'Transfer PI to Commercial Bill',
+      message: 'All order quantities have been 100% received from recipient side. Do you want to convert this Proforma Invoice into a finalized Commercial Bill?',
+      confirmText: 'Transfer to Bill',
+      cancelText: 'Cancel',
+      type: 'info'
+    });
+    if (!confirmed) return;
+
+    setTransferring(true);
+    try {
+      const res = await window.kadal.finance.transferToBill(piId);
+      if (res?.success) {
+        addToast('success', `Transferred to Bill #${res.data?.billNumber || res.billNumber}!`);
+        setReconciliationModalPi(null);
+        await loadInitialData();
+        // Switch to Bills view so user can see and print the new Bill
+        setActiveSection('bills');
       } else {
-        if (res && res.error) {
-          addToast('error', res.error);
-        } else {
-          window.print();
+        addToast('error', res?.error || 'Failed to transfer to bill');
+      }
+    } catch (e) {
+      addToast('error', e.message || 'Error transferring to bill');
+    } finally {
+      setTransferring(false);
+    }
+  };
+
+  // Open Preview Modal
+  const handlePreview = (item, mode = 'pi') => {
+    setPreviewPi(item);
+    setPreviewMode(mode);
+  };
+
+  // Filter records
+  const piList = useMemo(() => {
+    return records.filter(r => {
+      // Must not be a pure historical bill without PI number
+      if (!r.pi_number && r.bill_number) return false;
+
+      if (recipientFilter && r.recipient_id !== Number(recipientFilter)) return false;
+      if (statusFilter !== 'all') {
+        if (statusFilter === '100_received') {
+          if (!r.is_100_percent_received || r.status === 'BILLED') return false;
+        } else if (r.status !== statusFilter) {
+          return false;
         }
       }
-    } catch (err) {
-      console.warn('PDF export failed, falling back to window.print():', err);
-      window.print();
-    }
-  };
 
-  // Delete an invoice from history
-  const handleDeletePi = async (pi) => {
-    const ok = await showConfirm({
-      title: 'Delete Proforma Invoice',
-      message: `Are you sure you want to delete Proforma Invoice ${pi.pi_number}? This cannot be undone.`,
-      confirmText: 'Delete',
-      type: 'danger'
-    });
-    if (!ok) return;
-
-    try {
-      const res = await window.kadal.finance.delete(pi.id);
-      if (res.success) {
-        addToast('success', `PI ${pi.pi_number} deleted`);
-        loadHistory();
-      } else {
-        addToast('error', res.error || 'Failed to delete PI');
-      }
-    } catch (err) {
-      addToast('error', err.message);
-    }
-  };
-
-  // History filtering
-  const filteredHistory = useMemo(() => {
-    return history.filter(pi => {
-      if (historyRecipientFilter && pi.recipient_id !== Number(historyRecipientFilter)) {
-        return false;
-      }
-      if (historySearch.trim()) {
-        const q = historySearch.toLowerCase();
-        const matchNum = (pi.pi_number || '').toLowerCase().includes(q);
-        const matchBill = (pi.bill_number || '').toLowerCase().includes(q);
-        const matchApp = (pi.applicant_name || '').toLowerCase().includes(q);
-        const matchBuyer = (pi.buyer || '').toLowerCase().includes(q);
-        const matchChallans = (pi.challan_numbers || '').toLowerCase().includes(q);
-        if (!matchNum && !matchBill && !matchApp && !matchBuyer && !matchChallans) return false;
+      if (searchQuery.trim()) {
+        const s = searchQuery.toLowerCase();
+        const matches = (r.pi_number && r.pi_number.toLowerCase().includes(s)) ||
+                        (r.applicant_name && r.applicant_name.toLowerCase().includes(s)) ||
+                        (r.buyer && r.buyer.toLowerCase().includes(s)) ||
+                        (r.bill_number && r.bill_number.toLowerCase().includes(s));
+        if (!matches) return false;
       }
       return true;
     });
-  }, [history, historyRecipientFilter, historySearch]);
+  }, [records, recipientFilter, statusFilter, searchQuery]);
+
+  const billsList = useMemo(() => {
+    return records.filter(r => {
+      // Must have a bill_number (Historical bills + Converted bills)
+      if (!r.bill_number) return false;
+
+      if (recipientFilter && r.recipient_id !== Number(recipientFilter)) return false;
+      if (searchQuery.trim()) {
+        const s = searchQuery.toLowerCase();
+        const matches = (r.bill_number && r.bill_number.toLowerCase().includes(s)) ||
+                        (r.applicant_name && r.applicant_name.toLowerCase().includes(s)) ||
+                        (r.pi_number && r.pi_number.toLowerCase().includes(s)) ||
+                        (r.challan_numbers && r.challan_numbers.toLowerCase().includes(s));
+        if (!matches) return false;
+      }
+      return true;
+    });
+  }, [records, recipientFilter, searchQuery]);
+
+  // Statistics for PI
+  const piStats = useMemo(() => {
+    let totalPis = 0;
+    let inProduction = 0;
+    let readyToBill = 0;
+    let billed = 0;
+
+    records.forEach(r => {
+      if (r.pi_number) {
+        totalPis++;
+        if (r.status === 'BILLED') billed++;
+        else if (r.is_100_percent_received) readyToBill++;
+        else inProduction++;
+      }
+    });
+
+    return { totalPis, inProduction, readyToBill, billed };
+  }, [records]);
 
   return (
-    <div className="finance-page-container" style={{ padding: '20px 24px', maxWidth: 1400, margin: '0 auto' }}>
-      {/* Top Banner */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+    <div className="page-container" style={{ padding: '24px 32px' }}>
+      {/* Top Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ 
-              background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)', 
-              color: '#ffffff', 
-              padding: 8, 
-              borderRadius: 8,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center'
-            }}>
-              <Landmark size={24} />
-            </div>
-            <div>
-              <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: 'var(--text-color)' }}>Finance & Invoicing</h2>
-              <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)' }}>
-                Generate official Proforma Invoices (PI) from Delivery Challans for Recipient Companies
-              </p>
-            </div>
-          </div>
+          <h1 style={{ display: 'flex', alignItems: 'center', gap: 12, margin: 0, fontSize: 24, fontWeight: 700, color: 'var(--text)' }}>
+            <Landmark size={28} color="var(--primary)" />
+            Finance & Billing Management
+          </h1>
+          <p style={{ margin: '6px 0 0 0', color: 'var(--text-muted)', fontSize: 14 }}>
+            Pre-production Proforma Invoices (PI), Recipient delivery reconciliation, and Final Commercial Bills.
+          </p>
         </div>
 
-        {/* Tab Switcher */}
-        <div style={{ display: 'flex', gap: 8, background: 'var(--card-bg)', padding: 4, borderRadius: 8, border: '1px solid var(--border-color)' }}>
-          <button 
-            className={`btn btn-sm ${activeTab === 'create' ? 'btn-primary' : 'btn-ghost'}`}
-            onClick={() => setActiveTab('create')}
-          >
-            <Plus size={15} style={{ marginRight: 6 }} /> Create PI
-          </button>
-          <button 
-            className={`btn btn-sm ${activeTab === 'history' ? 'btn-primary' : 'btn-ghost'}`}
-            onClick={() => setActiveTab('history')}
-          >
-            <FileText size={15} style={{ marginRight: 6 }} /> PI History ({history.length})
-          </button>
-        </div>
+        <button className="btn btn-outline btn-sm" onClick={loadInitialData} disabled={loading} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <RefreshCw size={15} className={loading ? 'spin' : ''} /> Refresh
+        </button>
       </div>
 
-      {/* CREATE TAB */}
-      {activeTab === 'create' && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: 24, alignItems: 'start' }}>
-          {/* Main Form Body */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-            
-            {/* Step 1: Select Recipient & Applicant Card */}
-            <div className="card" style={{ padding: 20, background: 'var(--card-bg)', borderRadius: 10, border: '1px solid var(--border-color)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
-                <Building size={18} color="var(--primary)" />
-                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>1. Applicant & Beneficiary Details</h3>
-              </div>
+      {/* Main Navigation: PI vs Commercial Bills */}
+      <div style={{ display: 'flex', gap: 10, borderBottom: '2px solid var(--border)', marginBottom: 24 }}>
+        <button
+          onClick={() => setActiveSection('pi')}
+          style={{
+            padding: '12px 20px',
+            background: 'none',
+            border: 'none',
+            borderBottom: activeSection === 'pi' ? '3px solid var(--primary)' : '3px solid transparent',
+            color: activeSection === 'pi' ? 'var(--primary)' : 'var(--text-muted)',
+            fontWeight: 700,
+            fontSize: 15,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            transition: 'all 0.15s ease'
+          }}
+        >
+          <FileText size={18} />
+          Proforma Invoices (PI)
+          <span style={{ 
+            fontSize: 11, padding: '2px 8px', borderRadius: 10, 
+            background: activeSection === 'pi' ? 'rgba(99,102,241,0.15)' : 'var(--border)', 
+            color: activeSection === 'pi' ? 'var(--primary)' : 'var(--text-muted)' 
+          }}>
+            {piStats.totalPis}
+          </span>
+        </button>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-                <div>
-                  <label className="form-label" style={{ fontWeight: 600, display: 'block', marginBottom: 6 }}>
-                    Select Recipient Company (Applicant) *
-                  </label>
-                  <select 
-                    className="form-select" 
-                    value={selectedRecipientId} 
-                    onChange={e => handleRecipientChange(e.target.value)}
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: 6, border: '1px solid var(--border-color)', background: 'var(--input-bg)' }}
-                  >
-                    <option value="">-- Choose Recipient Company --</option>
-                    {recipients.map(r => (
-                      <option key={r.id} value={r.id}>
-                        {r.name} {r.receiver_address ? `(${r.receiver_address.slice(0, 35)}...)` : ''}
-                      </option>
-                    ))}
-                  </select>
+        <button
+          onClick={() => setActiveSection('bills')}
+          style={{
+            padding: '12px 20px',
+            background: 'none',
+            border: 'none',
+            borderBottom: activeSection === 'bills' ? '3px solid var(--primary)' : '3px solid transparent',
+            color: activeSection === 'bills' ? 'var(--primary)' : 'var(--text-muted)',
+            fontWeight: 700,
+            fontSize: 15,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            transition: 'all 0.15s ease'
+          }}
+        >
+          <Landmark size={18} />
+          Commercial Bills & Invoices
+          <span style={{ 
+            fontSize: 11, padding: '2px 8px', borderRadius: 10, 
+            background: activeSection === 'bills' ? 'rgba(99,102,241,0.15)' : 'var(--border)', 
+            color: activeSection === 'bills' ? 'var(--primary)' : 'var(--text-muted)' 
+          }}>
+            {billsList.length}
+          </span>
+        </button>
+      </div>
 
-                  {applicantName && (
-                    <div style={{ marginTop: 12, padding: 12, background: 'var(--badge-bg, rgba(16,185,129,0.08))', borderRadius: 6, border: '1px solid var(--border-color)' }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>APPLICANT DISPLAY (LINE BREAK WITH ADDRESS)</div>
-                      <div style={{ fontWeight: 700, fontSize: 13, marginTop: 4, color: 'var(--text-color)' }}>{applicantName}</div>
-                      <div style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'pre-line', marginTop: 2 }}>{applicantAddress || 'No address registered'}</div>
-                    </div>
-                  )}
-                </div>
-
-                <div>
-                  <div style={{ padding: 12, background: 'var(--table-header-bg, rgba(0,0,0,0.03))', borderRadius: 6, border: '1px solid var(--border-color)' }}>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>BENEFICIARY (FIXED)</div>
-                    <div style={{ fontWeight: 700, fontSize: 13, marginTop: 4, color: 'var(--text-color)' }}>{beneficiaryName}</div>
-                    <div style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'pre-line', marginTop: 2 }}>{beneficiaryAddress}</div>
-                    
-                    <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ fontSize: 11, fontWeight: 600 }}>BIN (Optional):</span>
-                      <input 
-                        type="text" 
-                        className="form-input" 
-                        placeholder="e.g. 001928374-0101"
-                        value={beneficiaryBin}
-                        onChange={e => setBeneficiaryBin(e.target.value)}
-                        style={{ padding: '4px 8px', fontSize: 12, flex: 1, borderRadius: 4, border: '1px solid var(--border-color)', background: 'var(--input-bg)' }}
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Bank Details & Buyer definition */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 16, paddingTop: 16, borderTop: '1px dashed var(--border-color)' }}>
-                <div>
-                  <label className="form-label" style={{ fontWeight: 600, display: 'block', marginBottom: 4, fontSize: 12 }}>
-                    Bank Detail (Default UCB Tongi Branch, editable)
-                  </label>
-                  <textarea 
-                    className="form-input"
-                    rows={4}
-                    value={bankDetails}
-                    onChange={e => setBankDetails(e.target.value)}
-                    style={{ width: '100%', fontSize: 11.5, fontFamily: 'monospace', borderRadius: 6, border: '1px solid var(--border-color)', background: 'var(--input-bg)', padding: 8 }}
-                  />
-                </div>
-
-                <div>
-                  <label className="form-label" style={{ fontWeight: 600, display: 'block', marginBottom: 4, fontSize: 12 }}>
-                    BUYER (User Define) *
-                  </label>
-                  <textarea 
-                    className="form-input"
-                    rows={4}
-                    placeholder="e.g. INTERSPORT AW26 (MICRO FLEECE PROGRAM 3RD) // PURCHASE NO. KAD/#00663+00704+00669+00665/2026"
-                    value={buyer}
-                    onChange={e => setBuyer(e.target.value)}
-                    style={{ width: '100%', fontSize: 12, borderRadius: 6, border: '1px solid var(--border-color)', background: 'var(--input-bg)', padding: 8 }}
-                  />
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
-                    Define the buyer brand, program name, and purchase order numbers.
-                  </div>
-                </div>
-              </div>
+      {/* ========================================================================= */}
+      {/* SECTION 1: PROFORMA INVOICES (PI) */}
+      {/* ========================================================================= */}
+      {activeSection === 'pi' && (
+        <div>
+          {/* Subtabs for PI */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+            <div style={{ display: 'flex', gap: 8, background: 'var(--bg-card)', padding: 4, borderRadius: 8, border: '1px solid var(--border)' }}>
+              <button
+                className={`btn btn-sm ${piSubTab === 'orders' ? 'btn-primary' : 'btn-ghost'}`}
+                onClick={() => setPiSubTab('orders')}
+                style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}
+              >
+                <Layers size={14} /> PI Orders & Reconciliation
+              </button>
+              <button
+                className={`btn btn-sm ${piSubTab === 'create' ? 'btn-primary' : 'btn-ghost'}`}
+                onClick={() => setPiSubTab('create')}
+                style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}
+              >
+                <Plus size={14} /> Create Proforma Invoice
+              </button>
             </div>
 
-            {/* Step 2: Challan Selection */}
-            <div className="card" style={{ padding: 20, background: 'var(--card-bg)', borderRadius: 10, border: '1px solid var(--border-color)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <Truck size={18} color="var(--primary)" />
-                  <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>2. Select Delivery Challans (Single or Multiple)</h3>
-                  {selectedChallans.length > 0 && (
-                    <span className="badge badge-success" style={{ fontSize: 11, fontWeight: 600 }}>
-                      {selectedChallans.length} Selected
-                    </span>
-                  )}
+            {piSubTab === 'orders' && (
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Status Filter:</span>
+                <select
+                  value={statusFilter}
+                  onChange={e => setStatusFilter(e.target.value)}
+                  style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 12, background: 'var(--bg-card)' }}
+                >
+                  <option value="all">All Statuses</option>
+                  <option value="100_received">100% Received (Ready to Bill)</option>
+                  <option value="APPROVED">Approved / In Production</option>
+                  <option value="BILLED">Transferred to Bill</option>
+                </select>
+              </div>
+            )}
+          </div>
+
+          {/* VIEW A: PI ORDERS & RECONCILIATION LIST */}
+          {piSubTab === 'orders' && (
+            <div>
+              {/* Metric Cards for PI */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, marginBottom: 20 }}>
+                <div style={{ padding: '14px 18px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10 }}>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>Total PIs Issued</div>
+                  <div style={{ fontSize: 24, fontWeight: 700, color: 'var(--text)' }}>{piStats.totalPis}</div>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer', color: 'var(--text-muted)' }}>
-                    <input 
-                      type="checkbox" 
-                      checked={showAllChallans || challanRecipientFilter === 'ALL'} 
-                      onChange={e => {
-                        setShowAllChallans(e.target.checked);
-                        if (e.target.checked) setChallanRecipientFilter('ALL');
-                        else setChallanRecipientFilter('');
-                      }} 
-                    />
-                    Show challans from all recipients
-                  </label>
-                  {selectedChallans.length > 0 && (
-                    <button 
-                      type="button"
-                      className="btn btn-ghost btn-xs"
-                      onClick={handleClearAllSelected}
-                      style={{ color: 'var(--danger)', fontSize: 11, padding: '2px 6px' }}
-                    >
-                      Clear Selection
-                    </button>
-                  )}
+                <div style={{ padding: '14px 18px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10 }}>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>In Production / Dispatched</div>
+                  <div style={{ fontSize: 24, fontWeight: 700, color: '#6366f1' }}>{piStats.inProduction}</div>
+                </div>
+                <div style={{ padding: '14px 18px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10 }}>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>Ready to Bill (100% Received)</div>
+                  <div style={{ fontSize: 24, fontWeight: 700, color: 'var(--success, #10b981)' }}>{piStats.readyToBill}</div>
+                </div>
+                <div style={{ padding: '14px 18px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10 }}>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>Transferred to Commercial Bill</div>
+                  <div style={{ fontSize: 24, fontWeight: 700, color: 'var(--text-muted)' }}>{piStats.billed}</div>
                 </div>
               </div>
 
-              {/* Selected Challans Chips */}
-              <div style={{ marginBottom: 14 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>
-                  Selected Challans ({selectedChallans.length}):
-                </div>
-                {selectedChallans.length === 0 ? (
-                  <div style={{ padding: '10px 14px', background: 'var(--badge-bg, rgba(0,0,0,0.03))', borderRadius: 6, border: '1px dashed var(--border-color)', color: 'var(--text-muted)', fontSize: 12.5 }}>
-                    No challans selected yet. Search and click "+ Add" on any challan below to include its items in this Proforma Invoice.
-                  </div>
-                ) : (
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                    {selectedChallans.map(c => (
-                      <div 
-                        key={c.id} 
-                        style={{ 
-                          display: 'inline-flex', 
-                          alignItems: 'center', 
-                          gap: 8, 
-                          background: 'var(--primary-light, rgba(16,185,129,0.12))', 
-                          color: 'var(--primary, #059669)',
-                          padding: '5px 12px',
-                          borderRadius: 20,
-                          fontSize: 12,
-                          fontWeight: 600,
-                          border: '1px solid rgba(16,185,129,0.3)'
-                        }}
-                      >
-                        <FileText size={13} />
-                        <span>{c.challan_number}</span>
-                        <span style={{ opacity: 0.7, fontSize: 11 }}>({c.total_quantity || c.item_count || 0} items)</span>
-                        <button 
-                          type="button"
-                          onClick={() => handleRemoveChallan(c.id)}
-                          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', color: 'inherit' }}
-                          title="Remove Challan"
-                        >
-                          <X size={13} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Comprehensive Filter Toolbar */}
-              <div style={{ 
-                background: 'var(--badge-bg, rgba(0,0,0,0.02))', 
-                padding: '12px 14px', 
-                borderRadius: 8, 
-                border: '1px solid var(--border-color)', 
-                marginBottom: 12 
-              }}>
-                {/* Row 1: Search, Recipient Dropdown, Invoiced Status, Selection Status */}
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', marginBottom: 10 }}>
-                  {/* Search Query */}
-                  <div style={{ position: 'relative', flex: '1 1 240px', minWidth: 210 }}>
-                    <Search size={14} style={{ position: 'absolute', left: 10, top: 10, color: 'var(--text-muted)' }} />
-                    <input 
-                      type="text" 
-                      className="form-input" 
-                      placeholder="Search Challan #, buyer, item, style, PO..."
-                      value={challanSearch}
-                      onChange={e => setChallanSearch(e.target.value)}
-                      onKeyDown={e => { if (e.key === 'Enter') handleRemoteSearch(); }}
-                      style={{ width: '100%', paddingLeft: 30, paddingRight: challanSearch ? 28 : 10, height: 34, fontSize: 12.5, borderRadius: 6, border: '1px solid var(--border-color)', background: 'var(--input-bg)' }}
-                    />
-                    {challanSearch && (
-                      <button
-                        type="button"
-                        onClick={() => setChallanSearch('')}
-                        style={{ position: 'absolute', right: 8, top: 9, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 0 }}
-                        title="Clear search"
-                      >
-                        <X size={14} />
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Recipient Dropdown Filter */}
-                  <div style={{ flex: '1 1 180px', minWidth: 170 }}>
-                    <select 
-                      className="form-input"
-                      value={challanRecipientFilter}
-                      onChange={e => {
-                        const val = e.target.value;
-                        setChallanRecipientFilter(val);
-                        if (val === 'ALL') setShowAllChallans(true);
-                      }}
-                      style={{ width: '100%', height: 34, fontSize: 12, borderRadius: 6, border: '1px solid var(--border-color)', background: 'var(--input-bg)', padding: '0 8px' }}
-                    >
-                      <option value="">
-                        {applicantName ? `Recipient: ${applicantName}` : 'All Recipients'}
-                      </option>
-                      <option value="ALL">-- Show All Recipients --</option>
-                      {distinctRecipients.map(r => (
-                        <option key={r} value={r}>{r}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {/* Invoiced Status Toggle */}
-                  <div style={{ display: 'inline-flex', background: 'var(--card-bg)', padding: 2, borderRadius: 6, border: '1px solid var(--border-color)' }}>
-                    <button
-                      type="button"
-                      onClick={() => setChallanInvoiceStatus('all')}
-                      style={{
-                        border: 'none',
-                        padding: '4px 9px',
-                        fontSize: 11.5,
-                        fontWeight: challanInvoiceStatus === 'all' ? 600 : 400,
-                        borderRadius: 4,
-                        cursor: 'pointer',
-                        background: challanInvoiceStatus === 'all' ? 'var(--primary)' : 'transparent',
-                        color: challanInvoiceStatus === 'all' ? '#fff' : 'var(--text-muted)'
-                      }}
-                    >
-                      All Status
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setChallanInvoiceStatus('uninvoiced')}
-                      style={{
-                        border: 'none',
-                        padding: '4px 9px',
-                        fontSize: 11.5,
-                        fontWeight: challanInvoiceStatus === 'uninvoiced' ? 600 : 400,
-                        borderRadius: 4,
-                        cursor: 'pointer',
-                        background: challanInvoiceStatus === 'uninvoiced' ? 'var(--primary)' : 'transparent',
-                        color: challanInvoiceStatus === 'uninvoiced' ? '#fff' : 'var(--text-muted)'
-                      }}
-                      title="Only challans not yet included in any Proforma Invoice"
-                    >
-                      Un-invoiced
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setChallanInvoiceStatus('invoiced')}
-                      style={{
-                        border: 'none',
-                        padding: '4px 9px',
-                        fontSize: 11.5,
-                        fontWeight: challanInvoiceStatus === 'invoiced' ? 600 : 400,
-                        borderRadius: 4,
-                        cursor: 'pointer',
-                        background: challanInvoiceStatus === 'invoiced' ? 'var(--primary)' : 'transparent',
-                        color: challanInvoiceStatus === 'invoiced' ? '#fff' : 'var(--text-muted)'
-                      }}
-                      title="Challans already billed in a Proforma Invoice"
-                    >
-                      Invoiced
-                    </button>
-                  </div>
-
-                  {/* Selection Status Toggle */}
-                  <div style={{ display: 'inline-flex', background: 'var(--card-bg)', padding: 2, borderRadius: 6, border: '1px solid var(--border-color)' }}>
-                    <button
-                      type="button"
-                      onClick={() => setChallanSelectionStatus('all')}
-                      style={{
-                        border: 'none',
-                        padding: '4px 8px',
-                        fontSize: 11.5,
-                        fontWeight: challanSelectionStatus === 'all' ? 600 : 400,
-                        borderRadius: 4,
-                        cursor: 'pointer',
-                        background: challanSelectionStatus === 'all' ? 'var(--primary)' : 'transparent',
-                        color: challanSelectionStatus === 'all' ? '#fff' : 'var(--text-muted)'
-                      }}
-                    >
-                      All
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setChallanSelectionStatus('selected')}
-                      style={{
-                        border: 'none',
-                        padding: '4px 8px',
-                        fontSize: 11.5,
-                        fontWeight: challanSelectionStatus === 'selected' ? 600 : 400,
-                        borderRadius: 4,
-                        cursor: 'pointer',
-                        background: challanSelectionStatus === 'selected' ? 'var(--primary)' : 'transparent',
-                        color: challanSelectionStatus === 'selected' ? '#fff' : 'var(--text-muted)'
-                      }}
-                      title="Show only selected challans"
-                    >
-                      Selected ({selectedChallans.length})
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setChallanSelectionStatus('unselected')}
-                      style={{
-                        border: 'none',
-                        padding: '4px 8px',
-                        fontSize: 11.5,
-                        fontWeight: challanSelectionStatus === 'unselected' ? 600 : 400,
-                        borderRadius: 4,
-                        cursor: 'pointer',
-                        background: challanSelectionStatus === 'unselected' ? 'var(--primary)' : 'transparent',
-                        color: challanSelectionStatus === 'unselected' ? '#fff' : 'var(--text-muted)'
-                      }}
-                    >
-                      Unselected
-                    </button>
-                  </div>
-                </div>
-
-                {/* Row 2: Date Pickers + Quick Presets + Buyer Dropdown + Style/PO + Reset */}
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
-                  {/* Date Pickers */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12 }}>
-                    <Calendar size={13} color="var(--text-muted)" />
-                    <span style={{ color: 'var(--text-muted)', fontSize: 11.5 }}>Date:</span>
-                    <input 
-                      type="date" 
-                      className="form-input" 
-                      value={challanDateFrom} 
-                      onChange={e => setChallanDateFrom(e.target.value)} 
-                      style={{ width: 120, height: 30, fontSize: 11.5, padding: '2px 6px', borderRadius: 4, border: '1px solid var(--border-color)', background: 'var(--input-bg)' }}
-                      title="From Date"
-                    />
-                    <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>to</span>
-                    <input 
-                      type="date" 
-                      className="form-input" 
-                      value={challanDateTo} 
-                      onChange={e => setChallanDateTo(e.target.value)} 
-                      style={{ width: 120, height: 30, fontSize: 11.5, padding: '2px 6px', borderRadius: 4, border: '1px solid var(--border-color)', background: 'var(--input-bg)' }}
-                      title="To Date"
-                    />
-                  </div>
-
-                  {/* Date Quick Presets */}
-                  <div style={{ display: 'flex', gap: 4 }}>
-                    <button 
-                      type="button" 
-                      className="btn btn-outline btn-xs" 
-                      onClick={setDatePresetToday}
-                      style={{ padding: '2px 7px', fontSize: 11 }}
-                    >
-                      Today
-                    </button>
-                    <button 
-                      type="button" 
-                      className="btn btn-outline btn-xs" 
-                      onClick={setDatePresetLast7Days}
-                      style={{ padding: '2px 7px', fontSize: 11 }}
-                    >
-                      7 Days
-                    </button>
-                    <button 
-                      type="button" 
-                      className="btn btn-outline btn-xs" 
-                      onClick={setDatePresetThisMonth}
-                      style={{ padding: '2px 7px', fontSize: 11 }}
-                    >
-                      This Month
-                    </button>
-                    <button 
-                      type="button" 
-                      className="btn btn-outline btn-xs" 
-                      onClick={setDatePresetThisYear}
-                      style={{ padding: '2px 7px', fontSize: 11 }}
-                    >
-                      This Year
-                    </button>
-                    {(challanDateFrom || challanDateTo) && (
-                      <button 
-                        type="button" 
-                        className="btn btn-ghost btn-xs" 
-                        onClick={clearDatePreset}
-                        style={{ padding: '2px 6px', fontSize: 11, color: 'var(--danger)' }}
-                        title="Clear date filter"
-                      >
-                        <X size={11} /> Clear Date
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Buyer Filter */}
-                  <div style={{ minWidth: 140, flex: '1 1 140px' }}>
-                    <select
-                      className="form-input"
-                      value={challanBuyerFilter}
-                      onChange={e => setChallanBuyerFilter(e.target.value)}
-                      style={{ width: '100%', height: 30, fontSize: 11.5, borderRadius: 4, border: '1px solid var(--border-color)', background: 'var(--input-bg)', padding: '0 6px' }}
-                    >
-                      <option value="">All Buyers ({distinctBuyers.length})</option>
-                      {distinctBuyers.map(b => (
-                        <option key={b} value={b}>{b}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {/* Style / PO Filter */}
-                  <div style={{ minWidth: 130, flex: '1 1 130px' }}>
-                    <input 
+              {/* PI Search Bar */}
+              <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, padding: 12, marginBottom: 16 }}>
+                <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                  <div style={{ position: 'relative', flex: 1 }}>
+                    <Search size={16} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                    <input
                       type="text"
-                      className="form-input"
-                      placeholder="Filter Style / PO #..."
-                      value={challanStyleFilter}
-                      onChange={e => setChallanStyleFilter(e.target.value)}
-                      style={{ width: '100%', height: 30, fontSize: 11.5, borderRadius: 4, border: '1px solid var(--border-color)', background: 'var(--input-bg)', padding: '0 8px' }}
+                      placeholder="Search by PI #, Applicant, Buyer, Bill #..."
+                      value={searchQuery}
+                      onChange={e => setSearchQuery(e.target.value)}
+                      style={{ width: '100%', padding: '7px 10px 7px 32px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 13, background: 'var(--bg-base)' }}
                     />
                   </div>
-
-                  {/* Reset All Filters Button */}
-                  {hasActiveChallanFilters && (
-                    <button 
-                      type="button" 
-                      className="btn btn-ghost btn-xs"
-                      onClick={handleResetChallanFilters}
-                      style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 8px', fontSize: 11, color: 'var(--danger)' }}
-                      title="Reset all filters to default"
-                    >
-                      <RotateCcw size={12} /> Reset Filters
-                    </button>
-                  )}
-                </div>
-
-                {/* Filter Summary & Actions */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 10, paddingTop: 8, borderTop: '1px dashed var(--border-color)', fontSize: 11.5, flexWrap: 'wrap', gap: 8 }}>
-                  <div style={{ color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                    <span>
-                      Showing <strong>{availableChallans.length}</strong> matching challan{availableChallans.length !== 1 ? 's' : ''} (out of {allChallans.length})
-                    </span>
-                    {selectedChallans.length > 0 && (
-                      <span style={{ color: 'var(--primary)', fontWeight: 600 }}>
-                        • {selectedChallans.length} selected
-                      </span>
-                    )}
-                    {challanSearch.trim() && (
-                      <span className="badge" style={{ background: 'var(--badge-bg)', fontSize: 10.5 }}>
-                        Search: "{challanSearch}"
-                      </span>
-                    )}
-                    {challanBuyerFilter && (
-                      <span className="badge" style={{ background: 'var(--badge-bg)', fontSize: 10.5 }}>
-                        Buyer: {challanBuyerFilter}
-                      </span>
-                    )}
-                    {challanInvoiceStatus !== 'all' && (
-                      <span className="badge" style={{ background: 'var(--badge-bg)', fontSize: 10.5 }}>
-                        {challanInvoiceStatus === 'uninvoiced' ? 'Un-invoiced Only' : 'Invoiced Only'}
-                      </span>
-                    )}
-                  </div>
-
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    {challanSearch.trim() && (
-                      <button 
-                        type="button"
-                        className="btn btn-outline btn-xs"
-                        onClick={handleRemoteSearch}
-                        disabled={isSearchingServer}
-                        style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, height: 26 }}
-                        title="Search entire database for matching challans"
-                      >
-                        {isSearchingServer ? <RefreshCw size={11} className="spin" /> : <Search size={11} />}
-                        Search Database
-                      </button>
-                    )}
-                    {availableChallans.length > 0 && (
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-xs"
-                        onClick={handleToggleSelectAllVisible}
-                        style={{ fontSize: 11, color: 'var(--primary)', height: 26, fontWeight: 600 }}
-                      >
-                        {areAllVisibleSelected ? 'Deselect All Visible' : '+ Add All Visible'}
-                      </button>
-                    )}
-                  </div>
+                  <select
+                    value={recipientFilter}
+                    onChange={e => setRecipientFilter(e.target.value)}
+                    style={{ padding: '7px 12px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 13, background: 'var(--bg-base)', minWidth: 200 }}
+                  >
+                    <option value="">All Applicants / Factories</option>
+                    {recipients.map(r => (
+                      <option key={r.id} value={r.id}>{r.name}</option>
+                    ))}
+                  </select>
                 </div>
               </div>
 
-              {/* Challan Table */}
-              <div style={{ maxHeight: 280, overflowY: 'auto', border: '1px solid var(--border-color)', borderRadius: 6 }}>
-                <table className="table" style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+              {/* PI Table */}
+              <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 13 }}>
                   <thead>
-                    <tr style={{ background: 'var(--table-header-bg, #f8fafc)', borderBottom: '1px solid var(--border-color)' }}>
-                      <th style={{ padding: '8px 10px', textAlign: 'left' }}>Challan No</th>
-                      <th style={{ padding: '8px 10px', textAlign: 'left' }}>Date</th>
-                      <th style={{ padding: '8px 10px', textAlign: 'left' }}>Receiver</th>
-                      <th style={{ padding: '8px 10px', textAlign: 'left' }}>Buyer</th>
-                      <th style={{ padding: '8px 10px', textAlign: 'left' }}>Style / PO</th>
-                      <th style={{ padding: '8px 10px', textAlign: 'right' }}>Total Qty</th>
-                      <th style={{ padding: '8px 10px', textAlign: 'center', width: 90 }}>Status</th>
-                      <th style={{ padding: '8px 10px', textAlign: 'center', width: 95 }}>Action</th>
+                    <tr style={{ background: 'var(--bg-base, rgba(0,0,0,0.02))', borderBottom: '1px solid var(--border)', color: 'var(--text-muted)', fontSize: 12 }}>
+                      <th style={{ padding: '12px 16px' }}>PI NUMBER</th>
+                      <th style={{ padding: '12px 16px' }}>DATE</th>
+                      <th style={{ padding: '12px 16px' }}>APPLICANT / BUYER</th>
+                      <th style={{ padding: '12px 16px', textAlign: 'right' }}>ORDER QTY</th>
+                      <th style={{ padding: '12px 16px', textAlign: 'right' }}>RECEIVED QTY</th>
+                      <th style={{ padding: '12px 16px', width: 180 }}>RECEIPT MATCH</th>
+                      <th style={{ padding: '12px 16px', textAlign: 'center' }}>STATUS</th>
+                      <th style={{ padding: '12px 16px', textAlign: 'right' }}>ACTIONS</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {availableChallans.length === 0 ? (
+                    {piList.length === 0 ? (
                       <tr>
-                        <td colSpan={8} style={{ textAlign: 'center', padding: '24px 16px', color: 'var(--text-muted)' }}>
-                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-                            <FileText size={26} style={{ opacity: 0.4 }} />
-                            <div style={{ fontWeight: 500 }}>
-                              {applicantName ? `No challans found matching filters for "${applicantName}".` : 'No challans found matching current filters.'}
-                            </div>
-                            <div style={{ fontSize: 11.5, opacity: 0.8 }}>
-                              {hasActiveChallanFilters ? (
-                                <span>Try adjusting or clearing your filters.</span>
-                              ) : (
-                                <span>Try choosing "Show challans from all recipients" or searching by Challan #.</span>
-                              )}
-                            </div>
-                            <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-                              {hasActiveChallanFilters && (
-                                <button 
-                                  type="button"
-                                  className="btn btn-outline btn-xs"
-                                  onClick={handleResetChallanFilters}
-                                >
-                                  Clear Filters
-                                </button>
-                              )}
-                              {challanSearch.trim() && (
-                                <button 
-                                  type="button"
-                                  className="btn btn-primary btn-xs" 
-                                  onClick={handleRemoteSearch}
-                                  disabled={isSearchingServer}
-                                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-                                >
-                                  {isSearchingServer ? <RefreshCw size={11} className="spin" /> : <Search size={11} />}
-                                  Search database for "{challanSearch.trim()}"
-                                </button>
-                              )}
-                            </div>
-                          </div>
+                        <td colSpan={8} style={{ padding: 48, textAlign: 'center', color: 'var(--text-muted)' }}>
+                          <FileText size={40} style={{ opacity: 0.3, marginBottom: 10 }} />
+                          <p style={{ margin: 0, fontSize: 14 }}>No Proforma Invoices found matching your criteria.</p>
                         </td>
                       </tr>
                     ) : (
-                      availableChallans.slice(0, 100).map(c => {
-                        const isSelected = selectedChallans.some(sc => sc.id === c.id);
-                        const isAlreadyUsed = usedChallanIds.includes(c.id);
+                      piList.map(pi => {
+                        const pct = pi.fulfillment_pct || 0;
+                        const isReadyToBill = pi.is_100_percent_received && pi.status !== 'BILLED';
+                        const isBilled = pi.status === 'BILLED' || !!pi.bill_number;
+
                         return (
-                          <tr 
-                            key={c.id} 
-                            style={{ 
-                              borderBottom: '1px solid var(--border-color)',
-                              background: isSelected ? 'rgba(16, 185, 129, 0.07)' : undefined 
-                            }}
-                          >
-                            <td style={{ padding: '8px 10px', fontWeight: 600, fontFamily: 'monospace' }}>
-                              {c.challan_number}
+                          <tr key={pi.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                            <td style={{ padding: '12px 16px', fontWeight: 600, color: 'var(--primary)' }}>
+                              {pi.pi_number}
+                              {pi.bill_number && (
+                                <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 'normal' }}>
+                                  Bill: {pi.bill_number}
+                                </div>
+                              )}
                             </td>
-                            <td style={{ padding: '8px 10px', color: 'var(--text-muted)' }}>
-                              {c.challan_date ? new Date(c.challan_date).toLocaleDateString('en-GB') : '-'}
+                            <td style={{ padding: '12px 16px', color: 'var(--text-muted)' }}>
+                              {pi.pi_date ? new Date(pi.pi_date).toLocaleDateString('en-GB') : '-'}
                             </td>
-                            <td style={{ padding: '8px 10px', maxWidth: 170, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={c.receiver_name}>
-                              {c.receiver_name}
+                            <td style={{ padding: '12px 16px' }}>
+                              <div style={{ fontWeight: 600, color: 'var(--text)' }}>{pi.applicant_name}</div>
+                              {pi.buyer && <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Buyer: {pi.buyer}</div>}
                             </td>
-                            <td style={{ padding: '8px 10px', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={c.buyer_names}>
-                              {c.buyer_names || '-'}
+                            <td style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 600 }}>
+                              {Number(pi.total_quantity || 0).toLocaleString()}
                             </td>
-                            <td style={{ padding: '8px 10px', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={[c.style_names, c.order_numbers, c.purchase_nos].filter(Boolean).join(' / ')}>
-                              {[c.style_names, c.order_numbers, c.purchase_nos].filter(Boolean).join(' / ') || '-'}
+                            <td style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 600, color: pi.is_100_percent_received ? 'var(--success, #10b981)' : 'var(--text)' }}>
+                              {Number(pi.received_quantity || 0).toLocaleString()}
                             </td>
-                            <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600 }}>
-                              {Number(c.total_quantity || 0).toLocaleString()}
+                            <td style={{ padding: '12px 16px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <div style={{ flex: 1, height: 6, background: 'var(--border)', borderRadius: 3, overflow: 'hidden' }}>
+                                  <div style={{ 
+                                    height: '100%', 
+                                    width: `${pct}%`, 
+                                    background: isBilled ? '#64748b' : (pct >= 100 ? 'var(--success, #10b981)' : 'var(--primary)'),
+                                    transition: 'width 0.3s ease'
+                                  }} />
+                                </div>
+                                <span style={{ fontSize: 11, fontWeight: 600, minWidth: 34, textAlign: 'right' }}>{pct}%</span>
+                              </div>
                             </td>
-                            <td style={{ padding: '8px 10px', textAlign: 'center' }}>
-                              {isSelected ? (
-                                <span style={{ fontSize: 10.5, padding: '2px 6px', borderRadius: 4, background: '#dcfce7', color: '#166534', fontWeight: 600 }}>
-                                  Selected ✓
+                            <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                              {isBilled ? (
+                                <span style={{ 
+                                  display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', 
+                                  borderRadius: 12, background: 'rgba(100,116,139,0.12)', color: '#475569', fontSize: 11, fontWeight: 600 
+                                }}>
+                                  <CheckCircle size={12} /> Billed
                                 </span>
-                              ) : isAlreadyUsed ? (
-                                <span style={{ fontSize: 10.5, padding: '2px 6px', borderRadius: 4, background: '#fef3c7', color: '#92400e', fontWeight: 500 }} title="Already billed in a Proforma Invoice">
-                                  Invoiced
+                              ) : isReadyToBill ? (
+                                <span style={{ 
+                                  display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', 
+                                  borderRadius: 12, background: 'rgba(16,185,129,0.15)', color: '#059669', fontSize: 11, fontWeight: 600 
+                                }}>
+                                  <CheckCircle size={12} /> Ready to Bill
                                 </span>
                               ) : (
-                                <span style={{ fontSize: 10.5, padding: '2px 6px', borderRadius: 4, background: '#e0f2fe', color: '#0369a1', fontWeight: 500 }}>
-                                  Active
+                                <span style={{ 
+                                  display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', 
+                                  borderRadius: 12, background: 'rgba(99,102,241,0.1)', color: '#6366f1', fontSize: 11, fontWeight: 600 
+                                }}>
+                                  <Clock size={12} /> Production
                                 </span>
                               )}
                             </td>
-                            <td style={{ padding: '8px 10px', textAlign: 'center' }}>
-                              {isSelected ? (
-                                <button 
-                                  type="button"
-                                  className="btn btn-ghost btn-xs"
-                                  onClick={() => handleRemoveChallan(c.id)}
-                                  style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: 'var(--danger)', fontSize: 11 }}
-                                  title="Remove from selection"
+                            <td style={{ padding: '12px 16px', textAlign: 'right' }}>
+                              <div style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                                <button
+                                  className="btn btn-outline btn-sm"
+                                  onClick={() => handleOpenReconciliation(pi)}
+                                  title="View Reconciliation & Transfer to Bill"
+                                  style={{ display: 'flex', alignItems: 'center', gap: 4 }}
                                 >
-                                  <X size={12} /> Remove
+                                  <BarChart3 size={13} /> Reconcile
                                 </button>
-                              ) : (
-                                <button 
-                                  type="button"
-                                  className="btn btn-outline btn-xs"
-                                  onClick={() => handleSelectChallan(c)}
-                                  style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11 }}
-                                  title="Add to selection"
+                                <button
+                                  className="btn btn-ghost btn-sm btn-icon"
+                                  onClick={() => handlePreview(pi, 'pi')}
+                                  title="Print Proforma Invoice"
                                 >
-                                  <Plus size={12} /> Add
+                                  <Printer size={15} />
                                 </button>
-                              )}
+                              </div>
                             </td>
                           </tr>
                         );
@@ -1554,426 +682,431 @@ export default function FinancePage() {
                 </table>
               </div>
             </div>
+          )}
 
-            {/* Step 3: Extracted Goods Table */}
-            <div className="card" style={{ padding: 20, background: 'var(--card-bg)', borderRadius: 10, border: '1px solid var(--border-color)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <Layers size={18} color="var(--primary)" />
-                  <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>3. Description of Goods (Extracted Items & Rates)</h3>
+          {/* VIEW B: CREATE PROFORMA INVOICE (PRE-PRODUCTION) */}
+          {piSubTab === 'create' && (
+            <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, padding: 24 }}>
+              <div style={{ borderBottom: '1px solid var(--border)', paddingBottom: 16, marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>Create New Proforma Invoice (Sales Order)</h3>
+                  <p style={{ margin: '4px 0 0 0', fontSize: 13, color: 'var(--text-muted)' }}>
+                    Enter ordered accessories, agreed unit prices, and client terms before issuing production.
+                  </p>
                 </div>
-                <button 
-                  className="btn btn-ghost btn-sm"
-                  onClick={handleAddLineItem}
-                  style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}
-                >
-                  <Plus size={14} /> Add Line Item
+                <button className="btn btn-ghost btn-sm" onClick={() => setPiSubTab('orders')}>
+                  ← Back to Orders
                 </button>
               </div>
 
-              <div style={{ overflowX: 'auto', border: '1px solid var(--border-color)', borderRadius: 6, marginBottom: 14 }}>
-                <table className="table" style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
-                  <thead>
-                    <tr style={{ background: 'var(--table-header-bg, #f8fafc)', borderBottom: '1px solid var(--border-color)' }}>
-                      <th style={{ padding: '8px 8px', textAlign: 'center', width: 45 }}>#</th>
-                      <th style={{ padding: '8px 10px', textAlign: 'left' }}>Item Description</th>
-                      <th style={{ padding: '8px 10px', textAlign: 'left', width: 180 }}>PO & Style No.</th>
-                      <th style={{ padding: '8px 10px', textAlign: 'right', width: 100 }}>Qty</th>
-                      <th style={{ padding: '8px 10px', textAlign: 'center', width: 75 }}>Unit</th>
-                      <th style={{ padding: '8px 10px', textAlign: 'right', width: 110 }}>Unit Price ({currencySymbol})</th>
-                      <th style={{ padding: '8px 10px', textAlign: 'right', width: 120 }}>Total ({currencySymbol})</th>
-                      <th style={{ padding: '8px 8px', textAlign: 'center', width: 45 }}></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {piItems.length === 0 ? (
-                      <tr>
-                        <td colSpan={8} style={{ textAlign: 'center', padding: 24, color: 'var(--text-muted)' }}>
-                          No items loaded. Select one or more delivery challans above to populate goods automatically.
-                        </td>
-                      </tr>
-                    ) : (
-                      piItems.map((item, idx) => (
-                        <tr key={idx} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                          <td style={{ padding: '8px 8px', textAlign: 'center', color: 'var(--text-muted)' }}>
-                            {idx + 1}
-                          </td>
-                          <td style={{ padding: '6px 8px' }}>
-                            <input 
-                              type="text" 
-                              className="form-input" 
-                              value={item.itemDescription !== undefined ? item.itemDescription : (item.item_description || '')}
-                              onChange={e => handleDescriptionChange(idx, e.target.value)}
-                              style={{ width: '100%', padding: '4px 6px', fontSize: 12, borderRadius: 4, border: '1px solid var(--border-color)', background: 'var(--input-bg)' }}
-                            />
-                          </td>
-                          <td style={{ padding: '6px 8px' }}>
-                            <input 
-                              type="text" 
-                              className="form-input" 
-                              value={item.poStyleNo !== undefined ? item.poStyleNo : (item.po_style_no || '')}
-                              onChange={e => handlePoStyleChange(idx, e.target.value)}
-                              style={{ width: '100%', padding: '4px 6px', fontSize: 12, borderRadius: 4, border: '1px solid var(--border-color)', background: 'var(--input-bg)' }}
-                            />
-                          </td>
-                          <td style={{ padding: '6px 8px' }}>
-                            <input 
-                              type="number" 
-                              step="any"
-                              className="form-input" 
-                              value={item.quantity !== undefined ? item.quantity : 0}
-                              onChange={e => handleQuantityChange(idx, e.target.value)}
-                              style={{ width: '100%', padding: '4px 6px', fontSize: 12, textAlign: 'right', fontWeight: 600, borderRadius: 4, border: '1px solid var(--border-color)', background: 'var(--input-bg)' }}
-                            />
-                          </td>
-                          <td style={{ padding: '6px 8px', textAlign: 'center' }}>
-                            <input 
-                              type="text" 
-                              className="form-input" 
-                              value={item.unit || 'PCS'}
-                              onChange={e => {
-                                const val = e.target.value.toUpperCase();
-                                setPiItems(prev => prev.map((it, i) => i === idx ? { ...it, unit: val } : it));
-                              }}
-                              style={{ width: '100%', padding: '4px 6px', fontSize: 12, textAlign: 'center', borderRadius: 4, border: '1px solid var(--border-color)', background: 'var(--input-bg)' }}
-                            />
-                          </td>
-                          <td style={{ padding: '6px 8px' }}>
-                            <input 
-                              type="number" 
-                              step="0.0001"
-                              className="form-input" 
-                              value={item.unitPrice !== undefined ? item.unitPrice : (item.unit_price !== undefined ? item.unit_price : 0)}
-                              onChange={e => handlePriceChange(idx, e.target.value)}
-                              style={{ width: '100%', padding: '4px 6px', fontSize: 12, textAlign: 'right', borderRadius: 4, border: '1px solid var(--border-color)', background: 'var(--input-bg)' }}
-                            />
-                          </td>
-                          <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600 }}>
-                            {currencySymbol} {Number(item.totalAmount !== undefined ? item.totalAmount : (item.total_amount || 0)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </td>
-                          <td style={{ padding: '6px 8px', textAlign: 'center' }}>
-                            <button 
-                              onClick={() => handleRemoveLineItem(idx)}
-                              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger, #ef4444)' }}
-                              title="Delete row"
-                            >
-                              <Trash2 size={14} />
-                            </button>
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                  {piItems.length > 0 && (
-                    <tfoot>
-                      <tr style={{ background: 'var(--table-header-bg, #f8fafc)', borderTop: '2px solid var(--border-color)', fontWeight: 'bold' }}>
-                        <td colSpan={3} style={{ padding: '10px 12px', textAlign: 'right' }}>TOTAL</td>
-                        <td style={{ padding: '10px 8px', textAlign: 'right', fontSize: 13 }}>
-                          {totalQuantity.toLocaleString('en-US')}
-                        </td>
-                        <td colSpan={2}></td>
-                        <td style={{ padding: '10px 10px', textAlign: 'right', fontSize: 14, color: 'var(--primary, #059669)' }}>
-                          {currencySymbol} {totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </td>
-                        <td></td>
-                      </tr>
-                    </tfoot>
-                  )}
-                </table>
-              </div>
-
-              {/* Amount In Words */}
-              {piItems.length > 0 && (
-                <div style={{ padding: '10px 14px', background: 'var(--badge-bg, rgba(16,185,129,0.06))', borderRadius: 6, border: '1px solid var(--border-color)', marginBottom: 16 }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)' }}>AMOUNT IN WORDS (AUTO-CALCULATED):</div>
-                  <div style={{ fontSize: 12.5, fontWeight: 700, marginTop: 3, color: 'var(--text-color)' }}>
-                    {amountInWords}
-                  </div>
-                </div>
-              )}
-
-              {/* Weight & Terms Section */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1.5fr', gap: 14 }}>
+              {/* Order Meta Header Form */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 16, marginBottom: 24 }}>
                 <div>
-                  <label className="form-label" style={{ fontSize: 11.5, fontWeight: 600 }}>NET WEIGHT</label>
-                  <input 
-                    type="text" 
-                    className="form-input" 
-                    value={netWeight} 
-                    onChange={e => setNetWeight(e.target.value)}
-                    style={{ width: '100%', padding: '6px 10px', fontSize: 12, borderRadius: 4, border: '1px solid var(--border-color)', background: 'var(--input-bg)' }}
-                  />
-                </div>
-                <div>
-                  <label className="form-label" style={{ fontSize: 11.5, fontWeight: 600 }}>GROSS WEIGHT</label>
-                  <input 
-                    type="text" 
-                    className="form-input" 
-                    value={grossWeight} 
-                    onChange={e => setGrossWeight(e.target.value)}
-                    style={{ width: '100%', padding: '6px 10px', fontSize: 12, borderRadius: 4, border: '1px solid var(--border-color)', background: 'var(--input-bg)' }}
-                  />
-                </div>
-                <div>
-                  <label className="form-label" style={{ fontSize: 11.5, fontWeight: 600 }}>TERMS AND CONDITIONS</label>
-                  <input 
-                    type="text" 
-                    className="form-input" 
-                    value={termsConditions} 
-                    onChange={e => setTermsConditions(e.target.value)}
-                    style={{ width: '100%', padding: '6px 10px', fontSize: 12, borderRadius: 4, border: '1px solid var(--border-color)', background: 'var(--input-bg)' }}
-                  />
-                </div>
-              </div>
-            </div>
-
-          </div>
-
-          {/* Right Sidebar: Meta Numbers & Actions */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-            {/* Numbers Card */}
-            <div className="card" style={{ padding: 18, background: 'var(--card-bg)', borderRadius: 10, border: '1px solid var(--border-color)' }}>
-              <h4 style={{ margin: '0 0 14px 0', fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Edit3 size={15} color="var(--primary)" /> Invoice Identifiers
-              </h4>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                <div>
-                  <label className="form-label" style={{ fontSize: 11.5, fontWeight: 600 }}>PROFORMA INVOICE NO. *</label>
-                  <input 
-                    type="text" 
-                    className="form-input" 
-                    value={piNumber} 
-                    onChange={e => setPiNumber(e.target.value)}
-                    placeholder="e.g. KADWL/KADAL/2026/127"
-                    style={{ width: '100%', padding: '7px 10px', fontSize: 12, fontWeight: 600, fontFamily: 'monospace', borderRadius: 4, border: '1px solid var(--border-color)', background: 'var(--input-bg)' }}
-                  />
-                </div>
-
-                <div>
-                  <label className="form-label" style={{ fontSize: 11.5, fontWeight: 600 }}>PI Date *</label>
-                  <input 
-                    type="date" 
-                    className="form-input" 
-                    value={piDate} 
-                    onChange={e => setPiDate(e.target.value)}
-                    style={{ width: '100%', padding: '7px 10px', fontSize: 12, borderRadius: 4, border: '1px solid var(--border-color)', background: 'var(--input-bg)' }}
-                  />
-                </div>
-
-                <div style={{ paddingTop: 8, borderTop: '1px dashed var(--border-color)' }}>
-                  <label className="form-label" style={{ fontSize: 11.5, fontWeight: 600 }}>BILL Reference / No.</label>
-                  <input 
-                    type="text" 
-                    className="form-input" 
-                    value={billNumber} 
-                    onChange={e => setBillNumber(e.target.value)}
-                    placeholder="e.g. KADWL/KADAL/2026/86"
-                    style={{ width: '100%', padding: '7px 10px', fontSize: 12, fontWeight: 600, fontFamily: 'monospace', borderRadius: 4, border: '1px solid var(--border-color)', background: 'var(--input-bg)' }}
-                  />
-                </div>
-
-                <div>
-                  <label className="form-label" style={{ fontSize: 11.5, fontWeight: 600 }}>BILL Date</label>
-                  <input 
-                    type="date" 
-                    className="form-input" 
-                    value={billDate} 
-                    onChange={e => setBillDate(e.target.value)}
-                    style={{ width: '100%', padding: '7px 10px', fontSize: 12, borderRadius: 4, border: '1px solid var(--border-color)', background: 'var(--input-bg)' }}
-                  />
-                </div>
-
-                <div style={{ paddingTop: 8, borderTop: '1px dashed var(--border-color)' }}>
-                  <label className="form-label" style={{ fontSize: 11.5, fontWeight: 600 }}>Currency</label>
-                  <select 
-                    className="form-select" 
-                    value={currency} 
-                    onChange={e => {
-                      const cur = e.target.value;
-                      setCurrency(cur);
-                      setCurrencySymbol(cur === 'BDT' ? '৳' : '$');
-                    }}
-                    style={{ width: '100%', padding: '7px 10px', fontSize: 12, borderRadius: 4, border: '1px solid var(--border-color)', background: 'var(--input-bg)' }}
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 4 }}>
+                    Recipient / Applicant Factory *
+                  </label>
+                  <select
+                    value={selectedRecipientId}
+                    onChange={e => handleRecipientChange(e.target.value)}
+                    style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 13, background: 'var(--bg-base)' }}
                   >
-                    <option value="USD">USD ($) - US Dollars</option>
-                    <option value="BDT">BDT (৳) - Bangladeshi Taka</option>
+                    <option value="">-- Select Factory / Recipient --</option>
+                    {recipients.map(r => (
+                      <option key={r.id} value={r.id}>{r.name}</option>
+                    ))}
                   </select>
                 </div>
+
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                    <label style={{ fontSize: 12, fontWeight: 600, margin: 0 }}>
+                      Proforma Invoice No. *
+                    </label>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      style={{ fontSize: 11, padding: '0 4px', height: 'auto', color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: 4 }}
+                      onClick={() => generateNextPiNumber(applicantName)}
+                      title="Auto-generate next number"
+                    >
+                      <RefreshCw size={11} /> Auto-Generate
+                    </button>
+                  </div>
+                  <input
+                    type="text"
+                    value={piNumber}
+                    onChange={e => setPiNumber(e.target.value)}
+                    placeholder="Auto-generating..."
+                    style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 13, fontWeight: 600, fontFamily: 'monospace', background: 'var(--bg-base)' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 4 }}>
+                    PI Date *
+                  </label>
+                  <input
+                    type="date"
+                    value={piDate}
+                    onChange={e => setPiDate(e.target.value)}
+                    style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 13 }}
+                  />
+                </div>
+
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                    <label style={{ fontSize: 12, fontWeight: 600, margin: 0 }}>
+                      Buyer Name
+                    </label>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      style={{ fontSize: 11, padding: '0 4px', height: 'auto', color: 'var(--primary)' }}
+                      onClick={() => setCustomBuyerMode(!customBuyerMode)}
+                    >
+                      {customBuyerMode ? '← Select from list' : '+ Type Custom'}
+                    </button>
+                  </div>
+                  {customBuyerMode ? (
+                    <input
+                      type="text"
+                      value={buyer}
+                      onChange={e => setBuyer(e.target.value)}
+                      placeholder="Type custom buyer name..."
+                      style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 13, background: 'var(--bg-base)' }}
+                    />
+                  ) : (
+                    <select
+                      value={buyer}
+                      onChange={e => {
+                        if (e.target.value === '__custom__') {
+                          setCustomBuyerMode(true);
+                          setBuyer('');
+                        } else {
+                          setBuyer(e.target.value);
+                        }
+                      }}
+                      style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 13, background: 'var(--bg-base)' }}
+                    >
+                      <option value="">-- Select Buyer from System --</option>
+                      {buyersList.map(bName => (
+                        <option key={bName} value={bName}>{bName}</option>
+                      ))}
+                      <option value="__custom__">+ Enter Custom Buyer...</option>
+                    </select>
+                  )}
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 4 }}>
+                    Currency
+                  </label>
+                  <select
+                    value={currency}
+                    onChange={e => handleCurrencyChange(e.target.value)}
+                    style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 13, background: 'var(--bg-base)' }}
+                  >
+                    <option value="USD">USD ($)</option>
+                    <option value="BDT">BDT (৳)</option>
+                    <option value="EUR">EUR (€)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 4 }}>
+                    Applicant Address
+                  </label>
+                  <input
+                    type="text"
+                    value={applicantAddress}
+                    onChange={e => setApplicantAddress(e.target.value)}
+                    placeholder="Factory Address"
+                    style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 13 }}
+                  />
+                </div>
+              </div>
+
+              {/* Line Items Table */}
+              <div style={{ marginBottom: 24 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <h4 style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>Ordered Items & Unit Pricing</h4>
+                  <button className="btn btn-outline btn-sm" onClick={handleAddLineItem} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Plus size={14} /> Add Line Item
+                  </button>
+                </div>
+
+                <div style={{ border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                    <thead>
+                      <tr style={{ background: 'var(--bg-base)', borderBottom: '1px solid var(--border)', color: 'var(--text-muted)' }}>
+                        <th style={{ padding: '8px 10px', width: 40 }}>#</th>
+                        <th style={{ padding: '8px 10px', width: 220 }}>SELECT INVENTORY ITEM (OPTIONAL)</th>
+                        <th style={{ padding: '8px 10px' }}>ITEM DESCRIPTION *</th>
+                        <th style={{ padding: '8px 10px', width: 140 }}>PO / STYLE NO.</th>
+                        <th style={{ padding: '8px 10px', width: 110, textAlign: 'right' }}>ORDER QTY *</th>
+                        <th style={{ padding: '8px 10px', width: 70, textAlign: 'center' }}>UNIT</th>
+                        <th style={{ padding: '8px 10px', width: 100, textAlign: 'right' }}>UNIT PRICE *</th>
+                        <th style={{ padding: '8px 10px', width: 110, textAlign: 'right' }}>TOTAL ({currencySymbol})</th>
+                        <th style={{ padding: '8px 10px', width: 40 }}></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {piItems.length === 0 ? (
+                        <tr>
+                          <td colSpan={9} style={{ padding: 30, textAlign: 'center', color: 'var(--text-muted)' }}>
+                            No items added yet. Click "+ Add Line Item" above to add accessories to this Proforma Invoice.
+                          </td>
+                        </tr>
+                      ) : (
+                        piItems.map((item, idx) => (
+                          <tr key={idx} style={{ borderBottom: '1px solid var(--border)' }}>
+                            <td style={{ padding: '8px 10px', color: 'var(--text-muted)' }}>{idx + 1}</td>
+                            <td style={{ padding: '8px 10px' }}>
+                              <select
+                                value={item.itemId || ''}
+                                onChange={e => handleSelectInventoryItem(idx, e.target.value)}
+                                style={{ width: '100%', padding: '5px 8px', borderRadius: 4, border: '1px solid var(--border)', fontSize: 12, background: 'var(--bg-base)' }}
+                              >
+                                <option value="">-- Or type manually --</option>
+                                {inventoryItems.map(inv => (
+                                  <option key={inv.id} value={inv.id}>{inv.name} ({inv.item_code})</option>
+                                ))}
+                              </select>
+                            </td>
+                            <td style={{ padding: '8px 10px' }}>
+                              <input
+                                type="text"
+                                value={item.itemDescription}
+                                onChange={e => handleUpdateItemField(idx, 'itemDescription', e.target.value)}
+                                placeholder="e.g. 100% COTTON TWILL TAPE (12MM)"
+                                style={{ width: '100%', padding: '5px 8px', borderRadius: 4, border: '1px solid var(--border)', fontSize: 12 }}
+                              />
+                            </td>
+                            <td style={{ padding: '8px 10px' }}>
+                              <input
+                                type="text"
+                                value={item.poStyleNo}
+                                onChange={e => handleUpdateItemField(idx, 'poStyleNo', e.target.value)}
+                                placeholder="Style / PO"
+                                style={{ width: '100%', padding: '5px 8px', borderRadius: 4, border: '1px solid var(--border)', fontSize: 12 }}
+                              />
+                            </td>
+                            <td style={{ padding: '8px 10px', textAlign: 'right' }}>
+                              <input
+                                type="number"
+                                step="any"
+                                min="1"
+                                value={item.quantity}
+                                onChange={e => handleUpdateItemField(idx, 'quantity', e.target.value)}
+                                style={{ width: '100%', padding: '5px 8px', textAlign: 'right', borderRadius: 4, border: '1px solid var(--border)', fontSize: 12, fontWeight: 600 }}
+                              />
+                            </td>
+                            <td style={{ padding: '8px 10px', textAlign: 'center' }}>
+                              <input
+                                type="text"
+                                value={item.unit}
+                                onChange={e => handleUpdateItemField(idx, 'unit', e.target.value.toUpperCase())}
+                                style={{ width: '100%', padding: '5px 8px', textAlign: 'center', borderRadius: 4, border: '1px solid var(--border)', fontSize: 12 }}
+                              />
+                            </td>
+                            <td style={{ padding: '8px 10px', textAlign: 'right' }}>
+                              <input
+                                type="number"
+                                step="0.0001"
+                                min="0"
+                                value={item.unitPrice}
+                                onChange={e => handleUpdateItemField(idx, 'unitPrice', e.target.value)}
+                                style={{ width: '100%', padding: '5px 8px', textAlign: 'right', borderRadius: 4, border: '1px solid var(--border)', fontSize: 12, fontWeight: 600 }}
+                              />
+                            </td>
+                            <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700 }}>
+                              {currencySymbol} {Number(item.totalAmount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </td>
+                            <td style={{ padding: '8px 10px', textAlign: 'center' }}>
+                              <button
+                                className="btn btn-ghost btn-sm btn-icon"
+                                onClick={() => handleRemoveLineItem(idx)}
+                                style={{ color: 'var(--danger, #ef4444)' }}
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                    {piItems.length > 0 && (
+                      <tfoot>
+                        <tr style={{ background: 'var(--bg-base)', borderTop: '2px solid var(--border)', fontWeight: 700 }}>
+                          <td colSpan={4} style={{ padding: '10px 12px', textAlign: 'right' }}>TOTAL ORDER:</td>
+                          <td style={{ padding: '10px 8px', textAlign: 'right', fontSize: 13 }}>
+                            {totalQuantity.toLocaleString()}
+                          </td>
+                          <td></td>
+                          <td style={{ padding: '10px 8px', textAlign: 'right' }}></td>
+                          <td style={{ padding: '10px 8px', textAlign: 'right', fontSize: 14, color: 'var(--primary)' }}>
+                            {currencySymbol} {totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </td>
+                          <td></td>
+                        </tr>
+                      </tfoot>
+                    )}
+                  </table>
+                </div>
+              </div>
+
+              {/* Amount in words & Terms */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 16, marginBottom: 24 }}>
+                <div style={{ gridColumn: '1 / -1', padding: 12, background: 'var(--bg-base)', borderRadius: 6, border: '1px solid var(--border)' }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)' }}>AMOUNT IN WORDS:</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', marginTop: 2 }}>{amountInWords}</div>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Net Weight</label>
+                  <input
+                    type="text"
+                    value={netWeight}
+                    onChange={e => setNetWeight(e.target.value)}
+                    style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 12 }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Gross Weight</label>
+                  <input
+                    type="text"
+                    value={grossWeight}
+                    onChange={e => setGrossWeight(e.target.value)}
+                    style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 12 }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Terms and Conditions</label>
+                  <input
+                    type="text"
+                    value={termsConditions}
+                    onChange={e => setTermsConditions(e.target.value)}
+                    style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 12 }}
+                  />
+                </div>
+              </div>
+
+              {/* Action buttons */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
+                <button className="btn btn-outline" onClick={() => setPiSubTab('orders')} disabled={savingPi}>
+                  Cancel
+                </button>
+                <button className="btn btn-primary" onClick={() => handleSavePi('APPROVED')} disabled={savingPi} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <CheckCircle size={16} /> {savingPi ? 'Creating PI...' : 'Create & Approve Proforma Invoice'}
+                </button>
               </div>
             </div>
-
-            {/* Quick Summary & Action Buttons */}
-            <div className="card" style={{ padding: 18, background: 'var(--card-bg)', borderRadius: 10, border: '1px solid var(--border-color)' }}>
-              <h4 style={{ margin: '0 0 12px 0', fontSize: 14, fontWeight: 700 }}>Summary</h4>
-              
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 13, marginBottom: 18 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'var(--text-muted)' }}>Challans:</span>
-                  <strong>{selectedChallans.length}</strong>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'var(--text-muted)' }}>Goods Items:</span>
-                  <strong>{piItems.length}</strong>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'var(--text-muted)' }}>Total Quantity:</span>
-                  <strong>{totalQuantity.toLocaleString()}</strong>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 15, paddingTop: 8, borderTop: '1px solid var(--border-color)', color: 'var(--primary)' }}>
-                  <span>Total Amount:</span>
-                  <strong>{currencySymbol} {totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <button 
-                  className="btn btn-primary"
-                  onClick={handleSavePi}
-                  disabled={saving || !applicantName || piItems.length === 0}
-                  style={{ width: '100%', padding: '10px 16px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 8, fontWeight: 600 }}
-                >
-                  <CheckCircle size={16} /> {saving ? 'Creating PI...' : 'Confirm & Save PI'}
-                </button>
-
-                <button 
-                  className="btn btn-outline"
-                  onClick={handlePreview}
-                  disabled={!applicantName || piItems.length === 0}
-                  style={{ width: '100%', padding: '9px 16px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 8 }}
-                >
-                  <Eye size={16} /> Preview Document
-                </button>
-
-                <button 
-                  className="btn btn-ghost btn-sm"
-                  onClick={() => {
-                    setSelectedChallans([]);
-                    setPiItems([]);
-                  }}
-                  style={{ color: 'var(--text-muted)', marginTop: 4 }}
-                >
-                  Clear Form
-                </button>
-              </div>
-            </div>
-          </div>
+          )}
         </div>
       )}
 
-      {/* HISTORY TAB */}
-      {activeTab === 'history' && (
-        <div className="card" style={{ padding: 20, background: 'var(--card-bg)', borderRadius: 10, border: '1px solid var(--border-color)' }}>
-          {/* History Filters */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18, gap: 16 }}>
-            <div style={{ position: 'relative', flex: 1, maxWidth: 400 }}>
-              <Search size={15} style={{ position: 'absolute', left: 10, top: 11, color: 'var(--text-muted)' }} />
-              <input 
-                type="text" 
-                className="form-input" 
-                placeholder="Search by PI #, Bill #, Applicant, Buyer..."
-                value={historySearch}
-                onChange={e => setHistorySearch(e.target.value)}
-                style={{ width: '100%', paddingLeft: 32, borderRadius: 6, border: '1px solid var(--border-color)', background: 'var(--input-bg)' }}
-              />
-            </div>
-
-            <div style={{ display: 'flex', gap: 12 }}>
-              <select 
-                className="form-select"
-                value={historyRecipientFilter}
-                onChange={e => setHistoryRecipientFilter(e.target.value)}
-                style={{ padding: '8px 12px', borderRadius: 6, border: '1px solid var(--border-color)', background: 'var(--input-bg)', fontSize: 13 }}
+      {/* ========================================================================= */}
+      {/* SECTION 2: COMMERCIAL BILLS & INVOICES */}
+      {/* ========================================================================= */}
+      {activeSection === 'bills' && (
+        <div>
+          {/* Bills Header Bar */}
+          <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, padding: 14, marginBottom: 20 }}>
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+              <div style={{ position: 'relative', flex: 1 }}>
+                <Search size={16} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                <input
+                  type="text"
+                  placeholder="Search by Bill #, Applicant, PI Ref, Challan #..."
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  style={{ width: '100%', padding: '7px 10px 7px 32px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 13, background: 'var(--bg-base)' }}
+                />
+              </div>
+              <select
+                value={recipientFilter}
+                onChange={e => setRecipientFilter(e.target.value)}
+                style={{ padding: '7px 12px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 13, background: 'var(--bg-base)', minWidth: 200 }}
               >
-                <option value="">All Recipient Companies</option>
+                <option value="">All Applicants / Factories</option>
                 {recipients.map(r => (
                   <option key={r.id} value={r.id}>{r.name}</option>
                 ))}
               </select>
-
-              <button 
-                className="btn btn-outline btn-sm"
-                onClick={loadHistory}
-                title="Refresh History"
-              >
-                <RefreshCw size={15} />
-              </button>
             </div>
           </div>
 
-          {/* History Table */}
-          <div style={{ overflowX: 'auto', border: '1px solid var(--border-color)', borderRadius: 6 }}>
-            <table className="table" style={{ width: '100%', fontSize: 12.5, borderCollapse: 'collapse' }}>
+          {/* Bills List Table */}
+          <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 13 }}>
               <thead>
-                <tr style={{ background: 'var(--table-header-bg, #f8fafc)', borderBottom: '1px solid var(--border-color)' }}>
-                  <th style={{ padding: '10px 12px', textAlign: 'left' }}>PI Number</th>
-                  <th style={{ padding: '10px 12px', textAlign: 'left' }}>Bill No.</th>
-                  <th style={{ padding: '10px 12px', textAlign: 'left' }}>Date</th>
-                  <th style={{ padding: '10px 12px', textAlign: 'left' }}>Applicant</th>
-                  <th style={{ padding: '10px 12px', textAlign: 'left' }}>Buyer</th>
-                  <th style={{ padding: '10px 12px', textAlign: 'right' }}>Total Qty</th>
-                  <th style={{ padding: '10px 12px', textAlign: 'right' }}>Total Amount</th>
-                  <th style={{ padding: '10px 12px', textAlign: 'center', width: 140 }}>Actions</th>
+                <tr style={{ background: 'var(--bg-base, rgba(0,0,0,0.02))', borderBottom: '1px solid var(--border)', color: 'var(--text-muted)', fontSize: 12 }}>
+                  <th style={{ padding: '12px 16px' }}>BILL NUMBER</th>
+                  <th style={{ padding: '12px 16px' }}>BILL DATE</th>
+                  <th style={{ padding: '12px 16px' }}>APPLICANT / FACTORY</th>
+                  <th style={{ padding: '12px 16px' }}>PI REF NO</th>
+                  <th style={{ padding: '12px 16px' }}>LINKED CHALLAN(S)</th>
+                  <th style={{ padding: '12px 16px', textAlign: 'right' }}>TOTAL AMOUNT</th>
+                  <th style={{ padding: '12px 16px', textAlign: 'center' }}>TYPE</th>
+                  <th style={{ padding: '12px 16px', textAlign: 'right' }}>ACTION</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredHistory.length === 0 ? (
+                {billsList.length === 0 ? (
                   <tr>
-                    <td colSpan={8} style={{ textAlign: 'center', padding: 32, color: 'var(--text-muted)' }}>
-                      No Proforma Invoices found matching your filter criteria.
+                    <td colSpan={8} style={{ padding: 48, textAlign: 'center', color: 'var(--text-muted)' }}>
+                      <Landmark size={40} style={{ opacity: 0.3, marginBottom: 10 }} />
+                      <p style={{ margin: 0, fontSize: 14 }}>No Commercial Bills found.</p>
+                      <p style={{ margin: '4px 0 0 0', fontSize: 12, color: 'var(--text-muted)' }}>
+                        Completed Proforma Invoices will appear here once 100% received and transferred to Bill.
+                      </p>
                     </td>
                   </tr>
                 ) : (
-                  filteredHistory.map(pi => (
-                    <tr key={pi.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                      <td style={{ padding: '10px 12px', fontWeight: 700, fontFamily: 'monospace', color: 'var(--primary)' }}>
-                        {pi.pi_number}
+                  billsList.map(b => (
+                    <tr key={b.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                      <td style={{ padding: '12px 16px', fontWeight: 700, color: 'var(--primary)' }}>
+                        {b.bill_number}
                       </td>
-                      <td style={{ padding: '10px 12px', fontFamily: 'monospace' }}>
-                        {pi.bill_number || '-'}
+                      <td style={{ padding: '12px 16px', color: 'var(--text-muted)' }}>
+                        {b.bill_date ? new Date(b.bill_date).toLocaleDateString('en-GB') : (b.pi_date ? new Date(b.pi_date).toLocaleDateString('en-GB') : '-')}
                       </td>
-                      <td style={{ padding: '10px 12px', color: 'var(--text-muted)' }}>
-                        {pi.pi_date ? new Date(pi.pi_date).toLocaleDateString('en-GB') : '-'}
+                      <td style={{ padding: '12px 16px', fontWeight: 600 }}>
+                        {b.applicant_name}
                       </td>
-                      <td style={{ padding: '10px 12px', fontWeight: 600 }}>
-                        {pi.applicant_name}
+                      <td style={{ padding: '12px 16px' }}>
+                        {b.pi_number ? (
+                          <span style={{ padding: '2px 6px', borderRadius: 4, background: 'rgba(99,102,241,0.08)', color: '#6366f1', fontSize: 11, fontWeight: 600 }}>
+                            {b.pi_number}
+                          </span>
+                        ) : '-'}
                       </td>
-                      <td style={{ padding: '10px 12px', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {pi.buyer || '-'}
-                      </td>
-                      <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 600 }}>
-                        {Number(pi.total_quantity || 0).toLocaleString()}
-                      </td>
-                      <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 700, color: 'var(--text-color)' }}>
-                        {pi.currency_symbol || '$'} {Number(pi.total_amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </td>
-                      <td style={{ padding: '10px 12px', textAlign: 'center' }}>
-                        <div style={{ display: 'flex', justifyContent: 'center', gap: 6 }}>
-                          <button 
-                            className="btn btn-ghost btn-icon btn-sm"
-                            onClick={() => setPreviewPi(pi)}
-                            title="View / Print Document"
-                          >
-                            <Printer size={15} />
-                          </button>
-                          <button 
-                            className="btn btn-ghost btn-icon btn-sm"
-                            onClick={() => handleExportPdf(pi)}
-                            title="Download PDF"
-                          >
-                            <Download size={15} />
-                          </button>
-                          {(user?.roleName === 'Admin' || user?.roleName === 'Super Admin') && (
-                            <button 
-                              className="btn btn-ghost btn-icon btn-sm"
-                              onClick={() => handleDeletePi(pi)}
-                              style={{ color: 'var(--danger)' }}
-                              title="Delete PI"
-                            >
-                              <Trash2 size={15} />
-                            </button>
-                          )}
+                      <td style={{ padding: '12px 16px' }}>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={b.challan_numbers}>
+                          {b.challan_numbers || '-'}
                         </div>
+                      </td>
+                      <td style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 700, color: 'var(--success, #10b981)' }}>
+                        {b.currency_symbol || '$'} {Number(b.total_amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </td>
+                      <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                        <span style={{ 
+                          display: 'inline-flex', padding: '3px 8px', borderRadius: 12, 
+                          background: 'rgba(16,185,129,0.12)', color: '#059669', fontSize: 11, fontWeight: 600 
+                        }}>
+                          Commercial Bill
+                        </span>
+                      </td>
+                      <td style={{ padding: '12px 16px', textAlign: 'right' }}>
+                        <button
+                          className="btn btn-primary btn-sm"
+                          onClick={() => handlePreview(b, 'bill')}
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                        >
+                          <Printer size={13} /> View / Print Bill
+                        </button>
                       </td>
                     </tr>
                   ))
@@ -1984,32 +1117,209 @@ export default function FinancePage() {
         </div>
       )}
 
-      {/* FULL PREVIEW MODAL */}
+      {/* ========================================================================= */}
+      {/* RECONCILIATION & TRANSFER MODAL */}
+      {/* ========================================================================= */}
+      {reconciliationModalPi && (
+        <div className="modal-backdrop" style={{ 
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, 
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 
+        }}>
+          <div style={{ 
+            background: 'var(--bg-card, #ffffff)', borderRadius: 12, width: '100%', maxWidth: 860, 
+            maxHeight: '90vh', overflowY: 'auto', padding: 24, boxShadow: '0 20px 25px -5px rgba(0,0,0,0.2)' 
+          }}>
+            {/* Modal Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '1px solid var(--border)', paddingBottom: 16, marginBottom: 20 }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <BarChart3 color="var(--primary)" size={22} />
+                  PI Order Reconciliation & Bill Transfer
+                </h3>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
+                  PI No: <strong>{reconciliationModalPi.pi_number}</strong> | Applicant: <strong>{reconciliationModalPi.applicant_name}</strong>
+                </div>
+              </div>
+              <button className="btn btn-ghost btn-icon btn-sm" onClick={() => setReconciliationModalPi(null)}>
+                <X size={18} />
+              </button>
+            </div>
+
+            {loadingRecon ? (
+              <div style={{ padding: 40, textAlign: 'center' }}>
+                <RefreshCw size={24} className="spin" style={{ margin: '0 auto 10px auto' }} />
+                <p>Calculating order vs delivery vs receipt status...</p>
+              </div>
+            ) : reconciliationData ? (
+              <div>
+                {/* Progress bar banner */}
+                <div style={{ 
+                  padding: 16, borderRadius: 8, marginBottom: 20,
+                  background: reconciliationData.is100PercentReceived ? 'rgba(16,185,129,0.1)' : 'rgba(99,102,241,0.08)',
+                  border: `1px solid ${reconciliationData.is100PercentReceived ? 'var(--success, #10b981)' : 'var(--primary)'}`
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: reconciliationData.is100PercentReceived ? 'var(--success, #10b981)' : 'var(--primary)' }}>
+                      {reconciliationData.is100PercentReceived 
+                        ? '✓ All Items 100% Received by Recipient - Ready for Commercial Bill Transfer'
+                        : `Pending Full Receipt (${reconciliationData.overallFulfillmentPct}% fulfilled)`}
+                    </span>
+                    <span style={{ fontSize: 14, fontWeight: 800 }}>
+                      {reconciliationData.totalReceived.toLocaleString()} / {reconciliationData.totalOrdered.toLocaleString()} PCS
+                    </span>
+                  </div>
+                  <div style={{ height: 8, background: 'var(--border)', borderRadius: 4, overflow: 'hidden' }}>
+                    <div style={{ 
+                      height: '100%', 
+                      width: `${reconciliationData.overallFulfillmentPct}%`, 
+                      background: reconciliationData.is100PercentReceived ? 'var(--success, #10b981)' : 'var(--primary)' 
+                    }} />
+                  </div>
+                </div>
+
+                {/* Items breakdown table */}
+                <h4 style={{ margin: '0 0 10px 0', fontSize: 13, fontWeight: 700 }}>Item-by-Item Verification:</h4>
+                <div style={{ border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden', marginBottom: 20 }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                    <thead>
+                      <tr style={{ background: 'var(--bg-base)', borderBottom: '1px solid var(--border)', color: 'var(--text-muted)' }}>
+                        <th style={{ padding: '8px 10px' }}>ITEM DESCRIPTION</th>
+                        <th style={{ padding: '8px 10px' }}>STYLE / PO</th>
+                        <th style={{ padding: '8px 10px', textAlign: 'right' }}>ORDER QTY</th>
+                        <th style={{ padding: '8px 10px', textAlign: 'right' }}>DISPATCHED</th>
+                        <th style={{ padding: '8px 10px', textAlign: 'right' }}>RECEIVED</th>
+                        <th style={{ padding: '8px 10px', textAlign: 'right' }}>REMAINING</th>
+                        <th style={{ padding: '8px 10px', textAlign: 'center' }}>STATUS</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {reconciliationData.items.map((it, idx) => (
+                        <tr key={idx} style={{ borderBottom: '1px solid var(--border)' }}>
+                          <td style={{ padding: '8px 10px', fontWeight: 600 }}>{it.item_description}</td>
+                          <td style={{ padding: '8px 10px', color: 'var(--text-muted)' }}>{it.po_style_no || '-'}</td>
+                          <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600 }}>
+                            {it.orderQuantity} {it.unit}
+                          </td>
+                          <td style={{ padding: '8px 10px', textAlign: 'right', color: 'var(--text-muted)' }}>
+                            {it.dispatchedQuantity}
+                          </td>
+                          <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700, color: it.isFullyReceived ? 'var(--success, #10b981)' : 'var(--danger, #ef4444)' }}>
+                            {it.receivedQuantity}
+                          </td>
+                          <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600, color: it.remainingToReceive > 0 ? 'var(--warning, #f59e0b)' : 'var(--text-muted)' }}>
+                            {it.remainingToReceive > 0 ? it.remainingToReceive : '0'}
+                          </td>
+                          <td style={{ padding: '8px 10px', textAlign: 'center' }}>
+                            {it.isFullyReceived ? (
+                              <span style={{ color: 'var(--success, #10b981)', fontWeight: 600 }}>✓ Matched</span>
+                            ) : (
+                              <span style={{ color: 'var(--warning, #f59e0b)', fontWeight: 600 }}>Pending</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Linked Challans Section */}
+                <h4 style={{ margin: '0 0 10px 0', fontSize: 13, fontWeight: 700 }}>
+                  Linked Delivery Challans ({reconciliationData.challans.length}):
+                </h4>
+                {reconciliationData.challans.length === 0 ? (
+                  <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 20 }}>
+                    No delivery challans dispatched against this PI yet. Create challans linked to this PI to dispatch goods.
+                  </p>
+                ) : (
+                  <div style={{ border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden', marginBottom: 20 }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                      <thead>
+                        <tr style={{ background: 'var(--bg-base)', borderBottom: '1px solid var(--border)', color: 'var(--text-muted)' }}>
+                          <th style={{ padding: '8px 10px' }}>CHALLAN NO</th>
+                          <th style={{ padding: '8px 10px' }}>DATE</th>
+                          <th style={{ padding: '8px 10px' }}>RECEIVER</th>
+                          <th style={{ padding: '8px 10px' }}>RECEIVED BY</th>
+                          <th style={{ padding: '8px 10px', textAlign: 'center' }}>STATUS</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {reconciliationData.challans.map(c => (
+                          <tr key={c.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                            <td style={{ padding: '8px 10px', fontWeight: 600, color: 'var(--primary)' }}>{c.challan_number}</td>
+                            <td style={{ padding: '8px 10px', color: 'var(--text-muted)' }}>{new Date(c.challan_date).toLocaleDateString('en-GB')}</td>
+                            <td style={{ padding: '8px 10px' }}>{c.receiver_name}</td>
+                            <td style={{ padding: '8px 10px' }}>{c.received_by || '-'}</td>
+                            <td style={{ padding: '8px 10px', textAlign: 'center' }}>
+                              <span style={{ 
+                                padding: '2px 6px', borderRadius: 4, fontSize: 11, fontWeight: 600,
+                                background: c.received_status === 'RECEIVED' ? 'rgba(16,185,129,0.1)' : 'rgba(245,158,11,0.1)',
+                                color: c.received_status === 'RECEIVED' ? '#059669' : '#d97706'
+                              }}>
+                                {c.received_status || 'PENDING'}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {/* Transfer Action Bar */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--border)', paddingTop: 16 }}>
+                  <div>
+                    {!reconciliationData.is100PercentReceived && (
+                      <span style={{ fontSize: 12, color: 'var(--danger, #ef4444)', fontWeight: 600 }}>
+                        ⚠️ Cannot transfer to Bill until all items are 100% received from recipient side.
+                      </span>
+                    )}
+                    {reconciliationData.pi.status === 'BILLED' && (
+                      <span style={{ fontSize: 12, color: 'var(--success, #10b981)', fontWeight: 600 }}>
+                        ✓ Already transferred to Bill: {reconciliationData.pi.bill_number}
+                      </span>
+                    )}
+                  </div>
+
+                  <div style={{ display: 'flex', gap: 10 }}>
+                    <button className="btn btn-outline" onClick={() => setReconciliationModalPi(null)}>
+                      Close
+                    </button>
+                    {reconciliationData.canTransferToBill && (
+                      <button 
+                        className="btn btn-primary" 
+                        onClick={() => handleTransferToBill(reconciliationModalPi.id)}
+                        disabled={transferring}
+                        style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700 }}
+                      >
+                        <CheckCircle size={16} /> {transferring ? 'Transferring...' : 'Transfer to Commercial Bill'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* PRINT VIEW PREVIEW MODAL */}
+      {/* ========================================================================= */}
       {previewPi && (
-        <div 
-          className="modal-overlay" 
-          style={{ 
-            position: 'fixed', 
-            top: 0, 
-            left: 0, 
-            right: 0, 
-            bottom: 0, 
-            background: 'rgba(15, 23, 42, 0.75)', 
-            display: 'flex', 
-            justifyContent: 'center', 
-            alignItems: 'flex-start',
-            overflowY: 'auto',
-            padding: '40px 20px',
-            zIndex: 9999 
-          }}
-          onClick={() => setPreviewPi(null)}
-        >
-          <div onClick={e => e.stopPropagation()}>
-            <ProformaInvoicePrintView 
-              pi={previewPi} 
+        <div className="modal-backdrop" style={{ 
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 1100, 
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 
+        }}>
+          <div style={{ 
+            background: 'var(--bg-card, #ffffff)', borderRadius: 12, width: '100%', maxWidth: 960, 
+            maxHeight: '94vh', overflowY: 'auto', padding: 24, boxShadow: '0 25px 50px -12px rgba(0,0,0,0.3)' 
+          }}>
+            <ProformaInvoicePrintView
+              pi={previewPi}
+              mode={previewMode}
               isModal={true}
               onClose={() => setPreviewPi(null)}
-              onExportPdf={() => handleExportPdf(previewPi)}
+              onPrint={() => window.print()}
             />
           </div>
         </div>
