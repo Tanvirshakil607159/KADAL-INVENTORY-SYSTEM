@@ -17,7 +17,11 @@ export default function IssueBrowserModal({ data }) {
 
   const filteredItems = allItems.filter(it => {
     const s = filters.search.toLowerCase();
-    const matchSearch = !s || it.name.toLowerCase().includes(s) || it.item_code.toLowerCase().includes(s) || (it.buyer_name || '').toLowerCase().includes(s);
+    const matchSearch = !s || 
+      it.name.toLowerCase().includes(s) || 
+      it.item_code.toLowerCase().includes(s) || 
+      (it.buyer_name || '').toLowerCase().includes(s) || 
+      (it.order_number || '').toLowerCase().includes(s);
     const matchStyle = !filters.style || it.style_name === filters.style;
     const matchOrder = !filters.order || it.order_number === filters.order;
     const matchPurchase = !filters.purchase || it.purchase_no === filters.purchase;
@@ -67,7 +71,7 @@ export default function IssueBrowserModal({ data }) {
           {/* Search bar */}
           <div className="search-bar mb-3" style={{ maxWidth: '100%' }}>
             <Search size={16} />
-            <input className="form-input" placeholder="Search by name, code, or buyer..." value={filters.search} onChange={e => setFilters({ ...filters, search: e.target.value })} style={{ fontSize: 14 }} />
+            <input className="form-input" placeholder="Search by name, code, buyer, or order no..." value={filters.search} onChange={e => setFilters({ ...filters, search: e.target.value })} style={{ fontSize: 14 }} />
           </div>
           {/* Filter row */}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>

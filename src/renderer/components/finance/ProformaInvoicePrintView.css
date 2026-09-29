@@ -59,7 +59,7 @@
 }
 
 .pi-header-logo {
-  width: 72px;
+  max-width: 200px;
   height: 72px;
   object-fit: contain;
   flex-shrink: 0;
