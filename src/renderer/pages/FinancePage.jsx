@@ -62,6 +62,52 @@ export default function FinancePage() {
   const [previewPi, setPreviewPi] = useState(null);
   const [previewMode, setPreviewMode] = useState('pi'); // 'pi' or 'bill'
 
+  // ==================== ORDER MODAL STATE ====================
+  const [orderModalOpen, setOrderModalOpen] = useState(false);
+  const [selectedOrderNo, setSelectedOrderNo] = useState('');
+  const [selectedItemsFromOrder, setSelectedItemsFromOrder] = useState(new Set());
+
+  const uniqueOrders = useMemo(() => {
+    const orders = new Set();
+    inventoryItems.forEach(it => {
+      if (it.order_number) orders.add(it.order_number);
+    });
+    return Array.from(orders).sort();
+  }, [inventoryItems]);
+
+  const itemsInSelectedOrder = useMemo(() => {
+    if (!selectedOrderNo) return [];
+    return inventoryItems.filter(it => it.order_number === selectedOrderNo);
+  }, [selectedOrderNo, inventoryItems]);
+
+  const handleAddSelectedFromOrder = () => {
+    const newItems = itemsInSelectedOrder
+      .filter(it => selectedItemsFromOrder.has(it.id))
+      .map(it => {
+        const rate = Number(it.unit_price) || 0;
+        const qty = Number(it.order_quantity) || Number(it.current_stock) || 1000;
+        return {
+          itemId: it.id,
+          itemDescription: it.name,
+          poStyleNo: it.style_name || it.order_number || it.purchase_no || '',
+          quantity: qty,
+          unit: (it.unit || 'PCS').toUpperCase(),
+          unitPrice: rate,
+          totalAmount: Number((qty * rate).toFixed(2)),
+          isReadOnly: true
+        };
+      });
+
+    setPiItems(prev => {
+      const combined = [...prev, ...newItems];
+      return combined.map((item, idx) => ({ ...item, slNo: idx + 1 }));
+    });
+
+    setOrderModalOpen(false);
+    setSelectedOrderNo('');
+    setSelectedItemsFromOrder(new Set());
+  };
+
   // Auto-generate next PI number
   const generateNextPiNumber = useCallback(async (applicant = '') => {
     try {
@@ -830,9 +876,14 @@ export default function FinancePage() {
               <div style={{ marginBottom: 24 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                   <h4 style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>Ordered Items & Unit Pricing</h4>
-                  <button className="btn btn-outline btn-sm" onClick={handleAddLineItem} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <Plus size={14} /> Add Line Item
-                  </button>
+                  <div style={{ display: 'flex', gap: 10 }}>
+                    <button className="btn btn-outline btn-sm" onClick={() => setOrderModalOpen(true)} style={{ display: 'flex', alignItems: 'center', gap: 6, borderColor: 'var(--primary)', color: 'var(--primary)' }}>
+                      <PackageCheck size={14} /> Load from Order
+                    </button>
+                    <button className="btn btn-outline btn-sm" onClick={handleAddLineItem} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <Plus size={14} /> Add Line Item
+                    </button>
+                  </div>
                 </div>
 
                 <div style={{ border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
@@ -865,7 +916,8 @@ export default function FinancePage() {
                               <select
                                 value={item.itemId || ''}
                                 onChange={e => handleSelectInventoryItem(idx, e.target.value)}
-                                style={{ width: '100%', padding: '5px 8px', borderRadius: 4, border: '1px solid var(--border)', fontSize: 12, background: 'var(--bg-base)' }}
+                                disabled={item.isReadOnly}
+                                style={{ width: '100%', padding: '5px 8px', borderRadius: 4, border: '1px solid var(--border)', fontSize: 12, background: item.isReadOnly ? 'var(--bg-card)' : 'var(--bg-base)', opacity: item.isReadOnly ? 0.7 : 1 }}
                               >
                                 <option value="">-- Or type manually --</option>
                                 {inventoryItems.map(inv => (
@@ -878,8 +930,9 @@ export default function FinancePage() {
                                 type="text"
                                 value={item.itemDescription}
                                 onChange={e => handleUpdateItemField(idx, 'itemDescription', e.target.value)}
+                                disabled={item.isReadOnly}
                                 placeholder="e.g. 100% COTTON TWILL TAPE (12MM)"
-                                style={{ width: '100%', padding: '5px 8px', borderRadius: 4, border: '1px solid var(--border)', fontSize: 12 }}
+                                style={{ width: '100%', padding: '5px 8px', borderRadius: 4, border: '1px solid var(--border)', fontSize: 12, background: item.isReadOnly ? 'var(--bg-base)' : '#fff' }}
                               />
                             </td>
                             <td style={{ padding: '8px 10px' }}>
@@ -887,8 +940,9 @@ export default function FinancePage() {
                                 type="text"
                                 value={item.poStyleNo}
                                 onChange={e => handleUpdateItemField(idx, 'poStyleNo', e.target.value)}
+                                disabled={item.isReadOnly}
                                 placeholder="Style / PO"
-                                style={{ width: '100%', padding: '5px 8px', borderRadius: 4, border: '1px solid var(--border)', fontSize: 12 }}
+                                style={{ width: '100%', padding: '5px 8px', borderRadius: 4, border: '1px solid var(--border)', fontSize: 12, background: item.isReadOnly ? 'var(--bg-base)' : '#fff' }}
                               />
                             </td>
                             <td style={{ padding: '8px 10px', textAlign: 'right' }}>
@@ -898,7 +952,8 @@ export default function FinancePage() {
                                 min="1"
                                 value={item.quantity}
                                 onChange={e => handleUpdateItemField(idx, 'quantity', e.target.value)}
-                                style={{ width: '100%', padding: '5px 8px', textAlign: 'right', borderRadius: 4, border: '1px solid var(--border)', fontSize: 12, fontWeight: 600 }}
+                                disabled={item.isReadOnly}
+                                style={{ width: '100%', padding: '5px 8px', textAlign: 'right', borderRadius: 4, border: '1px solid var(--border)', fontSize: 12, fontWeight: 600, background: item.isReadOnly ? 'var(--bg-base)' : '#fff' }}
                               />
                             </td>
                             <td style={{ padding: '8px 10px', textAlign: 'center' }}>
@@ -906,7 +961,8 @@ export default function FinancePage() {
                                 type="text"
                                 value={item.unit}
                                 onChange={e => handleUpdateItemField(idx, 'unit', e.target.value.toUpperCase())}
-                                style={{ width: '100%', padding: '5px 8px', textAlign: 'center', borderRadius: 4, border: '1px solid var(--border)', fontSize: 12 }}
+                                disabled={item.isReadOnly}
+                                style={{ width: '100%', padding: '5px 8px', textAlign: 'center', borderRadius: 4, border: '1px solid var(--border)', fontSize: 12, background: item.isReadOnly ? 'var(--bg-base)' : '#fff' }}
                               />
                             </td>
                             <td style={{ padding: '8px 10px', textAlign: 'right' }}>
@@ -916,7 +972,8 @@ export default function FinancePage() {
                                 min="0"
                                 value={item.unitPrice}
                                 onChange={e => handleUpdateItemField(idx, 'unitPrice', e.target.value)}
-                                style={{ width: '100%', padding: '5px 8px', textAlign: 'right', borderRadius: 4, border: '1px solid var(--border)', fontSize: 12, fontWeight: 600 }}
+                                disabled={item.isReadOnly}
+                                style={{ width: '100%', padding: '5px 8px', textAlign: 'right', borderRadius: 4, border: '1px solid var(--border)', fontSize: 12, fontWeight: 600, background: item.isReadOnly ? 'var(--bg-base)' : '#fff' }}
                               />
                             </td>
                             <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700 }}>
@@ -1321,6 +1378,130 @@ export default function FinancePage() {
               onClose={() => setPreviewPi(null)}
               onPrint={() => window.print()}
             />
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* ORDER ITEMS MODAL */}
+      {/* ========================================================================= */}
+      {orderModalOpen && (
+        <div className="modal-backdrop" style={{ 
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, 
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 
+        }}>
+          <div style={{ 
+            background: 'var(--bg-card, #ffffff)', borderRadius: 12, width: '100%', maxWidth: 700, 
+            maxHeight: '90vh', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.2)' 
+          }}>
+            <div style={{ padding: 20, borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <PackageCheck color="var(--primary)" size={20} />
+                Load Items from Order
+              </h3>
+              <button className="btn btn-ghost btn-icon btn-sm" onClick={() => { setOrderModalOpen(false); setSelectedOrderNo(''); setSelectedItemsFromOrder(new Set()); }}>
+                <X size={18} />
+              </button>
+            </div>
+            
+            <div style={{ padding: 20, overflowY: 'auto', flex: 1 }}>
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Select Order Number</label>
+                <select
+                  value={selectedOrderNo}
+                  onChange={e => {
+                    setSelectedOrderNo(e.target.value);
+                    setSelectedItemsFromOrder(new Set());
+                  }}
+                  style={{ width: '100%', padding: '10px 12px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 14, background: 'var(--bg-base)' }}
+                >
+                  <option value="">-- Choose an Order Number --</option>
+                  {uniqueOrders.map(o => (
+                    <option key={o} value={o}>{o}</option>
+                  ))}
+                </select>
+              </div>
+
+              {selectedOrderNo && (
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>Items in Order: {selectedOrderNo}</div>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => {
+                        if (selectedItemsFromOrder.size === itemsInSelectedOrder.length) {
+                          setSelectedItemsFromOrder(new Set());
+                        } else {
+                          setSelectedItemsFromOrder(new Set(itemsInSelectedOrder.map(it => it.id)));
+                        }
+                      }}
+                    >
+                      {selectedItemsFromOrder.size === itemsInSelectedOrder.length ? 'Deselect All' : 'Select All'}
+                    </button>
+                  </div>
+                  
+                  <div style={{ border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                      <thead>
+                        <tr style={{ background: 'var(--bg-base)', borderBottom: '1px solid var(--border)', color: 'var(--text-muted)' }}>
+                          <th style={{ padding: '10px', width: 40, textAlign: 'center' }}>
+                            <CheckSquare size={14} />
+                          </th>
+                          <th style={{ padding: '10px', textAlign: 'left' }}>ITEM DESCRIPTION</th>
+                          <th style={{ padding: '10px', textAlign: 'left' }}>STYLE / PO</th>
+                          <th style={{ padding: '10px', textAlign: 'right' }}>QTY</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {itemsInSelectedOrder.length === 0 ? (
+                          <tr>
+                            <td colSpan={4} style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)' }}>
+                              No items found for this order.
+                            </td>
+                          </tr>
+                        ) : (
+                          itemsInSelectedOrder.map(it => (
+                            <tr key={it.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                              <td style={{ padding: '10px', textAlign: 'center' }}>
+                                <input
+                                  type="checkbox"
+                                  checked={selectedItemsFromOrder.has(it.id)}
+                                  onChange={e => {
+                                    const next = new Set(selectedItemsFromOrder);
+                                    if (e.target.checked) next.add(it.id);
+                                    else next.delete(it.id);
+                                    setSelectedItemsFromOrder(next);
+                                  }}
+                                  style={{ cursor: 'pointer', width: 16, height: 16 }}
+                                />
+                              </td>
+                              <td style={{ padding: '10px', fontWeight: 600 }}>{it.name}</td>
+                              <td style={{ padding: '10px', color: 'var(--text-muted)' }}>{it.style_name || '-'}</td>
+                              <td style={{ padding: '10px', textAlign: 'right' }}>
+                                {Number(it.order_quantity || it.current_stock || 0).toLocaleString()} {it.unit || 'PCS'}
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div style={{ padding: 20, borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
+              <button className="btn btn-outline" onClick={() => { setOrderModalOpen(false); setSelectedOrderNo(''); setSelectedItemsFromOrder(new Set()); }}>
+                Cancel
+              </button>
+              <button 
+                className="btn btn-primary" 
+                onClick={handleAddSelectedFromOrder}
+                disabled={selectedItemsFromOrder.size === 0}
+              >
+                Add Selected Items ({selectedItemsFromOrder.size})
+              </button>
+            </div>
           </div>
         </div>
       )}

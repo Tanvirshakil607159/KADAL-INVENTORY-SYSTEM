@@ -455,15 +455,19 @@ const ChallansRepo = {
       const { data: challan, error } = await supabase.from('challans').insert([insertObj]).select().single();
       if (error) throw error;
       
-      const challanItems = items.map(item => ({
-        challan_id: challan.id,
-        item_id: item.itemId,
-        quantity: item.quantity,
-        unit: item.unit,
-        notes: item.notes || null,
-        pi_item_id: item.piItemId || item.pi_item_id || null,
-        received_quantity: 0
-      }));
+      const challanItems = items.map(item => {
+        const obj = {
+          challan_id: challan.id,
+          item_id: item.itemId,
+          quantity: item.quantity,
+          unit: item.unit,
+          notes: item.notes || null
+        };
+        const piItem = item.piItemId || item.pi_item_id;
+        if (piItem) obj.pi_item_id = piItem;
+        if (linkedPiId) obj.received_quantity = 0;
+        return obj;
+      });
       
       const { error: itemsError } = await supabase.from('challan_items').insert(challanItems);
       if (itemsError) throw itemsError;
