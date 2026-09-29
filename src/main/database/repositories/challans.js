@@ -470,7 +470,11 @@ const ChallansRepo = {
       });
       
       const { error: itemsError } = await supabase.from('challan_items').insert(challanItems);
-      if (itemsError) throw itemsError;
+      if (itemsError) {
+        // Rollback the orphaned challan since items failed to insert
+        await supabase.from('challans').delete().eq('id', challan.id);
+        throw itemsError;
+      }
       
       return challan.id;
     }
@@ -501,6 +505,11 @@ const ChallansRepo = {
     const { receivedBy, receivedAt, receivedNotes, items } = receiptData;
     const dateVal = receivedAt || new Date().toISOString();
 
+    let finalStatus = receiptData.receivedStatus || 'RECEIVED';
+    if (!receiptData.receivedStatus && items && items.some(it => (Number(it.receivedQuantity) || 0) < (Number(it.quantity) || 0))) {
+      finalStatus = 'PARTIAL';
+    }
+
     if (isCloudEnabled()) {
       try {
         const supabase = getSupabase();
@@ -513,7 +522,7 @@ const ChallansRepo = {
           }
         }
         await supabase.from('challans').update({
-          received_status: receiptData.receivedStatus || 'RECEIVED',
+          received_status: finalStatus,
           received_at: dateVal,
           received_by: receivedBy || 'Recipient',
           received_notes: receivedNotes || null,
@@ -544,7 +553,7 @@ const ChallansRepo = {
       if (r < q) allFull = false;
       if (r > 0) anyReceived = true;
     }
-    const finalStatus = allFull ? 'RECEIVED' : (anyReceived ? 'PARTIAL' : 'PENDING');
+    finalStatus = allFull ? 'RECEIVED' : (anyReceived ? 'PARTIAL' : 'PENDING');
 
     dbPrepare(`
       UPDATE challans 

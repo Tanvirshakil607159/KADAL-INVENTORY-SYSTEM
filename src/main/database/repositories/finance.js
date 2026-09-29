@@ -226,11 +226,60 @@ const FinanceRepo = {
         const { data, error } = await query;
         if (error) throw error;
 
+        const piIds = (data || []).map(p => p.id);
+        let challanItemsData = [];
+        if (piIds.length > 0) {
+          try {
+            // Batch sizes for IN queries to avoid URL length issues
+            const batchSize = 100;
+            for (let i = 0; i < piIds.length; i += batchSize) {
+              const batchIds = piIds.slice(i, i + batchSize);
+              const { data: ciData } = await supabase.from('challan_items').select(`
+                quantity, received_quantity, challans!inner(pi_id, status)
+              `).in('challans.pi_id', batchIds).eq('challans.status', 'ACTIVE');
+              if (ciData) {
+                challanItemsData.push(...ciData);
+              }
+            }
+          } catch (e) {
+            console.warn('[FinanceRepo] Cloud challan stats fetch failed:', e.message);
+          }
+        }
+
         let result = (data || []).map(pi => {
+          const items = pi.proforma_invoice_items || [];
+          const totalOrdered = Number(pi.total_quantity) || items.reduce((s, it) => s + (Number(it.quantity) || 0), 0);
+          
+          const piChallanItems = challanItemsData.filter(ci => ci.challans && ci.challans.pi_id === pi.id);
+          const totalDispatched = piChallanItems.reduce((s, ci) => s + (Number(ci.quantity) || 0), 0);
+          const totalReceived = piChallanItems.reduce((s, ci) => s + (Number(ci.received_quantity) || 0), 0);
+          
+          let allItemsFull = true;
+          if (items.length > 0) {
+            for (const item of items) {
+              const orderQty = Number(item.quantity) || 0;
+              let received = 0;
+              const matchedRows = piChallanItems.filter(r => r.item_id === item.item_id || r.pi_item_id === item.id);
+              matchedRows.forEach(r => { received += Number(r.received_quantity) || 0; });
+              if (orderQty > 0 && received < orderQty) {
+                allItemsFull = false;
+              }
+            }
+          } else {
+            allItemsFull = totalOrdered > 0 && totalReceived >= totalOrdered;
+          }
+
+          const pct = totalOrdered > 0 ? Math.min(100, Math.round((totalReceived / totalOrdered) * 100)) : 100;
+
           return normalizePi({
             ...pi,
             created_by_name: pi.users?.full_name,
-            items: pi.proforma_invoice_items || [],
+            items,
+            total_ordered: totalOrdered,
+            dispatched_quantity: totalDispatched,
+            received_quantity: totalReceived,
+            fulfillment_pct: pct,
+            is_100_percent_received: (allItemsFull || totalReceived >= totalOrdered) && totalOrdered > 0
           });
         });
 
@@ -329,6 +378,40 @@ const FinanceRepo = {
 
         data.created_by_name = data.users?.full_name;
         data.items = (data.proforma_invoice_items || []).sort((a, b) => a.sl_no - b.sl_no);
+
+        const { data: ciData } = await supabase.from('challan_items').select(`
+          quantity, received_quantity, challans!inner(pi_id, status)
+        `).eq('challans.pi_id', id).eq('challans.status', 'ACTIVE');
+        
+        const totalDispatched = (ciData || []).reduce((s, ci) => s + (Number(ci.quantity) || 0), 0);
+        const totalReceived = (ciData || []).reduce((s, ci) => s + (Number(ci.received_quantity) || 0), 0);
+        
+        const totalOrdered = Number(data.total_quantity) || data.items.reduce((s, i) => s + (Number(i.quantity) || 0), 0);
+        const fulfillmentPct = totalOrdered > 0 ? Math.min(100, Math.round((totalReceived / totalOrdered) * 100)) : (data.bill_number ? 100 : 0);
+        
+        let allItemsFull = true;
+        if (data.items.length > 0) {
+          for (const item of data.items) {
+            const orderQty = Number(item.quantity) || 0;
+            let received = 0;
+            const matchedRows = (ciData || []).filter(r => r.item_id === item.item_id || r.pi_item_id === item.id);
+            matchedRows.forEach(r => { received += Number(r.received_quantity) || 0; });
+            if (orderQty > 0 && received < orderQty) {
+              allItemsFull = false;
+            }
+          }
+        } else {
+          allItemsFull = totalOrdered > 0 && totalReceived >= totalOrdered;
+        }
+        
+        const is100PercentReceived = (allItemsFull || totalReceived >= totalOrdered) && totalOrdered > 0;
+
+        data.dispatched_quantity = totalDispatched;
+        data.received_quantity = totalReceived;
+        data.fulfillment_pct = fulfillmentPct;
+        data.is_100_percent_received = is100PercentReceived;
+        data.can_transfer_to_bill = is100PercentReceived && data.status !== 'BILLED';
+
         return normalizePi(data);
       } catch (cloudErr) {
         console.warn('[FinanceRepo] Cloud getById failed, falling back to SQLite:', cloudErr.message);
@@ -876,13 +959,42 @@ const FinanceRepo = {
     const pi = await this.getById(id);
     if (!pi) return null;
 
-    // Get all challans linked to this PI
-    const challans = dbPrepare(`
-      SELECT c.id, c.challan_number, c.challan_date, c.receiver_name, c.received_status, c.received_at, c.received_by, c.received_notes
-      FROM challans c
-      WHERE c.pi_id = ? AND c.status = 'ACTIVE'
-      ORDER BY c.challan_date DESC
-    `).all(id);
+    let challans = [];
+    let chItemRowsAll = [];
+
+    if (isCloudEnabled()) {
+      try {
+        const supabase = getSupabase();
+        const { data: cData } = await supabase.from('challans')
+          .select('id, challan_number, challan_date, receiver_name, received_status, received_at, received_by, received_notes')
+          .eq('pi_id', id)
+          .eq('status', 'ACTIVE')
+          .order('challan_date', { ascending: false });
+        challans = cData || [];
+
+        const { data: ciData } = await supabase.from('challan_items')
+          .select('quantity, received_quantity, item_id, pi_item_id, challans!inner(pi_id, status)')
+          .eq('challans.pi_id', id)
+          .eq('challans.status', 'ACTIVE');
+        chItemRowsAll = ciData || [];
+      } catch (e) {
+        console.warn('[FinanceRepo] Cloud getPiReconciliation failed:', e.message);
+      }
+    } else {
+      challans = dbPrepare(`
+        SELECT c.id, c.challan_number, c.challan_date, c.receiver_name, c.received_status, c.received_at, c.received_by, c.received_notes
+        FROM challans c
+        WHERE c.pi_id = ? AND c.status = 'ACTIVE'
+        ORDER BY c.challan_date DESC
+      `).all(id);
+
+      chItemRowsAll = dbPrepare(`
+        SELECT ci.quantity, ci.received_quantity, ci.item_id, ci.pi_item_id
+        FROM challan_items ci
+        JOIN challans c ON ci.challan_id = c.id
+        WHERE c.pi_id = ? AND c.status = 'ACTIVE'
+      `).all(id);
+    }
 
     // Get item breakdown
     const piItems = pi.items || [];
@@ -897,14 +1009,9 @@ const FinanceRepo = {
       let dispatched = 0;
       let received = 0;
 
-      const chItemRows = dbPrepare(`
-        SELECT ci.quantity, ci.received_quantity 
-        FROM challan_items ci
-        JOIN challans c ON ci.challan_id = c.id
-        WHERE c.pi_id = ? AND c.status = 'ACTIVE' AND (ci.item_id = ? OR ci.pi_item_id = ?)
-      `).all(id, item.item_id || -1, item.id || -1);
+      const matchedRows = chItemRowsAll.filter(r => r.item_id === item.item_id || r.pi_item_id === item.id);
 
-      chItemRows.forEach(row => {
+      matchedRows.forEach(row => {
         dispatched += Number(row.quantity) || 0;
         received += Number(row.received_quantity) || 0;
       });
@@ -928,7 +1035,8 @@ const FinanceRepo = {
       };
     });
 
-    const is100PercentReceived = totalOrdered > 0 && reconciledItems.every(i => i.isFullyReceived);
+    const allItemsFull = reconciledItems.every(i => i.isFullyReceived);
+    const is100PercentReceived = totalOrdered > 0 && (allItemsFull || totalReceived >= totalOrdered);
     const overallPct = totalOrdered > 0 ? Math.min(100, Math.round((totalReceived / totalOrdered) * 100)) : 100;
 
     return {
@@ -951,12 +1059,28 @@ const FinanceRepo = {
     const recon = await this.getPiReconciliation(id);
     if (!recon) return;
 
+    let newStatus = null;
     if (recon.is100PercentReceived) {
-      dbPrepare(`UPDATE proforma_invoices SET status = 'DELIVERED', updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(id);
+      newStatus = 'DELIVERED';
     } else if (recon.totalReceived > 0) {
-      dbPrepare(`UPDATE proforma_invoices SET status = 'PARTIALLY_DELIVERED', updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(id);
+      newStatus = 'PARTIALLY_DELIVERED';
     } else if (recon.totalDispatched > 0) {
-      dbPrepare(`UPDATE proforma_invoices SET status = 'IN_PRODUCTION', updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(id);
+      newStatus = 'IN_PRODUCTION';
+    }
+
+    if (newStatus) {
+      if (isCloudEnabled()) {
+        try {
+          await getSupabase().from('proforma_invoices').update({ 
+            status: newStatus, 
+            updated_at: new Date().toISOString() 
+          }).eq('id', id);
+        } catch (e) {
+          console.warn('[FinanceRepo] Cloud checkAndUpdatePiStatus failed:', e.message);
+        }
+      } else {
+        dbPrepare(`UPDATE proforma_invoices SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(newStatus, id);
+      }
     }
   },
 

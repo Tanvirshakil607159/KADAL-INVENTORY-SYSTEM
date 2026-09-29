@@ -1749,7 +1749,8 @@ export const webBridge = {
         };
       });
 
-      const is100PercentReceived = totalOrdered > 0 && reconciledItems.every(i => i.isFullyReceived);
+      const allItemsFull = reconciledItems.every(i => i.isFullyReceived);
+      const is100PercentReceived = totalOrdered > 0 && (allItemsFull || totalReceived >= totalOrdered);
       const overallPct = totalOrdered > 0 ? Math.min(100, Math.round((totalReceived / totalOrdered) * 100)) : 100;
 
       return {

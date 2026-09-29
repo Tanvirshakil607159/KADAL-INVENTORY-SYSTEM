@@ -93,7 +93,7 @@ export default function ChallanReceiptPage() {
 
       // Populate items with default received qty = quantity
       const items = (full.items || []).map(it => {
-        const defaultQty = it.received_quantity !== undefined && Number(it.received_quantity) > 0 
+        const defaultQty = it.received_quantity !== null && it.received_quantity !== undefined
           ? Number(it.received_quantity) 
           : Number(it.quantity || 0);
         return {
@@ -152,6 +152,7 @@ export default function ChallanReceiptPage() {
         receivedNotes: receiptNotes.trim(),
         items: receivingItems.map(it => ({
           id: it.id,
+          quantity: it.quantity,
           receivedQuantity: it.receivedQuantity,
           rejectionQuantity: it.rejectionQuantity
         }))
@@ -390,14 +391,16 @@ export default function ChallanReceiptPage() {
                     </td>
                     <td style={{ padding: '12px 16px', textAlign: 'right' }}>
                       <div style={{ display: 'inline-flex', gap: 6 }}>
-                        <button
-                          className={`btn ${isPending || isPartial ? 'btn-primary' : 'btn-outline'} btn-sm`}
-                          onClick={() => handleOpenReceive(ch)}
-                          title={isPending ? "Confirm and receive goods" : "Re-inspect / Update received quantities"}
-                        >
-                          <PackageCheck size={14} style={{ marginRight: 4 }} />
-                          {isPending ? 'Receive Goods' : 'Update Qty'}
-                        </button>
+                        {!isReceived && (
+                          <button
+                            className={`btn ${isPending || isPartial ? 'btn-primary' : 'btn-outline'} btn-sm`}
+                            onClick={() => handleOpenReceive(ch)}
+                            title={isPending ? "Confirm and receive goods" : "Re-inspect / Update received quantities"}
+                          >
+                            <PackageCheck size={14} style={{ marginRight: 4 }} />
+                            {isPending ? 'Receive Goods' : 'Update Qty'}
+                          </button>
+                        )}
                         <button
                           className="btn btn-ghost btn-sm btn-icon"
                           onClick={() => handleViewSlip(ch)}
