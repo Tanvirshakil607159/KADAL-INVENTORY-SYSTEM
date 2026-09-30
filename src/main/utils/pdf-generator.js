@@ -85,6 +85,40 @@ function getLogoBase64() {
   return null;
 }
 
+const letterheadPath = path.join(__dirname, '../../assets/letterhead.png');
+let letterheadBase64Cache = null;
+
+function getLetterheadBase64() {
+  if (letterheadBase64Cache) return letterheadBase64Cache;
+  try {
+    if (fs.existsSync(letterheadPath)) {
+      const buffer = fs.readFileSync(letterheadPath);
+      letterheadBase64Cache = `data:image/png;base64,${buffer.toString('base64')}`;
+      return letterheadBase64Cache;
+    }
+  } catch (e) {
+    console.error('[PdfGenerator] Failed to load letterhead:', e.message);
+  }
+  return null;
+}
+
+const watermarkPath = path.join(__dirname, '../../assets/watermark.png');
+let watermarkBase64Cache = null;
+
+function getWatermarkBase64() {
+  if (watermarkBase64Cache) return watermarkBase64Cache;
+  try {
+    if (fs.existsSync(watermarkPath)) {
+      const buffer = fs.readFileSync(watermarkPath);
+      watermarkBase64Cache = `data:image/png;base64,${buffer.toString('base64')}`;
+      return watermarkBase64Cache;
+    }
+  } catch (e) {
+    console.error('[PdfGenerator] Failed to load watermark:', e.message);
+  }
+  return getLogoBase64();
+}
+
 const PdfGenerator = {
 
   async generateChallanPdf(challan, settings = {}) {
@@ -144,13 +178,13 @@ const PdfGenerator = {
       pageSize: 'A4',
       pageMargins: [40, 40, 40, 60],
       background: (currentPage, pageSize) => {
-        const logo = getLogoBase64();
-        if (!logo) return null;
+        const watermark = getWatermarkBase64();
+        if (!watermark) return null;
         return {
-          image: logo,
-          width: 400,
-          opacity: 0.05,
-          absolutePosition: { x: (pageSize.width - 400) / 2, y: (pageSize.height - 400) / 2 }
+          image: watermark,
+          width: 380,
+          opacity: 0.08,
+          absolutePosition: { x: (pageSize.width - 380) / 2, y: (pageSize.height - 380) / 2 }
         };
       },
       content: [
@@ -301,13 +335,13 @@ const PdfGenerator = {
       pageSize: 'A4',
       pageMargins: [40, 40, 40, 60],
       background: (currentPage, pageSize) => {
-        const logo = getLogoBase64();
-        if (!logo) return null;
+        const watermark = getWatermarkBase64();
+        if (!watermark) return null;
         return {
-          image: logo,
-          width: 400,
-          opacity: 0.05,
-          absolutePosition: { x: (pageSize.width - 400) / 2, y: (pageSize.height - 400) / 2 }
+          image: watermark,
+          width: 380,
+          opacity: 0.08,
+          absolutePosition: { x: (pageSize.width - 380) / 2, y: (pageSize.height - 380) / 2 }
         };
       },
       content: [
@@ -587,13 +621,13 @@ const PdfGenerator = {
       pageSize: 'A4',
       pageMargins: [40, 40, 40, 60],
       background: (currentPage, pageSize) => {
-        const logo = getLogoBase64();
-        if (!logo) return null;
+        const watermark = getWatermarkBase64();
+        if (!watermark) return null;
         return {
-          image: logo,
-          width: 400,
-          opacity: 0.05,
-          absolutePosition: { x: (pageSize.width - 400) / 2, y: (pageSize.height - 400) / 2 }
+          image: watermark,
+          width: 380,
+          opacity: 0.08,
+          absolutePosition: { x: (pageSize.width - 380) / 2, y: (pageSize.height - 380) / 2 }
         };
       },
       content: [
@@ -930,9 +964,9 @@ const PdfGenerator = {
       pageSize: 'A4',
       pageMargins: [40, 40, 40, 60],
       background: (currentPage, pageSize) => {
-        const logo = getLogoBase64();
-        if (!logo) return null;
-        return { image: logo, width: 400, opacity: 0.05, absolutePosition: { x: (pageSize.width - 400) / 2, y: (pageSize.height - 400) / 2 } };
+        const watermark = getWatermarkBase64();
+        if (!watermark) return null;
+        return { image: watermark, width: 380, opacity: 0.08, absolutePosition: { x: (pageSize.width - 380) / 2, y: (pageSize.height - 380) / 2 } };
       },
       content: [
         // Header
@@ -1080,6 +1114,8 @@ const PdfGenerator = {
     };
 
     const logo = getLogoBase64();
+    const letterhead = getLetterheadBase64();
+    const watermark = getWatermarkBase64();
     const currencySym = pi.currency_symbol || '$';
 
     const items = (pi.items || []).map((it, idx) => {
@@ -1117,17 +1153,22 @@ const PdfGenerator = {
       pageSize: 'A4',
       pageMargins: [35, 30, 35, 35],
       background: (currentPage, pageSize) => {
-        if (!logo) return null;
+        if (!watermark) return null;
         return {
-          image: logo,
-          width: 320,
+          image: watermark,
+          width: 340,
           opacity: 0.08,
-          absolutePosition: { x: (pageSize.width - 320) / 2, y: (pageSize.height - 320) / 2 }
+          absolutePosition: { x: (pageSize.width - 340) / 2, y: (pageSize.height - 340) / 2 }
         };
       },
       content: [
         // Top Letterhead
-        {
+        letterhead ? {
+          image: letterhead,
+          width: 525,
+          alignment: 'center',
+          margin: [0, 0, 0, 6]
+        } : {
           columns: [
             logo ? { image: logo, width: 55, height: 55, margin: [0, 0, 10, 0] } : { text: '', width: 0 },
             {
@@ -1164,11 +1205,15 @@ const PdfGenerator = {
               width: 210,
               alignment: 'right',
               stack: [
-                { text: 'BILL', bold: true, fontSize: 13, alignment: 'right', margin: [0, 0, 0, 4] },
-                { text: `Date : ${formatDate(pi.pi_date)}`, fontSize: 9, alignment: 'right', margin: [0, 0, 0, 4] },
-                { text: [{ text: 'BILL : ', bold: true }, { text: pi.bill_number || '-' }], fontSize: 9, alignment: 'right', margin: [0, 0, 0, 4] },
-                { text: `Date : ${formatDate(pi.bill_date || pi.pi_date)}`, fontSize: 9, alignment: 'right', margin: [0, 0, 0, 6] },
-                { text: [{ text: 'PROFORMA INVOICE NO. : ', bold: true }, { text: pi.pi_number || '-' }], fontSize: 9, bold: true, alignment: 'right', margin: [0, 0, 0, 4] }
+                { text: (pi.bill_number ? 'BILL' : 'PROFORMA INVOICE'), bold: true, fontSize: 13, alignment: 'right', margin: [0, 0, 0, 4] },
+                ...(pi.bill_number ? [
+                  { text: [{ text: 'BILL : ', bold: true }, { text: pi.bill_number || '-' }], fontSize: 9, alignment: 'right', margin: [0, 0, 0, 4] },
+                  { text: `Date : ${formatDate(pi.bill_date || pi.pi_date)}`, fontSize: 9, alignment: 'right', margin: [0, 0, 0, 6] },
+                  { text: [{ text: 'PROFORMA INVOICE NO. : ', bold: true }, { text: pi.pi_number || '-' }], fontSize: 9, bold: true, alignment: 'right', margin: [0, 0, 0, 4] }
+                ] : [
+                  { text: `Date : ${formatDate(pi.pi_date)}`, fontSize: 9, alignment: 'right', margin: [0, 0, 0, 4] },
+                  { text: [{ text: 'PROFORMA INVOICE NO. : ', bold: true }, { text: pi.pi_number || '-' }], fontSize: 9, bold: true, alignment: 'right', margin: [0, 0, 0, 4] }
+                ])
               ]
             }
           ],

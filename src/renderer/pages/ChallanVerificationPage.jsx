@@ -2,6 +2,7 @@ import ThemeToggle from '../components/common/ThemeToggle';
 import React, { useState, useEffect, useMemo } from 'react';
 import { CheckCircle2, Download, AlertTriangle, Shield, ShieldCheck, FileText, Phone, MapPin, User, Calendar, Info, RefreshCw, Hash, Clock, Building2, Package } from 'lucide-react';
 import logo from '../assets/logo.png';
+import watermarkLogo from '../assets/watermark.png';
 import pdfMake from 'pdfmake/build/pdfmake';
 import pdfFonts from 'pdfmake/build/vfs_fonts';
 import QRCode from 'qrcode';
@@ -136,7 +137,7 @@ export default function ChallanVerificationPage({ challanNumber }) {
     if (!challan) return;
     setDownloading(true);
     try {
-      const logoBase64 = await getBase64FromUrl(logo);
+      const logoBase64 = await getBase64FromUrl(watermarkLogo);
       const companyName = settings.company_name || 'KA Design Accessories LTD';
       const companyAddress = settings.company_address || '';
       const companyPhone = settings.company_phone || '';

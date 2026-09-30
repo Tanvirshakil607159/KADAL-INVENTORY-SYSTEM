@@ -718,6 +718,20 @@ export default function FinancePage() {
                                 >
                                   <Printer size={15} />
                                 </button>
+                                <button
+                                  className="btn btn-ghost btn-sm btn-icon"
+                                  onClick={async () => {
+                                    try {
+                                      const res = await window.kadal.finance.exportPdf(pi.id || pi);
+                                      if (res?.success) addToast('success', 'PDF exported successfully');
+                                    } catch (e) {
+                                      addToast('error', e.message || 'Failed to export PDF');
+                                    }
+                                  }}
+                                  title="Export PDF"
+                                >
+                                  <Download size={15} />
+                                </button>
                               </div>
                             </td>
                           </tr>
@@ -1157,13 +1171,30 @@ export default function FinancePage() {
                         </span>
                       </td>
                       <td style={{ padding: '12px 16px', textAlign: 'right' }}>
-                        <button
-                          className="btn btn-primary btn-sm"
-                          onClick={() => handlePreview(b, 'bill')}
-                          style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
-                        >
-                          <Printer size={13} /> View / Print Bill
-                        </button>
+                        <div style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                          <button
+                            className="btn btn-primary btn-sm"
+                            onClick={() => handlePreview(b, 'bill')}
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                          >
+                            <Printer size={13} /> View / Print
+                          </button>
+                          <button
+                            className="btn btn-outline btn-sm"
+                            onClick={async () => {
+                              try {
+                                const res = await window.kadal.finance.exportPdf(b.id || b);
+                                if (res?.success) addToast('success', 'PDF exported successfully');
+                              } catch (e) {
+                                addToast('error', e.message || 'Failed to export PDF');
+                              }
+                            }}
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                            title="Export Commercial Bill PDF"
+                          >
+                            <Download size={13} /> PDF
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -1377,6 +1408,14 @@ export default function FinancePage() {
               isModal={true}
               onClose={() => setPreviewPi(null)}
               onPrint={() => window.print()}
+              onExportPdf={async () => {
+                try {
+                  const res = await window.kadal.finance.exportPdf(previewPi.id || previewPi);
+                  if (res?.success) addToast('success', 'PDF exported successfully');
+                } catch (e) {
+                  addToast('error', e.message || 'Failed to export PDF');
+                }
+              }}
             />
           </div>
         </div>

@@ -1,6 +1,8 @@
 import React from 'react';
 import './ProformaInvoicePrintView.css';
 import logoImg from '../../assets/logo.png';
+import letterheadImg from '../../assets/letterhead.png';
+import watermarkImg from '../../assets/watermark.png';
 import { Printer, Download, X } from 'lucide-react';
 
 export default function ProformaInvoicePrintView({ 
@@ -74,19 +76,13 @@ export default function ProformaInvoicePrintView({
         {/* Background Watermark */}
         <div 
           className="pi-watermark" 
-          style={{ backgroundImage: `url(${logoImg})` }}
+          style={{ backgroundImage: `url(${watermarkImg})` }}
         />
 
         <div className="pi-content">
           {/* Header */}
           <div className="pi-header">
-            <img src={logoImg} alt="KADAL Logo" className="pi-header-logo" />
-            <div className="pi-header-text">
-              <h1 className="pi-company-title">K.A. DESIGN ACCESSORIES LTD.</h1>
-              <p className="pi-company-tagline">
-                A House of Quality Twill Tape, Herringbone Tape & Garments Accessories Manufacturer.
-              </p>
-            </div>
+            <img src={letterheadImg} alt="K.A. DESIGN ACCESSORIES LTD." className="pi-header-letterhead" />
           </div>
 
           {/* Meta Information Section */}
