@@ -6,6 +6,7 @@
     // Restore appearance before the first paint, including on desktop reloads.
     try {
       document.documentElement.dataset.theme = localStorage.getItem('kadal_theme') === 'light' ? 'light' : 'dark';
+      document.documentElement.dataset.motion = localStorage.getItem('kadal_motion') === 'paused' ? 'paused' : 'playful';
     } catch {}
   </script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />

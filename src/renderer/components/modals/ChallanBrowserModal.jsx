@@ -1,15 +1,19 @@
 import SearchableSelect from '../ui/SearchableSelect';
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import useStore from '../../store/useStore';
+import PaginationBar from '../common/PaginationBar';
 import { Plus, Search } from 'lucide-react';
+
+const PAGE_SIZE = 50;
 
 export default function ChallanBrowserModal({ data }) {
   const { closeModal, setModalMinimized, modal, challanItems, setChallanItems, addToast } = useStore();
-  const { items: allItems, distinctValues } = data;
+  const { items: allItems = [], distinctValues = {} } = data;
   const isMinimized = modal?.isMinimized;
 
   const [filters, setFilters] = useState({ search: '', style: '', order: '', purchase: '', buyer: '', category: '', size: '', color: '' });
   const [deliveredMap, setDeliveredMap] = useState({});
+  const [currentPage, setCurrentPage] = useState(0);
 
   React.useEffect(() => {
     let mounted = true;
@@ -19,29 +23,41 @@ export default function ChallanBrowserModal({ data }) {
     return () => { mounted = false; };
   }, []);
 
-  const sizes = [...new Set(allItems.map(i => i.size).filter(Boolean))];
-  const colors = [...new Set(allItems.map(i => i.color).filter(Boolean))];
-  const buyers = [...new Set(allItems.map(i => i.buyer_name).filter(Boolean))];
-  const categories = [...new Set(allItems.map(i => i.category_name).filter(Boolean))];
+  const sizes = useMemo(() => [...new Set(allItems.map(i => i.size).filter(Boolean))], [allItems]);
+  const colors = useMemo(() => [...new Set(allItems.map(i => i.color).filter(Boolean))], [allItems]);
+  const buyers = useMemo(() => [...new Set(allItems.map(i => i.buyer_name).filter(Boolean))], [allItems]);
+  const categories = useMemo(() => [...new Set(allItems.map(i => i.category_name).filter(Boolean))], [allItems]);
 
-  const filteredItems = allItems.filter(it => {
+  const filteredItems = useMemo(() => {
     const s = filters.search.toLowerCase();
-    const matchSearch = !s || 
-      it.name.toLowerCase().includes(s) || 
-      it.item_code.toLowerCase().includes(s) || 
-      (it.buyer_name || '').toLowerCase().includes(s) ||
-      (it.style_name || '').toLowerCase().includes(s) ||
-      (it.order_number || '').toLowerCase().includes(s) ||
-      (it.purchase_no || '').toLowerCase().includes(s);
-    const matchStyle = !filters.style || it.style_name === filters.style;
-    const matchOrder = !filters.order || it.order_number === filters.order;
-    const matchPurchase = !filters.purchase || it.purchase_no === filters.purchase;
-    const matchBuyer = !filters.buyer || it.buyer_name === filters.buyer;
-    const matchCategory = !filters.category || it.category_name === filters.category;
-    const matchSize = !filters.size || it.size === filters.size;
-    const matchColor = !filters.color || it.color === filters.color;
-    return matchSearch && matchStyle && matchOrder && matchPurchase && matchBuyer && matchCategory && matchSize && matchColor;
-  });
+    return allItems.filter(it => {
+      const matchSearch = !s || 
+        (it.name || '').toLowerCase().includes(s) || 
+        (it.item_code || '').toLowerCase().includes(s) || 
+        (it.buyer_name || '').toLowerCase().includes(s) ||
+        (it.style_name || '').toLowerCase().includes(s) ||
+        (it.order_number || '').toLowerCase().includes(s) ||
+        (it.purchase_no || '').toLowerCase().includes(s);
+      const matchStyle = !filters.style || it.style_name === filters.style;
+      const matchOrder = !filters.order || it.order_number === filters.order;
+      const matchPurchase = !filters.purchase || it.purchase_no === filters.purchase;
+      const matchBuyer = !filters.buyer || it.buyer_name === filters.buyer;
+      const matchCategory = !filters.category || it.category_name === filters.category;
+      const matchSize = !filters.size || it.size === filters.size;
+      const matchColor = !filters.color || it.color === filters.color;
+      return matchSearch && matchStyle && matchOrder && matchPurchase && matchBuyer && matchCategory && matchSize && matchColor;
+    });
+  }, [allItems, filters]);
+
+  useEffect(() => {
+    setCurrentPage(0);
+  }, [filters]);
+
+  const totalPages = Math.ceil(filteredItems.length / PAGE_SIZE);
+  const paginatedItems = useMemo(() => {
+    const start = currentPage * PAGE_SIZE;
+    return filteredItems.slice(start, start + PAGE_SIZE);
+  }, [filteredItems, currentPage]);
 
   const addItem = async (item) => {
     if (item.current_stock <= 0) return addToast('error', `"${item.name}" has no stock`);
@@ -115,7 +131,15 @@ export default function ChallanBrowserModal({ data }) {
             </SearchableSelect>
             {hasFilters && <button className="btn btn-ghost btn-sm" onClick={clearFilters} style={{ fontSize: 11 }}>✕ Clear</button>}
           </div>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>Showing {filteredItems.length} of {allItems.length} items • {challanItems.length} selected</div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>Showing {filteredItems.length} of {allItems.length} items • {challanItems.length} selected</div>
+          <PaginationBar
+            position="top"
+            currentPage={currentPage}
+            totalPages={totalPages}
+            totalItems={filteredItems.length}
+            pageSize={PAGE_SIZE}
+            onPageChange={setCurrentPage}
+          />
           {/* Table */}
           <div className="table-wrapper" style={{ maxHeight: 380 }}>
             <table className="data-table">
@@ -137,7 +161,7 @@ export default function ChallanBrowserModal({ data }) {
               </thead>
               <tbody>
                 {filteredItems.length === 0 && <tr><td colSpan={12} className="text-center text-muted" style={{ padding: 30 }}>No items match your filters</td></tr>}
-                {filteredItems.map(item => {
+                {paginatedItems.map(item => {
                   const added = challanItems.some(i => i.itemId === item.id);
                   const isLocked = data.lockedItemIds?.has(item.id);
                   const delivered = deliveredMap[item.id] || 0;
@@ -178,6 +202,14 @@ export default function ChallanBrowserModal({ data }) {
               </tbody>
             </table>
           </div>
+          <PaginationBar
+            position="bottom"
+            currentPage={currentPage}
+            totalPages={totalPages}
+            totalItems={filteredItems.length}
+            pageSize={PAGE_SIZE}
+            onPageChange={setCurrentPage}
+          />
         </div>
         <div className="modal-footer">
           <span className="text-muted" style={{ fontSize: 13 }}>{challanItems.length} items selected</span>

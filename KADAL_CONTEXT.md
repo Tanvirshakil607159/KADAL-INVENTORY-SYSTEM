@@ -64,6 +64,14 @@ Authentication uses custom bcrypt password checks and an in-memory desktop sessi
 
 ## Working and validation context
 
+### Playful interface (added 2026-10-01)
+
+`src/renderer/styles/playful.css`, loaded after the base and theme styles, adds colored icon tiles, rounded controls, tactile primary actions, and shared styling for forms, tables, tabs, dialogs, and searchable menus. It keeps the dark foundation and dim off-white light surfaces. The dashboard groups its existing ten metrics into four stock cards and six activity counters, with a decorative CSS parcel character and a read-only refresh action. Failed refreshes retain the last loaded figures and display an error; initial failures do not display invented zero values.
+
+Lucide icons have gentle idle and hover/focus animations; barcode SVGs are excluded. Animation preferences are device-local (`localStorage.kadal_motion`), restored before paint, synchronized across tabs, and controlled from the top bar or Settings > Appearance. System reduced-motion preferences and print rendering disable animations. Mobile navigation uses Zustand `sidebarOpen`, an inert closed sidebar, backdrop dismissal, Escape, focus restoration, and keyboard focus containment while open. Existing navigation permission checks are retained.
+
+Validation used a production renderer build and an isolated browser with mocked `window.kadal` responses, covering themes, motion/persistence, dashboard refresh/error/empty states, filters, item dialog rendering, and mobile navigation. Preview images under ignored `exports/` contain sample data, not production records. No installer was packaged or release published for this UI change.
+
 ### Searchable filters (added 2026-09-16)
 
 The 35 dropdown filters in Inventory, Reports, Challan History, Issue history, production categories, Requisition history, and the Challan/Issue/Target Product browsers use `src/renderer/components/ui/SearchableSelect.jsx`. Existing option values and filtering handlers are preserved through `onValueChange(value)`. Typing narrows choices without applying a partial value; exact and prefix matches come first, followed by other matches, with natural alphabetical/numeric sorting. Click or Enter selects; Escape and Tab preserve the prior selection. The empty-value “All…” option clears the filter. Menus render in a portal so dialog overflow does not clip them, and use the current light/dark palette. Form-entry selectors and date inputs retain their existing behavior.

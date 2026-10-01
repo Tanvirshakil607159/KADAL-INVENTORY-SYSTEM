@@ -1,20 +1,20 @@
 import React from 'react';
 import useStore from '../../store/useStore';
-import { Home, LayoutDashboard, Package, FileText, History, BarChart3, Settings, HardDrive, LogOut, CheckCircle, Send, Factory, ChevronRight, ArrowDownUp, Landmark, PackageCheck } from 'lucide-react';
+import { Home, LayoutDashboard, Package, PackageOpen, Warehouse, ClipboardList, Truck, BarChart3, Settings, HardDrive, LogOut, CheckCircle, Send, Factory, ChevronRight, ArrowDownUp, Landmark, PackageCheck, Hourglass, X } from 'lucide-react';
 
 const navItems = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'inventory', label: 'Inventory', icon: Package },
   { id: 'stock-in-out', label: 'Stock In & Out', icon: ArrowDownUp },
-  { id: 'pending-items', label: 'Pending Items', icon: Package },
-  { id: 'warehouses', label: 'Warehouses', icon: Package },
-  { id: 'challan', label: 'Create Challan', icon: FileText },
+  { id: 'pending-items', label: 'Pending Items', icon: Hourglass },
+  { id: 'warehouses', label: 'Warehouses', icon: Warehouse },
+  { id: 'challan', label: 'Create Challan', icon: ClipboardList },
   { id: 'challan-receipt', label: 'Challan Receipt', icon: PackageCheck },
   { id: 'finance', label: 'Finance', icon: Landmark },
   { id: 'approvals', label: 'Approvals', icon: CheckCircle },
-  { id: 'gate-pass', label: 'Gate Pass', icon: FileText },
+  { id: 'gate-pass', label: 'Gate Pass', icon: Truck },
   { id: 'requisition', label: 'Requisition', icon: Send },
-  { id: 'issue', label: 'Issue', icon: Send },
+  { id: 'issue', label: 'Issue', icon: PackageOpen },
   { id: 'production', label: 'Production', icon: Factory },
   { id: 'reports', label: 'Reports', icon: BarChart3 },
   { id: 'settings', label: 'Settings', icon: Settings },
@@ -22,7 +22,39 @@ const navItems = [
 ];
 
 export default function Sidebar() {
-  const { currentPage, setPage, user, logout, addToast, notificationDots, clearNotificationDot, setShowLanding } = useStore();
+  const { currentPage, setPage, user, logout, addToast, notificationDots, clearNotificationDot, setShowLanding, sidebarOpen, setSidebarOpen } = useStore();
+  const sidebarRef = React.useRef(null);
+  const [isMobile, setIsMobile] = React.useState(() => window.matchMedia('(max-width: 768px)').matches);
+  const closeNavigation = () => {
+    setSidebarOpen(false);
+    document.getElementById('navigation-toggle')?.focus();
+  };
+
+  React.useEffect(() => {
+    const media = window.matchMedia('(max-width: 768px)');
+    const onChange = () => { setIsMobile(media.matches); setSidebarOpen(false); };
+    media.addEventListener('change', onChange);
+    return () => media.removeEventListener('change', onChange);
+  }, [setSidebarOpen]);
+
+  React.useEffect(() => {
+    if (!sidebarOpen || !isMobile) return;
+    sidebarRef.current?.querySelector('button')?.focus();
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        setSidebarOpen(false);
+        document.getElementById('navigation-toggle')?.focus();
+      }
+      if (event.key === 'Tab') {
+        const buttons = [...sidebarRef.current.querySelectorAll('button')];
+        const first = buttons[0], last = buttons[buttons.length - 1];
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [sidebarOpen, isMobile, setSidebarOpen]);
 
   const handleLogout = async () => {
     try {
@@ -34,6 +66,7 @@ export default function Sidebar() {
 
   const handleNavClick = (itemId) => {
     setPage(itemId);
+    if (isMobile) document.getElementById('navigation-toggle')?.focus();
     // Clear the red dot when user clicks the module
     if (notificationDots[itemId]) {
       clearNotificationDot(itemId);
@@ -65,22 +98,28 @@ export default function Sidebar() {
   }, [currentPage]);
 
   return (
-    <aside className="sidebar">
-      <div className="sidebar-brand" onClick={() => setShowLanding(true)} style={{ cursor: 'pointer' }} title="Go to Home / Landing Slideshow">
-        <h1>KADAL</h1>
-        <p>KA Design Accessories</p>
+    <>
+    {sidebarOpen && <button className="sidebar-backdrop" aria-label="Close navigation" tabIndex={-1} onClick={closeNavigation} />}
+    <aside id="app-sidebar" ref={sidebarRef} className={`sidebar ${sidebarOpen ? 'active' : ''}`} inert={isMobile && !sidebarOpen} aria-label="Main navigation">
+      <div className="sidebar-brand">
+        <button className="brand-link" onClick={() => setShowLanding(true)} title="Go to Home / Showcase">
+          <span className="brand-mark"><PackageOpen size={25} /></span>
+          <span><strong>KADAL<span className="brand-dot">.</span></strong><small>KA Design Accessories</small></span>
+        </button>
+        <button className="btn-icon sidebar-close" aria-label="Close navigation" onClick={closeNavigation}><X size={18} /></button>
       </div>
-      <nav className="sidebar-nav">
-        <div
+      <nav className="sidebar-nav" aria-label="Inventory modules">
+        <button
           className="sidebar-nav-item sidebar-home-item"
           onClick={() => setShowLanding(true)}
           title="Go to Home / Landing Slideshow (keeps you logged in)"
         >
-          <Home size={16} />
+          <span className="nav-icon"><Home size={17} /></span>
           <span style={{ flex: 1 }}>Home / Showcase</span>
           <ChevronRight size={12} style={{ opacity: 0.6 }} />
-        </div>
-        {navItems.map(item => {
+        </button>
+        <div className="nav-section-label">LET’S GET THINGS MOVING</div>
+        {navItems.map((item, index) => {
           const Icon = item.icon;
           const permsObj = typeof user?.permissions === 'string' ? JSON.parse(user.permissions) : (user?.permissions || {});
           const hasExplicitPerm = permsObj && Object.prototype.hasOwnProperty.call(permsObj, item.id);
@@ -124,28 +163,31 @@ export default function Sidebar() {
           }
           const hasDot = notificationDots[item.id];
           return (
-            <div
+            <button
               key={item.id}
               className={`sidebar-nav-item ${currentPage === item.id ? 'active' : ''}`}
               onClick={() => handleNavClick(item.id)}
-              style={{ position: 'relative' }}
+              aria-current={currentPage === item.id ? 'page' : undefined}
+              style={{ '--icon-delay': `${index * -0.47}s` }}
+              data-tone={['violet', 'mint', 'peach', 'rose'][index % 4]}
             >
-              <Icon size={16} />
+              <span className="nav-icon"><Icon size={17} /></span>
               <span style={{ flex: 1 }}>{item.label}</span>
               {hasDot && (
-                <span className="nav-dot" />
+                <span className="nav-dot" aria-label="New activity" />
               )}
               <ChevronRight size={12} style={{ opacity: 0.4 }} />
-            </div>
+            </button>
           );
         })}
       </nav>
       <div className="sidebar-footer">
-        <div className="sidebar-nav-item" onClick={handleLogout} style={{ color: 'var(--logout-color)' }}>
-          <LogOut size={16} /> <span>Logout</span>
-        </div>
-        <div className="app-version">v{version}</div>
+        <button className="sidebar-nav-item" onClick={handleLogout} style={{ color: 'var(--logout-color)' }}>
+          <span className="nav-icon"><LogOut size={17} /></span> <span>Logout</span>
+        </button>
+        <div className="app-version">Made for your everyday <span>v{version}</span></div>
       </div>
     </aside>
+    </>
   );
 }

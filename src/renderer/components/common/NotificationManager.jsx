@@ -14,7 +14,7 @@ export default function NotificationManager() {
       try {
         // 1. Admin: Check for pending approvals → red dot on "approvals"
         if (user.roleName === 'Admin' || user.roleName === 'Super Admin') {
-          const pendingRes = await window.kadal.approvals.getAll({ status: 'PENDING' });
+          const pendingRes = await window.kadal.approvals.getAll({ status: 'PENDING', simple: true });
           if (pendingRes.success) {
             const hasPending = pendingRes.data.length > 0;
             setNotificationDot('approvals', hasPending);
@@ -39,7 +39,7 @@ export default function NotificationManager() {
         }
 
         // 2. Everyone: Check for status updates on my requests
-        const myRes = await window.kadal.approvals.getAll({ requestedBy: user.id });
+        const myRes = await window.kadal.approvals.getAll({ requestedBy: user.id, simple: true });
         if (myRes.success && myRes.data.length > 0) {
           const processed = myRes.data.filter(r => r.status !== 'PENDING');
           
@@ -92,8 +92,8 @@ export default function NotificationManager() {
     // Check immediately on load
     checkNotifications();
 
-    // Then check every 10 seconds
-    const interval = setInterval(checkNotifications, 10000);
+    // Check every 30 seconds
+    const interval = setInterval(checkNotifications, 30000);
     return () => clearInterval(interval);
   }, [user, addToast, setNotificationDot]);
 

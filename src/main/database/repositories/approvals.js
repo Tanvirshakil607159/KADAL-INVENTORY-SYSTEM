@@ -17,6 +17,21 @@ const ApprovalsRepo = {
         }
         throw error;
       }
+
+      if (filters.simple) {
+        return data.map(a => {
+          let parsedData = a.data;
+          try {
+            if (typeof a.data === 'string') parsedData = JSON.parse(a.data);
+          } catch (e) {}
+          return {
+            ...a,
+            requester_name: a.users?.full_name,
+            data: parsedData
+          };
+        });
+      }
+
       // Batch enrich STOCK_MOVEMENT items with item details
       let itemMap = {};
       try {

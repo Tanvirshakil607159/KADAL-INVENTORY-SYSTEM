@@ -1,15 +1,21 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
+import ErrorBoundary from './components/common/ErrorBoundary';
 import './styles/index.css';
 import './styles/themes.css';
+import './styles/playful.css';
 import { webBridge } from './web/web-bridge';
 import useStore from './store/useStore';
 import { THEME_STORAGE_KEY, readTheme } from './theme';
+import { MOTION_STORAGE_KEY, readMotion } from './motion';
 
 window.addEventListener('storage', (event) => {
   if (event.key === THEME_STORAGE_KEY || event.key === null) {
     useStore.getState().setTheme(readTheme(), false);
+  }
+  if (event.key === MOTION_STORAGE_KEY || event.key === null) {
+    useStore.getState().setMotionEnabled(readMotion(), false);
   }
 });
 
@@ -44,7 +50,9 @@ async function init() {
 
   ReactDOM.createRoot(document.getElementById('root')).render(
     <React.StrictMode>
-      <App />
+      <ErrorBoundary>
+        <App />
+      </ErrorBoundary>
     </React.StrictMode>
   );
 }

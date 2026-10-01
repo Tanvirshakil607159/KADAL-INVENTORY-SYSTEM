@@ -1,7 +1,25 @@
 import SearchableSelect from '../components/ui/SearchableSelect';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import useStore from '../store/useStore';
+import PaginationBar from '../components/common/PaginationBar';
 import { Search, FileText, XCircle, Eye, Download, FileSpreadsheet, Trash2, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+
+const PAGE_SIZE = 50;
+
+const SortHeader = React.memo(({ label, field, className = "", sortConfig, onSort }) => (
+  <th 
+    className={`sortable ${className}`} 
+    onClick={() => onSort(field)}
+  >
+    <div className="flex items-center justify-between">
+      {label}
+      <span className={`sort-icon-container ${sortConfig.key === field ? 'active' : ''}`}>
+        {sortConfig.key !== field ? <ArrowUpDown size={12} /> : 
+         sortConfig.direction === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />}
+      </span>
+    </div>
+  </th>
+));
 
 export default function ChallanHistoryPage() {
   const { addToast, showConfirm, user } = useStore();
@@ -13,46 +31,44 @@ export default function ChallanHistoryPage() {
   const [dateTo, setDateTo] = useState('');
   const [detail, setDetail] = useState(null);
   const [sortConfig, setSortConfig] = useState({ key: 'challan_number', direction: 'desc' });
+  const [currentPage, setCurrentPage] = useState(0);
 
-  const handleSort = (key) => {
+  const handleSort = useCallback((key) => {
     setSortConfig(prev => ({
       key,
       direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc'
     }));
-  };
+  }, []);
 
-  const sortedChallans = [...challans].sort((a, b) => {
-    if (!sortConfig.key) return 0;
-    let valA = a[sortConfig.key];
-    let valB = b[sortConfig.key];
-    
-    if (['total_quantity', 'id'].includes(sortConfig.key)) {
-      valA = Number(valA) || 0;
-      valB = Number(valB) || 0;
-    } else {
-      valA = (valA || '').toString().toLowerCase();
-      valB = (valB || '').toString().toLowerCase();
-    }
+  const sortedChallans = useMemo(() => {
+    return [...challans].sort((a, b) => {
+      if (!sortConfig.key) return 0;
+      let valA = a[sortConfig.key];
+      let valB = b[sortConfig.key];
+      
+      if (['total_quantity', 'id'].includes(sortConfig.key)) {
+        valA = Number(valA) || 0;
+        valB = Number(valB) || 0;
+      } else {
+        valA = (valA || '').toString().toLowerCase();
+        valB = (valB || '').toString().toLowerCase();
+      }
 
-    if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
-    if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
-    return 0;
-  });
+      if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
+      if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }, [challans, sortConfig]);
 
-  const SortHeader = ({ label, field, className = "" }) => (
-    <th 
-      className={`sortable ${className}`} 
-      onClick={() => handleSort(field)}
-    >
-      <div className="flex items-center justify-between">
-        {label}
-        <span className={`sort-icon-container ${sortConfig.key === field ? 'active' : ''}`}>
-          {sortConfig.key !== field ? <ArrowUpDown size={12} /> : 
-           sortConfig.direction === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />}
-        </span>
-      </div>
-    </th>
-  );
+  const totalPages = Math.ceil(sortedChallans.length / PAGE_SIZE);
+  const paginatedChallans = useMemo(() => {
+    const start = currentPage * PAGE_SIZE;
+    return sortedChallans.slice(start, start + PAGE_SIZE);
+  }, [sortedChallans, currentPage]);
+
+  useEffect(() => {
+    setCurrentPage(0);
+  }, [challans]);
 
   const loadData = async () => {
     setLoading(true);
@@ -257,46 +273,64 @@ export default function ChallanHistoryPage() {
       {loading ? <div className="loading"><div className="spinner"></div></div> : challans.length === 0 ? (
         <div className="empty-state"><FileText size={48} /><h3>No challans found</h3><p>Create your first challan to see it here</p></div>
       ) : (
-        <div className="table-wrapper">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <SortHeader label="Challan No" field="challan_number" />
-                <SortHeader label="Date" field="challan_date" />
-                <SortHeader label="Receiver" field="receiver_name" />
-                <SortHeader label="Items" field="item_names" />
-                <SortHeader label="Qty" field="total_quantity" className="text-right" />
-                <SortHeader label="Status" field="status" />
-                <SortHeader label="Created By" field="created_by_name" />
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sortedChallans.map(c => (
-                <tr key={c.id}>
-                  <td className="text-mono" style={{ fontSize: 12, color: 'var(--accent)' }}>{c.challan_number}</td>
-                  <td>{new Date(c.challan_date).toLocaleDateString('en-GB')}</td>
-                  <td style={{ fontWeight: 600 }}>{c.receiver_name}</td>
-                  <td className="text-muted" style={{ maxWidth: 200, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={c.item_names}>{c.item_names || '-'}</td>
-                  <td className="text-right text-mono fw-bold">{c.total_quantity}</td>
-                  <td><span className={`badge badge-${c.status === 'ACTIVE' ? 'success' : 'danger'}`}>{c.status === 'ACTIVE' ? 'Active' : 'Inactive'}</span></td>
-                  <td className="text-muted">{c.created_by_name}</td>
-                  <td>
-                    <div className="table-actions">
-                      <button className="btn btn-ghost btn-icon btn-sm" title="View" onClick={() => viewDetail(c.id)}><Eye size={15} /></button>
-                      <button className="btn btn-ghost btn-icon btn-sm" title="PDF" onClick={() => exportPdf(c.id)}><Download size={15} color="var(--accent)" /></button>
-                      {(user?.roleName === 'Super Admin' || user?.role_name === 'Super Admin') && (
-                        <button className="btn btn-ghost btn-icon btn-sm" title="Delete Permanently" onClick={() => handleDelete(c)}>
-                          <Trash2 size={15} color="var(--danger)" />
-                        </button>
-                      )}
-                    </div>
-                  </td>
+        <>
+          <PaginationBar
+            position="top"
+            currentPage={currentPage}
+            totalPages={totalPages}
+            totalItems={sortedChallans.length}
+            pageSize={PAGE_SIZE}
+            onPageChange={setCurrentPage}
+          />
+          <div className="table-wrapper">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <SortHeader label="Challan No" field="challan_number" sortConfig={sortConfig} onSort={handleSort} />
+                  <SortHeader label="Date" field="challan_date" sortConfig={sortConfig} onSort={handleSort} />
+                  <SortHeader label="Receiver" field="receiver_name" sortConfig={sortConfig} onSort={handleSort} />
+                  <SortHeader label="Items" field="item_names" sortConfig={sortConfig} onSort={handleSort} />
+                  <SortHeader label="Qty" field="total_quantity" className="text-right" sortConfig={sortConfig} onSort={handleSort} />
+                  <SortHeader label="Status" field="status" sortConfig={sortConfig} onSort={handleSort} />
+                  <SortHeader label="Created By" field="created_by_name" sortConfig={sortConfig} onSort={handleSort} />
+                  <th>Actions</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {paginatedChallans.map(c => (
+                  <tr key={c.id}>
+                    <td className="text-mono" style={{ fontSize: 12, color: 'var(--accent)' }}>{c.challan_number}</td>
+                    <td>{new Date(c.challan_date).toLocaleDateString('en-GB')}</td>
+                    <td style={{ fontWeight: 600 }}>{c.receiver_name}</td>
+                    <td className="text-muted" style={{ maxWidth: 200, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={c.item_names}>{c.item_names || '-'}</td>
+                    <td className="text-right text-mono fw-bold">{c.total_quantity}</td>
+                    <td><span className={`badge badge-${c.status === 'ACTIVE' ? 'success' : 'danger'}`}>{c.status === 'ACTIVE' ? 'Active' : 'Inactive'}</span></td>
+                    <td className="text-muted">{c.created_by_name}</td>
+                    <td>
+                      <div className="table-actions">
+                        <button className="btn btn-ghost btn-icon btn-sm" title="View" onClick={() => viewDetail(c.id)}><Eye size={15} /></button>
+                        <button className="btn btn-ghost btn-icon btn-sm" title="PDF" onClick={() => exportPdf(c.id)}><Download size={15} color="var(--accent)" /></button>
+                        {(user?.roleName === 'Super Admin' || user?.role_name === 'Super Admin') && (
+                          <button className="btn btn-ghost btn-icon btn-sm" title="Delete Permanently" onClick={() => handleDelete(c)}>
+                            <Trash2 size={15} color="var(--danger)" />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <PaginationBar
+            position="bottom"
+            currentPage={currentPage}
+            totalPages={totalPages}
+            totalItems={sortedChallans.length}
+            pageSize={PAGE_SIZE}
+            onPageChange={setCurrentPage}
+          />
+        </>
       )}
     </div>
   );

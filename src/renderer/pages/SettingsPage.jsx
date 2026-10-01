@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import useStore from '../store/useStore';
-import { Moon, Sun, Check } from 'lucide-react';
+import { Moon, Sun, Check, Sparkles } from 'lucide-react';
 import { Save, Plus, Trash2, Edit2, Users, Tag, Truck, Building, Upload, FileSpreadsheet, Link, CheckCircle, AlertCircle, Download, Cloud, RefreshCw, ArrowUpCircle, ArrowDownCircle, FolderOpen, XCircle } from 'lucide-react';
 
 const TABS = [
@@ -42,7 +42,7 @@ export default function SettingsPage() {
             className={`tab ${activeTab === t.id ? 'active' : ''}`}
             onClick={() => setActiveTab(t.id)}
           >
-            {t.label}
+            <t.icon size={15} aria-hidden="true" />{t.label}
           </button>
         ))}
       </div>
@@ -62,7 +62,7 @@ export default function SettingsPage() {
 }
 
 function AppearanceSettings() {
-  const { theme, setTheme } = useStore();
+  const { theme, setTheme, motionEnabled, setMotionEnabled } = useStore();
   return (
     <section className="card appearance-settings" aria-labelledby="appearance-title">
       <h3 id="appearance-title">Appearance</h3>
@@ -81,6 +81,11 @@ function AppearanceSettings() {
           </button>
         ))}
       </div>
+      <label className="motion-setting">
+        <span className="section-icon" data-tone="violet"><Sparkles size={20} /></span>
+        <span className="motion-setting-copy"><strong>A little motion</strong><span>Playful icons and gentle animations. Your device’s reduced-motion preference is always respected.</span></span>
+        <input type="checkbox" role="switch" aria-label="Playful animations" checked={motionEnabled} onChange={event => setMotionEnabled(event.target.checked)} />
+      </label>
     </section>
   );
 }

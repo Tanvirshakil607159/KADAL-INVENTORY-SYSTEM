@@ -27,7 +27,7 @@ export default function FinancePage() {
 
   // Dropdown reference data
   const [recipients, setRecipients] = useState([]);
-  const [inventoryItems, setInventoryItems] = useState([]);
+  const [orderNumbers, setOrderNumbers] = useState([]);
 
   // ==================== CREATE PI FORM STATE ====================
   const [selectedRecipientId, setSelectedRecipientId] = useState('');
@@ -65,30 +65,55 @@ export default function FinancePage() {
   // ==================== ORDER MODAL STATE ====================
   const [orderModalOpen, setOrderModalOpen] = useState(false);
   const [selectedOrderNo, setSelectedOrderNo] = useState('');
+  const [orderFilterQuery, setOrderFilterQuery] = useState('');
+  const [orderItems, setOrderItems] = useState([]);
+  const [loadingOrderItems, setLoadingOrderItems] = useState(false);
   const [selectedItemsFromOrder, setSelectedItemsFromOrder] = useState(new Set());
 
-  const uniqueOrders = useMemo(() => {
-    const orders = new Set();
-    inventoryItems.forEach(it => {
-      if (it.order_number) orders.add(it.order_number);
-    });
-    return Array.from(orders).sort();
-  }, [inventoryItems]);
+  // ==================== ITEM PICKER MODAL (FOR MANUAL LINE ITEMS) ====================
+  const [itemPickerIndex, setItemPickerIndex] = useState(null);
+  const [itemSearchQuery, setItemSearchQuery] = useState('');
+  const [itemSearchResults, setItemSearchResults] = useState([]);
+  const [loadingItemSearch, setLoadingItemSearch] = useState(false);
 
-  const itemsInSelectedOrder = useMemo(() => {
-    if (!selectedOrderNo) return [];
-    return inventoryItems.filter(it => it.order_number === selectedOrderNo);
-  }, [selectedOrderNo, inventoryItems]);
+  const visibleOrders = useMemo(() => {
+    if (!orderFilterQuery.trim()) return orderNumbers;
+    const q = orderFilterQuery.toLowerCase().trim();
+    return orderNumbers.filter(o => o && o.toLowerCase().includes(q));
+  }, [orderNumbers, orderFilterQuery]);
+
+  // Load items for the selected order on demand (ultra-fast, only loads items in that order)
+  useEffect(() => {
+    if (!selectedOrderNo) {
+      setOrderItems([]);
+      return;
+    }
+    let isCurrent = true;
+    setLoadingOrderItems(true);
+    window.kadal.items.getAll({ orderNumber: selectedOrderNo }).then(res => {
+      if (isCurrent) {
+        const items = res?.success ? (res.data || []) : (Array.isArray(res) ? res : []);
+        setOrderItems(items);
+        setLoadingOrderItems(false);
+      }
+    }).catch(err => {
+      console.error('Failed to load items for order:', err);
+      if (isCurrent) setLoadingOrderItems(false);
+    });
+    return () => { isCurrent = false; };
+  }, [selectedOrderNo]);
 
   const handleAddSelectedFromOrder = () => {
-    const newItems = itemsInSelectedOrder
+    const newItems = orderItems
       .filter(it => selectedItemsFromOrder.has(it.id))
       .map(it => {
         const rate = Number(it.unit_price) || 0;
         const qty = Number(it.order_quantity) || Number(it.current_stock) || 1000;
         return {
+          uid: 'pi-' + Math.random().toString(36).slice(2) + '-' + Date.now(),
           itemId: it.id,
-          itemDescription: it.name,
+          itemCode: it.item_code || '',
+          itemDescription: it.name || '',
           poStyleNo: it.style_name || it.order_number || it.purchase_no || '',
           quantity: qty,
           unit: (it.unit || 'PCS').toUpperCase(),
@@ -105,8 +130,39 @@ export default function FinancePage() {
 
     setOrderModalOpen(false);
     setSelectedOrderNo('');
+    setOrderFilterQuery('');
     setSelectedItemsFromOrder(new Set());
+    addToast('success', `Added ${newItems.length} item(s) to Proforma Invoice`);
   };
+
+  // Debounced search for manual item picker
+  useEffect(() => {
+    if (itemPickerIndex === null) {
+      setItemSearchResults([]);
+      setItemSearchQuery('');
+      return;
+    }
+    let isCurrent = true;
+    const timer = setTimeout(async () => {
+      setLoadingItemSearch(true);
+      try {
+        const res = await window.kadal.items.getAll({ search: itemSearchQuery.trim() || undefined });
+        if (isCurrent) {
+          const list = res?.success ? (res.data || []) : (Array.isArray(res) ? res : []);
+          setItemSearchResults(list.slice(0, 30));
+        }
+      } catch (e) {
+        console.error('Failed to search items:', e);
+      } finally {
+        if (isCurrent) setLoadingItemSearch(false);
+      }
+    }, 200);
+
+    return () => {
+      isCurrent = false;
+      clearTimeout(timer);
+    };
+  }, [itemPickerIndex, itemSearchQuery]);
 
   // Auto-generate next PI number
   const generateNextPiNumber = useCallback(async (applicant = '') => {
@@ -123,9 +179,9 @@ export default function FinancePage() {
   const loadInitialData = useCallback(async () => {
     setLoading(true);
     try {
-      const [recRes, itemRes, finRes, buyersRes] = await Promise.all([
+      const [recRes, dvRes, finRes, buyersRes] = await Promise.all([
         window.kadal.recipients.getAll().catch(() => ({ success: false, data: [] })),
-        window.kadal.items.getAll({}).catch(() => ({ success: false, data: [] })),
+        window.kadal.items.getDistinctValues().catch(() => ({ success: false, data: {} })),
         window.kadal.finance.getAll().catch(() => ({ success: false, data: [] })),
         window.kadal.buyers.getAll().catch(() => ({ success: false, data: [] }))
       ]);
@@ -133,18 +189,17 @@ export default function FinancePage() {
       if (recRes?.success) setRecipients(recRes.data || []);
       else if (Array.isArray(recRes)) setRecipients(recRes);
 
-      if (itemRes?.success) setInventoryItems(itemRes.data || []);
-      else if (Array.isArray(itemRes)) setInventoryItems(itemRes);
-
       if (finRes?.success) setRecords(finRes.data || []);
       else if (Array.isArray(finRes)) setRecords(finRes);
 
+      const dv = dvRes?.success ? (dvRes.data || {}) : (dvRes || {});
+      setOrderNumbers(dv.orders || []);
+
       const bRaw = buyersRes?.success ? (buyersRes.data || []) : (Array.isArray(buyersRes) ? buyersRes : []);
       const bSet = new Set(bRaw.map(b => (b.name || '').trim()).filter(Boolean));
-      // Also collect any buyer names from items
-      const itArr = itemRes?.data || (Array.isArray(itemRes) ? itemRes : []);
-      itArr.forEach(it => {
-        if (it.buyer_name) bSet.add(it.buyer_name.trim());
+      // Also collect any buyer names from distinct values
+      (dv.buyers || []).forEach(b => {
+        if (b) bSet.add(String(b).trim());
       });
       setBuyersList(Array.from(bSet).sort());
     } catch (e) {
@@ -187,22 +242,23 @@ export default function FinancePage() {
     setPiItems(prev => [
       ...prev,
       {
+        uid: 'pi-' + Math.random().toString(36).slice(2) + '-' + Date.now(),
         slNo: prev.length + 1,
         itemId: null,
+        itemCode: '',
         itemDescription: '',
         poStyleNo: '',
         quantity: 1000,
         unit: 'PCS',
         unitPrice: 0.05,
-        totalAmount: 50.00
+        totalAmount: 50.00,
+        isReadOnly: false
       }
     ]);
   };
 
-  const handleSelectInventoryItem = (index, itemId) => {
-    const it = inventoryItems.find(i => i.id === Number(itemId));
+  const handleSelectInventoryItem = (index, it) => {
     if (!it) return;
-
     setPiItems(prev => prev.map((item, idx) => {
       if (idx !== index) return item;
       const rate = Number(it.unit_price) || 0;
@@ -210,11 +266,25 @@ export default function FinancePage() {
       return {
         ...item,
         itemId: it.id,
-        itemDescription: it.name,
-        poStyleNo: it.style_name || it.order_number || it.purchase_no || item.poStyleNo,
+        itemCode: it.item_code || '',
+        itemDescription: it.name || item.itemDescription || '',
+        poStyleNo: it.style_name || it.order_number || it.purchase_no || item.poStyleNo || '',
         unit: (it.unit || 'PCS').toUpperCase(),
         unitPrice: rate,
         totalAmount: Number((qty * rate).toFixed(2))
+      };
+    }));
+    setItemPickerIndex(null);
+    setItemSearchQuery('');
+  };
+
+  const handleClearItemLink = (index) => {
+    setPiItems(prev => prev.map((item, idx) => {
+      if (idx !== index) return item;
+      return {
+        ...item,
+        itemId: null,
+        itemCode: ''
       };
     }));
   };
@@ -242,12 +312,17 @@ export default function FinancePage() {
   }, [piItems]);
 
   const totalAmount = useMemo(() => {
-    return Number(piItems.reduce((sum, it) => sum + (Number(it.totalAmount) || 0), 0).toFixed(2));
+    return Number(piItems.reduce((sum, it) => sum + (Number(it.totalAmount) || 0), 0).toFixed(2)) || 0;
   }, [piItems]);
 
   const amountInWords = useMemo(() => {
-    if (totalAmount <= 0) return 'ZERO ONLY';
-    return `IN WORDS: ${numberToCurrencyWords(totalAmount, currency)}`;
+    try {
+      if (!totalAmount || totalAmount <= 0 || isNaN(totalAmount)) return 'ZERO ONLY';
+      return `IN WORDS: ${numberToCurrencyWords(totalAmount, currency)}`;
+    } catch (e) {
+      console.error('Error converting amount to words:', e);
+      return 'ZERO ONLY';
+    }
   }, [totalAmount, currency]);
 
   // Currency handler
@@ -905,7 +980,7 @@ export default function FinancePage() {
                     <thead>
                       <tr style={{ background: 'var(--bg-base)', borderBottom: '1px solid var(--border)', color: 'var(--text-muted)' }}>
                         <th style={{ padding: '8px 10px', width: 40 }}>#</th>
-                        <th style={{ padding: '8px 10px', width: 220 }}>SELECT INVENTORY ITEM (OPTIONAL)</th>
+                        <th style={{ padding: '8px 10px', width: 200 }}>INVENTORY LINK</th>
                         <th style={{ padding: '8px 10px' }}>ITEM DESCRIPTION *</th>
                         <th style={{ padding: '8px 10px', width: 140 }}>PO / STYLE NO.</th>
                         <th style={{ padding: '8px 10px', width: 110, textAlign: 'right' }}>ORDER QTY *</th>
@@ -919,44 +994,109 @@ export default function FinancePage() {
                       {piItems.length === 0 ? (
                         <tr>
                           <td colSpan={9} style={{ padding: 30, textAlign: 'center', color: 'var(--text-muted)' }}>
-                            No items added yet. Click "+ Add Line Item" above to add accessories to this Proforma Invoice.
+                            No items added yet. Click "Load from Order" or "+ Add Line Item" above to add items to this Proforma Invoice.
                           </td>
                         </tr>
                       ) : (
                         piItems.map((item, idx) => (
-                          <tr key={idx} style={{ borderBottom: '1px solid var(--border)' }}>
+                          <tr key={item.uid || idx} style={{ borderBottom: '1px solid var(--border)' }}>
                             <td style={{ padding: '8px 10px', color: 'var(--text-muted)' }}>{idx + 1}</td>
                             <td style={{ padding: '8px 10px' }}>
-                              <select
-                                value={item.itemId || ''}
-                                onChange={e => handleSelectInventoryItem(idx, e.target.value)}
-                                disabled={item.isReadOnly}
-                                style={{ width: '100%', padding: '5px 8px', borderRadius: 4, border: '1px solid var(--border)', fontSize: 12, background: item.isReadOnly ? 'var(--bg-card)' : 'var(--bg-base)', opacity: item.isReadOnly ? 0.7 : 1 }}
-                              >
-                                <option value="">-- Or type manually --</option>
-                                {inventoryItems.map(inv => (
-                                  <option key={inv.id} value={inv.id}>{inv.name} ({inv.item_code})</option>
-                                ))}
-                              </select>
+                              {item.isReadOnly ? (
+                                <span style={{ 
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  padding: '3px 8px', 
+                                  borderRadius: 4, 
+                                  fontSize: 11, 
+                                  fontWeight: 600, 
+                                  background: 'rgba(59, 130, 246, 0.12)', 
+                                  color: '#3b82f6',
+                                  border: '1px solid rgba(59, 130, 246, 0.25)',
+                                  whiteSpace: 'nowrap',
+                                  maxWidth: 180,
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis'
+                                }} title={item.itemCode || 'Order Item'}>
+                                  {item.itemCode || 'Order Item'}
+                                </span>
+                              ) : item.itemId ? (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                  <span style={{ 
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    padding: '3px 8px', 
+                                    borderRadius: 4, 
+                                    fontSize: 11, 
+                                    fontWeight: 600, 
+                                    background: 'rgba(16, 185, 129, 0.12)', 
+                                    color: '#10b981',
+                                    border: '1px solid rgba(16, 185, 129, 0.25)',
+                                    whiteSpace: 'nowrap',
+                                    maxWidth: 140,
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis'
+                                  }} title={item.itemCode || 'Linked Item'}>
+                                    {item.itemCode || 'Linked'}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    title="Unlink inventory item"
+                                    onClick={() => handleClearItemLink(idx)}
+                                    style={{
+                                      background: 'none',
+                                      border: 'none',
+                                      cursor: 'pointer',
+                                      padding: '2px 4px',
+                                      color: 'var(--text-muted)',
+                                      fontSize: 12,
+                                      lineHeight: 1
+                                    }}
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="btn btn-outline btn-sm"
+                                  onClick={() => {
+                                    setItemPickerIndex(idx);
+                                    setItemSearchQuery('');
+                                  }}
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 4,
+                                    fontSize: 11,
+                                    padding: '3px 8px',
+                                    borderRadius: 4,
+                                    color: 'var(--text-muted)',
+                                    border: '1px dashed var(--border)'
+                                  }}
+                                >
+                                  <Search size={11} /> Link Item
+                                </button>
+                              )}
                             </td>
                             <td style={{ padding: '8px 10px' }}>
                               <input
                                 type="text"
-                                value={item.itemDescription}
+                                value={item.itemDescription || ''}
                                 onChange={e => handleUpdateItemField(idx, 'itemDescription', e.target.value)}
                                 disabled={item.isReadOnly}
                                 placeholder="e.g. 100% COTTON TWILL TAPE (12MM)"
-                                style={{ width: '100%', padding: '5px 8px', borderRadius: 4, border: '1px solid var(--border)', fontSize: 12, background: item.isReadOnly ? 'var(--bg-base)' : '#fff' }}
+                                style={{ width: '100%', padding: '5px 8px', borderRadius: 4, border: '1px solid var(--border)', fontSize: 12, background: item.isReadOnly ? 'var(--bg-card)' : 'var(--bg-base)', color: 'inherit' }}
                               />
                             </td>
                             <td style={{ padding: '8px 10px' }}>
                               <input
                                 type="text"
-                                value={item.poStyleNo}
+                                value={item.poStyleNo || ''}
                                 onChange={e => handleUpdateItemField(idx, 'poStyleNo', e.target.value)}
                                 disabled={item.isReadOnly}
                                 placeholder="Style / PO"
-                                style={{ width: '100%', padding: '5px 8px', borderRadius: 4, border: '1px solid var(--border)', fontSize: 12, background: item.isReadOnly ? 'var(--bg-base)' : '#fff' }}
+                                style={{ width: '100%', padding: '5px 8px', borderRadius: 4, border: '1px solid var(--border)', fontSize: 12, background: item.isReadOnly ? 'var(--bg-card)' : 'var(--bg-base)', color: 'inherit' }}
                               />
                             </td>
                             <td style={{ padding: '8px 10px', textAlign: 'right' }}>
@@ -964,19 +1104,19 @@ export default function FinancePage() {
                                 type="number"
                                 step="any"
                                 min="1"
-                                value={item.quantity}
+                                value={item.quantity ?? ''}
                                 onChange={e => handleUpdateItemField(idx, 'quantity', e.target.value)}
                                 disabled={item.isReadOnly}
-                                style={{ width: '100%', padding: '5px 8px', textAlign: 'right', borderRadius: 4, border: '1px solid var(--border)', fontSize: 12, fontWeight: 600, background: item.isReadOnly ? 'var(--bg-base)' : '#fff' }}
+                                style={{ width: '100%', padding: '5px 8px', textAlign: 'right', borderRadius: 4, border: '1px solid var(--border)', fontSize: 12, fontWeight: 600, background: item.isReadOnly ? 'var(--bg-card)' : 'var(--bg-base)', color: 'inherit' }}
                               />
                             </td>
                             <td style={{ padding: '8px 10px', textAlign: 'center' }}>
                               <input
                                 type="text"
-                                value={item.unit}
+                                value={item.unit || ''}
                                 onChange={e => handleUpdateItemField(idx, 'unit', e.target.value.toUpperCase())}
                                 disabled={item.isReadOnly}
-                                style={{ width: '100%', padding: '5px 8px', textAlign: 'center', borderRadius: 4, border: '1px solid var(--border)', fontSize: 12, background: item.isReadOnly ? 'var(--bg-base)' : '#fff' }}
+                                style={{ width: '100%', padding: '5px 8px', textAlign: 'center', borderRadius: 4, border: '1px solid var(--border)', fontSize: 12, background: item.isReadOnly ? 'var(--bg-card)' : 'var(--bg-base)', color: 'inherit' }}
                               />
                             </td>
                             <td style={{ padding: '8px 10px', textAlign: 'right' }}>
@@ -984,10 +1124,10 @@ export default function FinancePage() {
                                 type="number"
                                 step="0.0001"
                                 min="0"
-                                value={item.unitPrice}
+                                value={item.unitPrice ?? ''}
                                 onChange={e => handleUpdateItemField(idx, 'unitPrice', e.target.value)}
                                 disabled={item.isReadOnly}
-                                style={{ width: '100%', padding: '5px 8px', textAlign: 'right', borderRadius: 4, border: '1px solid var(--border)', fontSize: 12, fontWeight: 600, background: item.isReadOnly ? 'var(--bg-base)' : '#fff' }}
+                                style={{ width: '100%', padding: '5px 8px', textAlign: 'right', borderRadius: 4, border: '1px solid var(--border)', fontSize: 12, fontWeight: 600, background: item.isReadOnly ? 'var(--bg-card)' : 'var(--bg-base)', color: 'inherit' }}
                               />
                             </td>
                             <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700 }}>
@@ -998,6 +1138,7 @@ export default function FinancePage() {
                                 className="btn btn-ghost btn-sm btn-icon"
                                 onClick={() => handleRemoveLineItem(idx)}
                                 style={{ color: 'var(--danger, #ef4444)' }}
+                                title="Remove line item"
                               >
                                 <Trash2 size={14} />
                               </button>
@@ -1424,84 +1565,130 @@ export default function FinancePage() {
       {/* ========================================================================= */}
       {/* ORDER ITEMS MODAL */}
       {/* ========================================================================= */}
+      {/* ========================================================================= */}
+      {/* ORDER ITEMS MODAL */}
+      {/* ========================================================================= */}
       {orderModalOpen && (
         <div className="modal-backdrop" style={{ 
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, 
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 1000, 
           display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 
         }}>
           <div style={{ 
-            background: 'var(--bg-card, #ffffff)', borderRadius: 12, width: '100%', maxWidth: 700, 
-            maxHeight: '90vh', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.2)' 
+            background: 'var(--bg-card, #ffffff)', borderRadius: 12, width: '100%', maxWidth: 720, 
+            maxHeight: '90vh', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.25)' 
           }}>
-            <div style={{ padding: 20, borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
                 <PackageCheck color="var(--primary)" size={20} />
                 Load Items from Order
               </h3>
-              <button className="btn btn-ghost btn-icon btn-sm" onClick={() => { setOrderModalOpen(false); setSelectedOrderNo(''); setSelectedItemsFromOrder(new Set()); }}>
+              <button 
+                className="btn btn-ghost btn-icon btn-sm" 
+                onClick={() => { 
+                  setOrderModalOpen(false); 
+                  setSelectedOrderNo(''); 
+                  setOrderFilterQuery('');
+                  setSelectedItemsFromOrder(new Set()); 
+                }}
+              >
                 <X size={18} />
               </button>
             </div>
             
             <div style={{ padding: 20, overflowY: 'auto', flex: 1 }}>
               <div style={{ marginBottom: 16 }}>
-                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Select Order Number</label>
+                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
+                  Select Order Number
+                </label>
+                <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                  <div style={{ position: 'relative', flex: 1 }}>
+                    <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                    <input
+                      type="text"
+                      placeholder="Type to filter orders..."
+                      value={orderFilterQuery}
+                      onChange={e => setOrderFilterQuery(e.target.value)}
+                      style={{ width: '100%', padding: '7px 10px 7px 32px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 12, background: 'var(--bg-base)', color: 'inherit' }}
+                    />
+                  </div>
+                  {orderFilterQuery && (
+                    <button 
+                      className="btn btn-ghost btn-sm" 
+                      onClick={() => setOrderFilterQuery('')}
+                      style={{ fontSize: 12, padding: '4px 8px' }}
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+
                 <select
                   value={selectedOrderNo}
                   onChange={e => {
                     setSelectedOrderNo(e.target.value);
                     setSelectedItemsFromOrder(new Set());
                   }}
-                  style={{ width: '100%', padding: '10px 12px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 14, background: 'var(--bg-base)' }}
+                  style={{ width: '100%', padding: '9px 12px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 13, background: 'var(--bg-base)', color: 'inherit' }}
                 >
-                  <option value="">-- Choose an Order Number --</option>
-                  {uniqueOrders.map(o => (
+                  <option value="">-- Choose an Order Number ({visibleOrders.length} available) --</option>
+                  {visibleOrders.map(o => (
                     <option key={o} value={o}>{o}</option>
                   ))}
                 </select>
               </div>
 
-              {selectedOrderNo && (
+              {loadingOrderItems ? (
+                <div style={{ padding: 36, textAlign: 'center', color: 'var(--text-muted)' }}>
+                  <RefreshCw size={22} className="spin" style={{ marginBottom: 8 }} />
+                  <div style={{ fontSize: 13 }}>Loading accessories for Order {selectedOrderNo}...</div>
+                </div>
+              ) : selectedOrderNo ? (
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600 }}>Items in Order: {selectedOrderNo}</div>
-                    <button
-                      className="btn btn-ghost btn-sm"
-                      onClick={() => {
-                        if (selectedItemsFromOrder.size === itemsInSelectedOrder.length) {
-                          setSelectedItemsFromOrder(new Set());
-                        } else {
-                          setSelectedItemsFromOrder(new Set(itemsInSelectedOrder.map(it => it.id)));
-                        }
-                      }}
-                    >
-                      {selectedItemsFromOrder.size === itemsInSelectedOrder.length ? 'Deselect All' : 'Select All'}
-                    </button>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>
+                      Items in Order: <span style={{ color: 'var(--primary)' }}>{selectedOrderNo}</span> ({orderItems.length})
+                    </div>
+                    {orderItems.length > 0 && (
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => {
+                          if (selectedItemsFromOrder.size === orderItems.length) {
+                            setSelectedItemsFromOrder(new Set());
+                          } else {
+                            setSelectedItemsFromOrder(new Set(orderItems.map(it => it.id)));
+                          }
+                        }}
+                        style={{ fontSize: 12 }}
+                      >
+                        {selectedItemsFromOrder.size === orderItems.length ? 'Deselect All' : 'Select All'}
+                      </button>
+                    )}
                   </div>
                   
                   <div style={{ border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                       <thead>
                         <tr style={{ background: 'var(--bg-base)', borderBottom: '1px solid var(--border)', color: 'var(--text-muted)' }}>
-                          <th style={{ padding: '10px', width: 40, textAlign: 'center' }}>
+                          <th style={{ padding: '8px 10px', width: 40, textAlign: 'center' }}>
                             <CheckSquare size={14} />
                           </th>
-                          <th style={{ padding: '10px', textAlign: 'left' }}>ITEM DESCRIPTION</th>
-                          <th style={{ padding: '10px', textAlign: 'left' }}>STYLE / PO</th>
-                          <th style={{ padding: '10px', textAlign: 'right' }}>QTY</th>
+                          <th style={{ padding: '8px 10px', textAlign: 'left' }}>ITEM DESCRIPTION</th>
+                          <th style={{ padding: '8px 10px', textAlign: 'left', width: 140 }}>STYLE / PO</th>
+                          <th style={{ padding: '8px 10px', textAlign: 'right', width: 100 }}>ORDER QTY</th>
+                          <th style={{ padding: '8px 10px', textAlign: 'right', width: 90 }}>UNIT PRICE</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {itemsInSelectedOrder.length === 0 ? (
+                        {orderItems.length === 0 ? (
                           <tr>
-                            <td colSpan={4} style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)' }}>
-                              No items found for this order.
+                            <td colSpan={5} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>
+                              No items found for order "{selectedOrderNo}".
                             </td>
                           </tr>
                         ) : (
-                          itemsInSelectedOrder.map(it => (
+                          orderItems.map(it => (
                             <tr key={it.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                              <td style={{ padding: '10px', textAlign: 'center' }}>
+                              <td style={{ padding: '8px 10px', textAlign: 'center' }}>
                                 <input
                                   type="checkbox"
                                   checked={selectedItemsFromOrder.has(it.id)}
@@ -1514,10 +1701,22 @@ export default function FinancePage() {
                                   style={{ cursor: 'pointer', width: 16, height: 16 }}
                                 />
                               </td>
-                              <td style={{ padding: '10px', fontWeight: 600 }}>{it.name}</td>
-                              <td style={{ padding: '10px', color: 'var(--text-muted)' }}>{it.style_name || '-'}</td>
-                              <td style={{ padding: '10px', textAlign: 'right' }}>
+                              <td style={{ padding: '8px 10px', fontWeight: 600 }}>
+                                {it.name}
+                                {it.item_code && (
+                                  <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 6, fontWeight: 400 }}>
+                                    ({it.item_code})
+                                  </span>
+                                )}
+                              </td>
+                              <td style={{ padding: '8px 10px', color: 'var(--text-muted)' }}>
+                                {it.style_name || it.order_number || '-'}
+                              </td>
+                              <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600 }}>
                                 {Number(it.order_quantity || it.current_stock || 0).toLocaleString()} {it.unit || 'PCS'}
+                              </td>
+                              <td style={{ padding: '8px 10px', textAlign: 'right', color: 'var(--primary)', fontWeight: 600 }}>
+                                ${Number(it.unit_price || 0).toFixed(4)}
                               </td>
                             </tr>
                           ))
@@ -1526,19 +1725,138 @@ export default function FinancePage() {
                     </table>
                   </div>
                 </div>
+              ) : (
+                <div style={{ padding: 30, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
+                  Please choose an order number above to view and select accessories.
+                </div>
               )}
             </div>
 
-            <div style={{ padding: 20, borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
-              <button className="btn btn-outline" onClick={() => { setOrderModalOpen(false); setSelectedOrderNo(''); setSelectedItemsFromOrder(new Set()); }}>
+            <div style={{ padding: '14px 20px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button 
+                className="btn btn-outline" 
+                onClick={() => { 
+                  setOrderModalOpen(false); 
+                  setSelectedOrderNo(''); 
+                  setOrderFilterQuery('');
+                  setSelectedItemsFromOrder(new Set()); 
+                }}
+              >
                 Cancel
               </button>
               <button 
                 className="btn btn-primary" 
                 onClick={handleAddSelectedFromOrder}
                 disabled={selectedItemsFromOrder.size === 0}
+                style={{ display: 'flex', alignItems: 'center', gap: 6 }}
               >
-                Add Selected Items ({selectedItemsFromOrder.size})
+                <Plus size={16} /> Add Selected Items ({selectedItemsFromOrder.size})
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* ITEM PICKER MODAL (FOR MANUAL LINE ITEMS) */}
+      {/* ========================================================================= */}
+      {itemPickerIndex !== null && (
+        <div className="modal-backdrop" style={{ 
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 1100, 
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 
+        }}>
+          <div style={{ 
+            background: 'var(--bg-card, #ffffff)', borderRadius: 12, width: '100%', maxWidth: 680, 
+            maxHeight: '85vh', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.25)' 
+          }}>
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Search color="var(--primary)" size={18} />
+                Link Inventory Item to Line #{itemPickerIndex + 1}
+              </h3>
+              <button 
+                className="btn btn-ghost btn-icon btn-sm" 
+                onClick={() => { setItemPickerIndex(null); setItemSearchQuery(''); }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)' }}>
+              <div style={{ position: 'relative' }}>
+                <Search size={16} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                <input
+                  type="text"
+                  autoFocus
+                  placeholder="Search item by name, code, order or style..."
+                  value={itemSearchQuery}
+                  onChange={e => setItemSearchQuery(e.target.value)}
+                  style={{ width: '100%', padding: '10px 14px 10px 36px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 13, background: 'var(--bg-base)', color: 'inherit' }}
+                />
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
+                Type at least 2 characters to search inventory items quickly.
+              </div>
+            </div>
+
+            <div style={{ padding: 16, overflowY: 'auto', flex: 1, maxHeight: 400 }}>
+              {loadingItemSearch ? (
+                <div style={{ padding: 30, textAlign: 'center', color: 'var(--text-muted)' }}>
+                  <RefreshCw size={20} className="spin" style={{ marginBottom: 6 }} />
+                  <div>Searching items...</div>
+                </div>
+              ) : itemSearchResults.length === 0 ? (
+                <div style={{ padding: 30, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
+                  {itemSearchQuery.trim().length < 2 ? 'Start typing above to search inventory items...' : 'No matching items found.'}
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {itemSearchResults.map(it => (
+                    <div
+                      key={it.id}
+                      onClick={() => handleSelectInventoryItem(itemPickerIndex, it)}
+                      style={{
+                        padding: '10px 14px',
+                        borderRadius: 6,
+                        border: '1px solid var(--border)',
+                        background: 'var(--bg-base)',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        cursor: 'pointer',
+                        transition: 'border-color 0.15s'
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--primary)'; }}
+                      onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; }}
+                    >
+                      <div style={{ minWidth: 0, flex: 1, marginRight: 12 }}>
+                        <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-main)', marginBottom: 2 }}>
+                          {it.name}
+                        </div>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                          <span><strong>Code:</strong> {it.item_code || '-'}</span>
+                          {it.order_number && <span><strong>Order:</strong> {it.order_number}</span>}
+                          {it.style_name && <span><strong>Style:</strong> {it.style_name}</span>}
+                          <span><strong>Stock:</strong> {it.current_stock || 0} {it.unit || 'PCS'}</span>
+                        </div>
+                      </div>
+                      <div style={{ textAlign: 'right', display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--primary)' }}>
+                          ${Number(it.unit_price || 0).toFixed(4)}
+                        </div>
+                        <button className="btn btn-primary btn-sm" style={{ padding: '4px 10px', fontSize: 11 }}>
+                          Select
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div style={{ padding: '12px 20px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end' }}>
+              <button className="btn btn-outline btn-sm" onClick={() => { setItemPickerIndex(null); setItemSearchQuery(''); }}>
+                Cancel
               </button>
             </div>
           </div>

@@ -1,7 +1,25 @@
 import SearchableSelect from '../components/ui/SearchableSelect';
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import useStore from '../store/useStore';
+import PaginationBar from '../components/common/PaginationBar';
 import { Plus, Search, Package, ArrowUpDown, ArrowUp, ArrowDown, Printer, Edit2, Trash2, History } from 'lucide-react';
+
+const PAGE_SIZE = 100;
+
+const SortHeader = React.memo(({ label, field, className = "", sortConfig, onSort }) => (
+  <th 
+    className={`sortable ${className}`} 
+    onClick={() => onSort(field)}
+  >
+    <div className="flex items-center justify-between">
+      {label}
+      <span className={`sort-icon-container ${sortConfig.key === field ? 'active' : ''}`}>
+        {sortConfig.key !== field ? <ArrowUpDown size={12} /> : 
+         sortConfig.direction === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />}
+      </span>
+    </div>
+  </th>
+));
 
 export default function InventoryPage() {
   const { addToast, showConfirm, categories, setCategories, setSuppliers, setUnits, user, openModal } = useStore();
@@ -18,47 +36,46 @@ export default function InventoryPage() {
 
   const [distinctValues, setDistinctValues] = useState({ names: [], colors: [], sizes: [], styles: [], purchases: [] });
   const [sortConfig, setSortConfig] = useState({ key: 'name', direction: 'asc' });
+  const [currentPage, setCurrentPage] = useState(0);
 
-  const handleSort = (key) => {
+  const handleSort = useCallback((key) => {
     setSortConfig(prev => ({
       key,
       direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc'
     }));
-  };
+  }, []);
 
-  const sortedItems = [...items].sort((a, b) => {
-    if (!sortConfig.key) return 0;
-    let valA = a[sortConfig.key];
-    let valB = b[sortConfig.key];
-    
-    // Numeric sort for stock and qty
-    if (['current_stock', 'order_quantity', 'min_stock_level', 'unit_price', 'conversion_rate'].includes(sortConfig.key)) {
-      valA = Number(valA) || 0;
-      valB = Number(valB) || 0;
-    } else {
-      valA = (valA || '').toString().toLowerCase();
-      valB = (valB || '').toString().toLowerCase();
-    }
+  const sortedItems = useMemo(() => {
+    return [...items].sort((a, b) => {
+      if (!sortConfig.key) return 0;
+      let valA = a[sortConfig.key];
+      let valB = b[sortConfig.key];
+      
+      // Numeric sort for stock and qty
+      if (['current_stock', 'order_quantity', 'min_stock_level', 'unit_price', 'conversion_rate'].includes(sortConfig.key)) {
+        valA = Number(valA) || 0;
+        valB = Number(valB) || 0;
+      } else {
+        valA = (valA || '').toString().toLowerCase();
+        valB = (valB || '').toString().toLowerCase();
+      }
 
-    if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
-    if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
-    return 0;
-  });
+      if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
+      if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }, [items, sortConfig]);
 
-  const SortHeader = ({ label, field, className = "" }) => (
-    <th 
-      className={`sortable ${className}`} 
-      onClick={() => handleSort(field)}
-    >
-      <div className="flex items-center justify-between">
-        {label}
-        <span className={`sort-icon-container ${sortConfig.key === field ? 'active' : ''}`}>
-          {sortConfig.key !== field ? <ArrowUpDown size={12} /> : 
-           sortConfig.direction === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />}
-        </span>
-      </div>
-    </th>
-  );
+  const totalPages = Math.ceil(sortedItems.length / PAGE_SIZE);
+  const paginatedItems = useMemo(() => {
+    const start = currentPage * PAGE_SIZE;
+    return sortedItems.slice(start, start + PAGE_SIZE);
+  }, [sortedItems, currentPage]);
+
+  // Reset page when items or filters change
+  useEffect(() => {
+    setCurrentPage(0);
+  }, [items]);
 
   // Load filter dropdowns on mount
   useEffect(() => {
@@ -169,28 +186,37 @@ export default function InventoryPage() {
       ) : items.length === 0 ? (
         <div className="empty-state"><Package size={48} /><h3>No items found</h3><p>Try a different search term or filter</p></div>
       ) : (
-        <div className="table-wrapper">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <SortHeader label="Code" field="item_code" />
-                <SortHeader label="Item Name" field="name" />
-                <SortHeader label="Order No" field="order_number" />
-                <SortHeader label="Issue No" field="issue_numbers" />
-                <SortHeader label="Category" field="category_name" />
-                <SortHeader label="Size" field="size" />
-                <SortHeader label="Color" field="color" />
-                <SortHeader label="Order Qty" field="order_quantity" className="text-right" />
-                <SortHeader label="Stock" field="current_stock" className="text-right" />
-                <SortHeader label="Unit Price" field="unit_price" className="text-right" />
-                <SortHeader label="Conversion Rate" field="conversion_rate" className="text-right" />
-                <th className="text-right">Total Value</th>
-                <SortHeader label="Unit" field="unit" />
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sortedItems.map(item => (
+        <>
+          <PaginationBar
+            position="top"
+            currentPage={currentPage}
+            totalPages={totalPages}
+            totalItems={sortedItems.length}
+            pageSize={PAGE_SIZE}
+            onPageChange={setCurrentPage}
+          />
+          <div className="table-wrapper">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <SortHeader label="Code" field="item_code" sortConfig={sortConfig} onSort={handleSort} />
+                  <SortHeader label="Item Name" field="name" sortConfig={sortConfig} onSort={handleSort} />
+                  <SortHeader label="Order No" field="order_number" sortConfig={sortConfig} onSort={handleSort} />
+                  <SortHeader label="Issue No" field="issue_numbers" sortConfig={sortConfig} onSort={handleSort} />
+                  <SortHeader label="Category" field="category_name" sortConfig={sortConfig} onSort={handleSort} />
+                  <SortHeader label="Size" field="size" sortConfig={sortConfig} onSort={handleSort} />
+                  <SortHeader label="Color" field="color" sortConfig={sortConfig} onSort={handleSort} />
+                  <SortHeader label="Order Qty" field="order_quantity" className="text-right" sortConfig={sortConfig} onSort={handleSort} />
+                  <SortHeader label="Stock" field="current_stock" className="text-right" sortConfig={sortConfig} onSort={handleSort} />
+                  <SortHeader label="Unit Price" field="unit_price" className="text-right" sortConfig={sortConfig} onSort={handleSort} />
+                  <SortHeader label="Conversion Rate" field="conversion_rate" className="text-right" sortConfig={sortConfig} onSort={handleSort} />
+                  <th className="text-right">Total Value</th>
+                  <SortHeader label="Unit" field="unit" sortConfig={sortConfig} onSort={handleSort} />
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {paginatedItems.map(item => (
                 <tr key={item.id}>
                   <td className="text-mono" style={{ fontSize: 12, color: 'var(--accent)' }}>{item.item_code}</td>
                   <td style={{ fontWeight: 600 }}>{item.name}</td>
@@ -302,6 +328,15 @@ export default function InventoryPage() {
             </tbody>
           </table>
         </div>
+          <PaginationBar
+            position="bottom"
+            currentPage={currentPage}
+            totalPages={totalPages}
+            totalItems={sortedItems.length}
+            pageSize={PAGE_SIZE}
+            onPageChange={setCurrentPage}
+          />
+        </>
       )}
     </div>
   );

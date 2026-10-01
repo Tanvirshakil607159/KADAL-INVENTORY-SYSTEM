@@ -1,6 +1,21 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import useStore from '../store/useStore';
+import PaginationBar from '../components/common/PaginationBar';
 import { Search, ArrowDownCircle, ArrowUpCircle, Package, ArrowUpDown, ArrowUp, ArrowDown, Clock, FileText } from 'lucide-react';
+
+const PAGE_SIZE = 50;
+
+const SortHeader = React.memo(({ label, field, className = "", sortConfig, onSort }) => (
+  <th className={`sortable ${className}`} onClick={() => onSort(field)}>
+    <div className="flex items-center justify-between">
+      {label}
+      <span className={`sort-icon-container ${sortConfig.key === field ? 'active' : ''}`}>
+        {sortConfig.key !== field ? <ArrowUpDown size={12} /> :
+         sortConfig.direction === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />}
+      </span>
+    </div>
+  </th>
+));
 
 export default function StockInOutPage() {
   const { addToast, user, openModal } = useStore();
@@ -14,42 +29,43 @@ export default function StockInOutPage() {
   const [transactions, setTransactions] = useState([]);
   const [txLoading, setTxLoading] = useState(false);
   const [sortConfig, setSortConfig] = useState({ key: 'name', direction: 'asc' });
+  const [currentPage, setCurrentPage] = useState(0);
   const searchRef = useRef('');
 
-  const handleSort = (key) => {
+  const handleSort = useCallback((key) => {
     setSortConfig(prev => ({
       key,
       direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc'
     }));
-  };
+  }, []);
 
-  const sortedItems = [...items].sort((a, b) => {
-    if (!sortConfig.key) return 0;
-    let valA = a[sortConfig.key];
-    let valB = b[sortConfig.key];
-    if (['current_stock', 'order_quantity'].includes(sortConfig.key)) {
-      valA = Number(valA) || 0;
-      valB = Number(valB) || 0;
-    } else {
-      valA = (valA || '').toString().toLowerCase();
-      valB = (valB || '').toString().toLowerCase();
-    }
-    if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
-    if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
-    return 0;
-  });
+  const sortedItems = useMemo(() => {
+    return [...items].sort((a, b) => {
+      if (!sortConfig.key) return 0;
+      let valA = a[sortConfig.key];
+      let valB = b[sortConfig.key];
+      if (['current_stock', 'order_quantity'].includes(sortConfig.key)) {
+        valA = Number(valA) || 0;
+        valB = Number(valB) || 0;
+      } else {
+        valA = (valA || '').toString().toLowerCase();
+        valB = (valB || '').toString().toLowerCase();
+      }
+      if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
+      if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }, [items, sortConfig]);
 
-  const SortHeader = ({ label, field, className = "" }) => (
-    <th className={`sortable ${className}`} onClick={() => handleSort(field)}>
-      <div className="flex items-center justify-between">
-        {label}
-        <span className={`sort-icon-container ${sortConfig.key === field ? 'active' : ''}`}>
-          {sortConfig.key !== field ? <ArrowUpDown size={12} /> :
-           sortConfig.direction === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />}
-        </span>
-      </div>
-    </th>
-  );
+  const totalPages = Math.ceil(sortedItems.length / PAGE_SIZE);
+  const paginatedItems = useMemo(() => {
+    const start = currentPage * PAGE_SIZE;
+    return sortedItems.slice(start, start + PAGE_SIZE);
+  }, [sortedItems, currentPage]);
+
+  useEffect(() => {
+    setCurrentPage(0);
+  }, [items]);
 
   const searchItems = useCallback(async (query) => {
     if (!query || query.trim().length === 0) {
@@ -198,65 +214,83 @@ export default function StockInOutPage() {
               <p>Try a different search term</p>
             </div>
           ) : (
-            <div className="table-wrapper">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <SortHeader label="Code" field="item_code" />
-                    <SortHeader label="Item Name" field="name" />
-                    <SortHeader label="Size" field="size" />
-                    <SortHeader label="Color" field="color" />
-                    <SortHeader label="Style" field="style_name" />
-                    <SortHeader label="Order No" field="order_number" />
-                    <SortHeader label="Purchase" field="purchase_no" />
-                    <SortHeader label="Stock" field="current_stock" className="text-right" />
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sortedItems.map(item => (
-                    <tr
-                      key={item.id}
-                      className={selectedItem?.id === item.id ? 'row-selected' : ''}
-                      onClick={() => handleSelectItem(item)}
-                      style={{ cursor: 'pointer' }}
-                    >
-                      <td className="text-mono" style={{ fontSize: 12, color: 'var(--accent)' }}>{item.item_code}</td>
-                      <td style={{ fontWeight: 600 }}>
-                        <div>{item.name}</div>
-                        {(item.size || item.color) && (
-                          <div className="text-muted" style={{ fontSize: 11, fontWeight: 400 }}>
-                            {[item.size, item.color].filter(Boolean).join(' / ')}
-                          </div>
-                        )}
-                      </td>
-                      <td style={{ fontSize: 13 }}>{item.size || '-'}</td>
-                      <td style={{ fontSize: 13 }}>{item.color || '-'}</td>
-                      <td style={{ fontSize: 13 }}>{item.style_name || '-'}</td>
-                      <td style={{ fontSize: 13 }}>{item.order_number || '-'}</td>
-                      <td style={{ fontSize: 13 }}>{item.purchase_no || '-'}</td>
-                      <td className="text-right text-mono fw-bold" style={{ color: item.current_stock <= item.min_stock_level && item.min_stock_level > 0 ? 'var(--danger)' : 'var(--success)' }}>
-                        {item.current_stock} {item.unit}
-                      </td>
-                      <td>
-                        <div className="table-actions" onClick={e => e.stopPropagation()} style={{ display: 'flex', gap: 6 }}>
-                          {user?.permissions?.inventory === 'rw' && (
-                            <button className="btn btn-success btn-xs" title="Stock IN" onClick={() => handleStockAction(item, 'IN')}>
-                              <ArrowDownCircle size={13} /> Stock IN
-                            </button>
-                          )}
-                          {user?.permissions?.inventory === 'rw' && user?.roleName !== 'Inventory' && (
-                            <button className="btn btn-warning btn-xs" title="Stock OUT" onClick={() => handleStockAction(item, 'OUT')}>
-                              <ArrowUpCircle size={13} /> Stock OUT
-                            </button>
-                          )}
-                        </div>
-                      </td>
+            <>
+              <PaginationBar
+                position="top"
+                currentPage={currentPage}
+                totalPages={totalPages}
+                totalItems={sortedItems.length}
+                pageSize={PAGE_SIZE}
+                onPageChange={setCurrentPage}
+              />
+              <div className="table-wrapper">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <SortHeader label="Code" field="item_code" sortConfig={sortConfig} onSort={handleSort} />
+                      <SortHeader label="Item Name" field="name" sortConfig={sortConfig} onSort={handleSort} />
+                      <SortHeader label="Size" field="size" sortConfig={sortConfig} onSort={handleSort} />
+                      <SortHeader label="Color" field="color" sortConfig={sortConfig} onSort={handleSort} />
+                      <SortHeader label="Style" field="style_name" sortConfig={sortConfig} onSort={handleSort} />
+                      <SortHeader label="Order No" field="order_number" sortConfig={sortConfig} onSort={handleSort} />
+                      <SortHeader label="Purchase" field="purchase_no" sortConfig={sortConfig} onSort={handleSort} />
+                      <SortHeader label="Stock" field="current_stock" className="text-right" sortConfig={sortConfig} onSort={handleSort} />
+                      <th>Actions</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {paginatedItems.map(item => (
+                      <tr
+                        key={item.id}
+                        className={selectedItem?.id === item.id ? 'row-selected' : ''}
+                        onClick={() => handleSelectItem(item)}
+                        style={{ cursor: 'pointer' }}
+                      >
+                        <td className="text-mono" style={{ fontSize: 12, color: 'var(--accent)' }}>{item.item_code}</td>
+                        <td style={{ fontWeight: 600 }}>
+                          <div>{item.name}</div>
+                          {(item.size || item.color) && (
+                            <div className="text-muted" style={{ fontSize: 11, fontWeight: 400 }}>
+                              {[item.size, item.color].filter(Boolean).join(' / ')}
+                            </div>
+                          )}
+                        </td>
+                        <td style={{ fontSize: 13 }}>{item.size || '-'}</td>
+                        <td style={{ fontSize: 13 }}>{item.color || '-'}</td>
+                        <td style={{ fontSize: 13 }}>{item.style_name || '-'}</td>
+                        <td style={{ fontSize: 13 }}>{item.order_number || '-'}</td>
+                        <td style={{ fontSize: 13 }}>{item.purchase_no || '-'}</td>
+                        <td className="text-right text-mono fw-bold" style={{ color: item.current_stock <= item.min_stock_level && item.min_stock_level > 0 ? 'var(--danger)' : 'var(--success)' }}>
+                          {item.current_stock} {item.unit}
+                        </td>
+                        <td>
+                          <div className="table-actions" onClick={e => e.stopPropagation()} style={{ display: 'flex', gap: 6 }}>
+                            {user?.permissions?.inventory === 'rw' && (
+                              <button className="btn btn-success btn-xs" title="Stock IN" onClick={() => handleStockAction(item, 'IN')}>
+                                <ArrowDownCircle size={13} /> Stock IN
+                              </button>
+                            )}
+                            {user?.permissions?.inventory === 'rw' && user?.roleName !== 'Inventory' && (
+                              <button className="btn btn-warning btn-xs" title="Stock OUT" onClick={() => handleStockAction(item, 'OUT')}>
+                                <ArrowUpCircle size={13} /> Stock OUT
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <PaginationBar
+                position="bottom"
+                currentPage={currentPage}
+                totalPages={totalPages}
+                totalItems={sortedItems.length}
+                pageSize={PAGE_SIZE}
+                onPageChange={setCurrentPage}
+              />
+            </>
           )}
         </div>
 

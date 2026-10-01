@@ -1,43 +1,59 @@
 import SearchableSelect from '../ui/SearchableSelect';
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import useStore from '../../store/useStore';
+import PaginationBar from '../common/PaginationBar';
 import { Search, CheckCircle } from 'lucide-react';
+
+const PAGE_SIZE = 50;
 
 export default function TargetProductBrowserModal({ data }) {
   const { closeModal, setModalMinimized, modal, addToast } = useStore();
-  const { items: allItems, onSelect, initialSelectedIds = [] } = data;
+  const { items: allItems = [], onSelect, initialSelectedIds = [] } = data;
   const isMinimized = modal?.isMinimized;
 
   const [selectedIds, setSelectedIds] = useState(initialSelectedIds);
   const [filters, setFilters] = useState({ search: '', buyer: '', category: '', size: '', color: '', style: '', purchaseNo: '', orderNumber: '' });
+  const [currentPage, setCurrentPage] = useState(0);
 
-  const sizes = [...new Set(allItems.map(i => i.size).filter(Boolean))];
-  const colors = [...new Set(allItems.map(i => i.color).filter(Boolean))];
-  const buyers = [...new Set(allItems.map(i => i.buyer_name).filter(Boolean))];
-  const categories = [...new Set(allItems.map(i => i.category_name).filter(Boolean))];
-  const styles = [...new Set(allItems.map(i => i.style_name).filter(Boolean))];
-  const purchases = [...new Set(allItems.map(i => i.purchase_no).filter(Boolean))];
-  const orders = [...new Set(allItems.map(i => i.order_number).filter(Boolean))];
+  const sizes = useMemo(() => [...new Set(allItems.map(i => i.size).filter(Boolean))], [allItems]);
+  const colors = useMemo(() => [...new Set(allItems.map(i => i.color).filter(Boolean))], [allItems]);
+  const buyers = useMemo(() => [...new Set(allItems.map(i => i.buyer_name).filter(Boolean))], [allItems]);
+  const categories = useMemo(() => [...new Set(allItems.map(i => i.category_name).filter(Boolean))], [allItems]);
+  const styles = useMemo(() => [...new Set(allItems.map(i => i.style_name).filter(Boolean))], [allItems]);
+  const purchases = useMemo(() => [...new Set(allItems.map(i => i.purchase_no).filter(Boolean))], [allItems]);
+  const orders = useMemo(() => [...new Set(allItems.map(i => i.order_number).filter(Boolean))], [allItems]);
 
-  const filteredItems = allItems.filter(it => {
+  const filteredItems = useMemo(() => {
     const s = filters.search.toLowerCase();
-    const matchSearch = !s || 
-      it.name.toLowerCase().includes(s) || 
-      it.item_code.toLowerCase().includes(s) || 
-      (it.buyer_name || '').toLowerCase().includes(s) ||
-      (it.purchase_no || '').toLowerCase().includes(s) ||
-      (it.order_number || '').toLowerCase().includes(s) ||
-      (it.style_name || '').toLowerCase().includes(s);
-      
-    const matchBuyer = !filters.buyer || it.buyer_name === filters.buyer;
-    const matchCategory = !filters.category || it.category_name === filters.category;
-    const matchSize = !filters.size || it.size === filters.size;
-    const matchColor = !filters.color || it.color === filters.color;
-    const matchStyle = !filters.style || it.style_name === filters.style;
-    const matchPurchase = !filters.purchaseNo || it.purchase_no === filters.purchaseNo;
-    const matchOrder = !filters.orderNumber || it.order_number === filters.orderNumber;
-    return matchSearch && matchBuyer && matchCategory && matchSize && matchColor && matchStyle && matchPurchase && matchOrder;
-  });
+    return allItems.filter(it => {
+      const matchSearch = !s || 
+        (it.name || '').toLowerCase().includes(s) || 
+        (it.item_code || '').toLowerCase().includes(s) || 
+        (it.buyer_name || '').toLowerCase().includes(s) ||
+        (it.purchase_no || '').toLowerCase().includes(s) ||
+        (it.order_number || '').toLowerCase().includes(s) ||
+        (it.style_name || '').toLowerCase().includes(s);
+        
+      const matchBuyer = !filters.buyer || it.buyer_name === filters.buyer;
+      const matchCategory = !filters.category || it.category_name === filters.category;
+      const matchSize = !filters.size || it.size === filters.size;
+      const matchColor = !filters.color || it.color === filters.color;
+      const matchStyle = !filters.style || it.style_name === filters.style;
+      const matchPurchase = !filters.purchaseNo || it.purchase_no === filters.purchaseNo;
+      const matchOrder = !filters.orderNumber || it.order_number === filters.orderNumber;
+      return matchSearch && matchBuyer && matchCategory && matchSize && matchColor && matchStyle && matchPurchase && matchOrder;
+    });
+  }, [allItems, filters]);
+
+  useEffect(() => {
+    setCurrentPage(0);
+  }, [filters]);
+
+  const totalPages = Math.ceil(filteredItems.length / PAGE_SIZE);
+  const paginatedItems = useMemo(() => {
+    const start = currentPage * PAGE_SIZE;
+    return filteredItems.slice(start, start + PAGE_SIZE);
+  }, [filteredItems, currentPage]);
 
   const selectProduct = (item) => {
     if (!selectedIds.includes(item.id)) {
@@ -98,7 +114,15 @@ export default function TargetProductBrowserModal({ data }) {
             </SearchableSelect>
             {hasFilters && <button className="btn btn-ghost btn-sm" onClick={clearFilters} style={{ fontSize: 11 }}>✕ Clear</button>}
           </div>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>Showing {filteredItems.length} of {allItems.length} items</div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>Showing {filteredItems.length} of {allItems.length} items</div>
+          <PaginationBar
+            position="top"
+            currentPage={currentPage}
+            totalPages={totalPages}
+            totalItems={filteredItems.length}
+            pageSize={PAGE_SIZE}
+            onPageChange={setCurrentPage}
+          />
           {/* Table */}
           <div className="table-wrapper" style={{ maxHeight: 380 }}>
             <table className="data-table">
@@ -117,7 +141,7 @@ export default function TargetProductBrowserModal({ data }) {
               </thead>
               <tbody>
                 {filteredItems.length === 0 && <tr><td colSpan={9} className="text-center text-muted" style={{ padding: 30 }}>No items match your filters</td></tr>}
-                {filteredItems.map(item => {
+                {paginatedItems.map(item => {
                   const isAdded = selectedIds.includes(item.id);
                   return (
                     <tr key={item.id}>
@@ -149,6 +173,14 @@ export default function TargetProductBrowserModal({ data }) {
               </tbody>
             </table>
           </div>
+          <PaginationBar
+            position="bottom"
+            currentPage={currentPage}
+            totalPages={totalPages}
+            totalItems={filteredItems.length}
+            pageSize={PAGE_SIZE}
+            onPageChange={setCurrentPage}
+          />
         </div>
         <div className="modal-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span className="text-muted" style={{ fontSize: 13 }}>

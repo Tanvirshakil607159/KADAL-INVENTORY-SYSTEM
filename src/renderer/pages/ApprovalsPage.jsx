@@ -1,6 +1,24 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import useStore from '../store/useStore';
+import PaginationBar from '../components/common/PaginationBar';
 import { Clock, CheckCircle, XCircle, ArrowUpDown, ArrowUp, ArrowDown, AlertCircle, Package } from 'lucide-react';
+
+const PAGE_SIZE = 50;
+
+const SortHeader = React.memo(({ label, field, className = "", sortConfig, onSort }) => (
+  <th 
+    className={`sortable ${className}`} 
+    onClick={() => onSort(field)}
+  >
+    <div className="flex items-center justify-between">
+      {label}
+      <span className={`sort-icon-container ${sortConfig.key === field ? 'active' : ''}`}>
+        {sortConfig.key !== field ? <ArrowUpDown size={12} /> : 
+         sortConfig.direction === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />}
+      </span>
+    </div>
+  </th>
+));
 
 function IssueApprovalDetails({ safeData, renderProperty }) {
   const [prodItems, setProdItems] = useState(safeData?.producedProducts || []);
@@ -310,40 +328,29 @@ export default function ApprovalsPage() {
   const [distinctValues, setDistinctValues] = useState({ names: [], colors: [], sizes: [], styles: [], purchases: [], orders: [] });
   const [sortConfig, setSortConfig] = useState({ key: 'created_at', direction: 'desc' });
 
-  const handleSort = (key) => {
+  const [currentPage, setCurrentPage] = useState(0);
+
+  const handleSort = useCallback((key) => {
     setSortConfig(prev => ({
       key,
       direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc'
     }));
-  };
+  }, []);
 
-  const sortedRequests = [...requests].sort((a, b) => {
-    if (!sortConfig.key) return 0;
-    let valA = a[sortConfig.key];
-    let valB = b[sortConfig.key];
-    
-    valA = (valA || '').toString().toLowerCase();
-    valB = (valB || '').toString().toLowerCase();
+  const sortedRequests = useMemo(() => {
+    return [...requests].sort((a, b) => {
+      if (!sortConfig.key) return 0;
+      let valA = a[sortConfig.key];
+      let valB = b[sortConfig.key];
+      
+      valA = (valA || '').toString().toLowerCase();
+      valB = (valB || '').toString().toLowerCase();
 
-    if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
-    if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
-    return 0;
-  });
-
-  const SortHeader = ({ label, field, className = "" }) => (
-    <th 
-      className={`sortable ${className}`} 
-      onClick={() => handleSort(field)}
-    >
-      <div className="flex items-center justify-between">
-        {label}
-        <span className={`sort-icon-container ${sortConfig.key === field ? 'active' : ''}`}>
-          {sortConfig.key !== field ? <ArrowUpDown size={12} /> : 
-           sortConfig.direction === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />}
-        </span>
-      </div>
-    </th>
-  );
+      if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
+      if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }, [requests, sortConfig]);
 
   const isAdmin = user?.roleName === 'Super Admin' || user?.roleName === 'Admin';
 
@@ -370,10 +377,22 @@ export default function ApprovalsPage() {
 
   useEffect(() => { load(); }, []);
 
-  const filteredRequests = sortedRequests.filter(r => {
-    if (r.type === 'PENDING_ITEM') return false; // Hide from Admin Approvals (handled in Pending Items module)
-    return activeTab === 'pending' ? r.status === 'PENDING' : r.status !== 'PENDING';
-  });
+  const filteredRequests = useMemo(() => {
+    return sortedRequests.filter(r => {
+      if (r.type === 'PENDING_ITEM') return false; // Hide from Admin Approvals (handled in Pending Items module)
+      return activeTab === 'pending' ? r.status === 'PENDING' : r.status !== 'PENDING';
+    });
+  }, [sortedRequests, activeTab]);
+
+  useEffect(() => {
+    setCurrentPage(0);
+  }, [activeTab, requests]);
+
+  const totalPages = Math.ceil(filteredRequests.length / PAGE_SIZE);
+  const paginatedRequests = useMemo(() => {
+    const start = currentPage * PAGE_SIZE;
+    return filteredRequests.slice(start, start + PAGE_SIZE);
+  }, [filteredRequests, currentPage]);
 
   const renderDataDetail = (data, type) => {
     if (!data) return null;
@@ -563,56 +582,74 @@ export default function ApprovalsPage() {
             <p>No {activeTab} requests found</p>
           </div>
         ) : (
-          <div className="table-wrapper">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <SortHeader label="Date" field="created_at" />
-                  <SortHeader label="Requester" field="requester_name" />
-                  <SortHeader label="Module" field="type" />
-                  <th>Details</th>
-                  <SortHeader label="Status" field="status" />
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredRequests.map(req => (
-                  <tr key={req.id}>
-                    <td className="text-muted" style={{ fontSize: 13 }}>{new Date(req.created_at).toLocaleString()}</td>
-                    <td style={{ fontWeight: 600 }}>{req.requester_name}</td>
-                    <td>
-                      <span className="badge badge-info">
-                        {req.type === 'CREATE_ITEM' || req.type === 'UPDATE_ITEM' ? 'Inventory' :
-                         req.type === 'STOCK_MOVEMENT' ? 'Stock' :
-                         req.type === 'CREATE_CHALLAN' ? 'Challan' :
-                         req.type === 'CREATE_GATE_PASS' ? 'Gate Pass' :
-                         req.type === 'CREATE_ISSUE' ? 'Issue' : req.type}
-                      </span>
-                    </td>
-                    <td style={{ fontSize: 13 }}>
-                      {req.type === 'CREATE_ITEM' && `New Item: ${req.data.name}`}
-                      {req.type === 'PENDING_ITEM' && `Pending Item: ${req.data.name}`}
-                      {req.type === 'UPDATE_ITEM' && `Update Item: ${req.data.data?.name || req.data.name}`}
-                      {req.type === 'STOCK_MOVEMENT' && `Stock ${req.data.type}: ${req.data.quantity} ${req.data.itemName || 'units'}`}
-                      {req.type === 'CREATE_CHALLAN' && `New Challan: ${req.data.receiverName}`}
-                      {req.type === 'CREATE_GATE_PASS' && `New Gate Pass: ${req.data?.receiverName || req.data?.receiver_name ? `${req.data.receiverName || req.data.receiver_name} ` : ''}(${req.data?.challanIds?.length || 0} Challans)`}
-                      {req.type === 'CREATE_ISSUE' && `New Issue: ${req.data?.recipientName || '-'} (${req.data?.items?.length || 0} Items)`}
-                    </td>
-                    <td>
-                      <span className={`badge badge-${req.status === 'PENDING' ? 'warning' : req.status === 'APPROVED' ? 'success' : 'danger'}`}>
-                        {req.status}
-                      </span>
-                    </td>
-                    <td>
-                      <button className="btn btn-ghost btn-sm" onClick={() => handleReview(req)}>
-                        {activeTab === 'history' ? 'View Details' : 'Review Details'}
-                      </button>
-                    </td>
+          <>
+            <PaginationBar
+              position="top"
+              currentPage={currentPage}
+              totalPages={totalPages}
+              totalItems={filteredRequests.length}
+              pageSize={PAGE_SIZE}
+              onPageChange={setCurrentPage}
+            />
+            <div className="table-wrapper">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <SortHeader label="Date" field="created_at" sortConfig={sortConfig} onSort={handleSort} />
+                    <SortHeader label="Requester" field="requester_name" sortConfig={sortConfig} onSort={handleSort} />
+                    <SortHeader label="Module" field="type" sortConfig={sortConfig} onSort={handleSort} />
+                    <th>Details</th>
+                    <SortHeader label="Status" field="status" sortConfig={sortConfig} onSort={handleSort} />
+                    <th>Action</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {paginatedRequests.map(req => (
+                    <tr key={req.id}>
+                      <td className="text-muted" style={{ fontSize: 13 }}>{new Date(req.created_at).toLocaleString()}</td>
+                      <td style={{ fontWeight: 600 }}>{req.requester_name}</td>
+                      <td>
+                        <span className="badge badge-info">
+                          {req.type === 'CREATE_ITEM' || req.type === 'UPDATE_ITEM' ? 'Inventory' :
+                           req.type === 'STOCK_MOVEMENT' ? 'Stock' :
+                           req.type === 'CREATE_CHALLAN' ? 'Challan' :
+                           req.type === 'CREATE_GATE_PASS' ? 'Gate Pass' :
+                           req.type === 'CREATE_ISSUE' ? 'Issue' : req.type}
+                        </span>
+                      </td>
+                      <td style={{ fontSize: 13 }}>
+                        {req.type === 'CREATE_ITEM' && `New Item: ${req.data.name}`}
+                        {req.type === 'PENDING_ITEM' && `Pending Item: ${req.data.name}`}
+                        {req.type === 'UPDATE_ITEM' && `Update Item: ${req.data.data?.name || req.data.name}`}
+                        {req.type === 'STOCK_MOVEMENT' && `Stock ${req.data.type}: ${req.data.quantity} ${req.data.itemName || 'units'}`}
+                        {req.type === 'CREATE_CHALLAN' && `New Challan: ${req.data.receiverName}`}
+                        {req.type === 'CREATE_GATE_PASS' && `New Gate Pass: ${req.data?.receiverName || req.data?.receiver_name ? `${req.data.receiverName || req.data.receiver_name} ` : ''}(${req.data?.challanIds?.length || 0} Challans)`}
+                        {req.type === 'CREATE_ISSUE' && `New Issue: ${req.data?.recipientName || '-'} (${req.data?.items?.length || 0} Items)`}
+                      </td>
+                      <td>
+                        <span className={`badge badge-${req.status === 'PENDING' ? 'warning' : req.status === 'APPROVED' ? 'success' : 'danger'}`}>
+                          {req.status}
+                        </span>
+                      </td>
+                      <td>
+                        <button className="btn btn-ghost btn-sm" onClick={() => handleReview(req)}>
+                          {activeTab === 'history' ? 'View Details' : 'Review Details'}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <PaginationBar
+              position="bottom"
+              currentPage={currentPage}
+              totalPages={totalPages}
+              totalItems={filteredRequests.length}
+              pageSize={PAGE_SIZE}
+              onPageChange={setCurrentPage}
+            />
+          </>
         )}
       </div>
     </div>

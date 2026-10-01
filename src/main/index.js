@@ -17,7 +17,10 @@ if (!gotTheLock) {
   // Fix for GPU Cache and Access Denied errors
   app.commandLine.appendSwitch('disable-gpu-cache');
   app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
-  app.commandLine.appendSwitch('disable-http-cache'); // Help with "Unable to move cache"
+  app.commandLine.appendSwitch('disable-http-cache');
+  // V8 Memory limits and GC optimization to prevent RAM ballooning up to 4GB
+  app.commandLine.appendSwitch('js-flags', '--max-old-space-size=512 --expose-gc');
+  app.commandLine.appendSwitch('renderer-process-limit', '2');
 }
 
 function createWindow() {
@@ -32,7 +35,6 @@ function createWindow() {
     icon: path.join(__dirname, '../../assets/logo.png'),
   });
 
-
   mainWindow.once('ready-to-show', () => mainWindow.show());
 
   if (process.env.NODE_ENV === 'development') {
@@ -41,7 +43,26 @@ function createWindow() {
     mainWindow.loadFile(path.join(__dirname, '../../dist/index.html'));
   }
 
-  mainWindow.on('closed', () => { mainWindow = null; });
+  // Periodic memory cleanup and working set trimming
+  const trimMemory = () => {
+    try {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.session.clearCache().catch(() => {});
+        if (global.gc) {
+          global.gc();
+        }
+      }
+    } catch (e) {}
+  };
+
+  mainWindow.on('minimize', trimMemory);
+  mainWindow.on('blur', trimMemory);
+  const memInterval = setInterval(trimMemory, 3 * 60 * 1000);
+
+  mainWindow.on('closed', () => {
+    clearInterval(memInterval);
+    mainWindow = null;
+  });
 
   // Keyboard shortcuts for refreshing and devtools
   mainWindow.webContents.on('before-input-event', (event, input) => {

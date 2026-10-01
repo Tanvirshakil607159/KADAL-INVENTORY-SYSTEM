@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { applyTheme, readTheme } from '../theme';
+import { applyMotion, readMotion } from '../motion';
 
 const savedUser = sessionStorage.getItem('kadal_user');
 const initialUser = savedUser ? JSON.parse(savedUser) : null;
@@ -8,6 +9,8 @@ const useStore = create((set, get) => ({
   // Appearance is a preference on this device, independent of company settings.
   theme: applyTheme(readTheme(), false),
   setTheme: (theme, persist = true) => set({ theme: applyTheme(theme, persist) }),
+  motionEnabled: applyMotion(readMotion(), false),
+  setMotionEnabled: (enabled, persist = true) => set({ motionEnabled: applyMotion(enabled, persist) }),
 
   // Auth
   user: initialUser,
@@ -19,16 +22,18 @@ const useStore = create((set, get) => ({
   },
   logout: () => {
     sessionStorage.removeItem('kadal_user');
-    set({ user: null, isLoggedIn: false });
+    set({ user: null, isLoggedIn: false, sidebarOpen: false });
   },
 
   // Navigation & Landing
   showLanding: true,
-  setShowLanding: (showLanding) => set({ showLanding }),
-  goHome: () => set({ showLanding: true }),
-  openApp: () => set({ showLanding: false }),
+  setShowLanding: (showLanding) => set({ showLanding, sidebarOpen: false }),
+  goHome: () => set({ showLanding: true, sidebarOpen: false }),
+  openApp: () => set({ showLanding: false, sidebarOpen: false }),
   currentPage: 'dashboard',
-  setPage: (page) => set({ currentPage: page }),
+  setPage: (page) => set({ currentPage: page, sidebarOpen: false }),
+  sidebarOpen: false,
+  setSidebarOpen: (sidebarOpen) => set({ sidebarOpen }),
 
   // Toast notifications
   toasts: [],
