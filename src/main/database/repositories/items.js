@@ -42,35 +42,32 @@ const ItemsRepo = {
       }
 
       const data = await fetchAll(query.order('name', { ascending: true }).order('id', { ascending: true }));
-      const tiersMap = await ItemPriceTiersRepo.getAllActiveGrouped();
-      
-      // Fetch issue mapping for factory issues
-      const { data: issueItemsData } = await getSupabase()
-        .from('issue_items')
-        .select('item_id, issues!inner(issue_id, issue_type), items!inner(order_number)')
-        .eq('issues.issue_type', 'FACTORY');
+
+      // Fire all supplementary queries in parallel instead of sequentially
+      const [tiersMap, issueItemsResult, targetIssuesResult] = await Promise.all([
+        ItemPriceTiersRepo.getAllActiveGrouped(),
+        getSupabase()
+          .from('issue_items')
+          .select('item_id, issues!inner(issue_id, issue_type)')
+          .eq('issues.issue_type', 'FACTORY'),
+        getSupabase()
+          .from('issues')
+          .select('issue_id, produced_item_id, produced_item_ids, remarks')
+          .eq('issue_type', 'FACTORY')
+      ]);
+
+      const { data: issueItemsData } = issueItemsResult;
+      const { data: targetIssuesData } = targetIssuesResult;
       
       const issueMap = {};
-      const orderIssueMap = {};
       if (issueItemsData) {
         issueItemsData.forEach(ii => {
-          if (ii.issues) {
+          if (ii.issues?.issue_id && ii.item_id) {
             if (!issueMap[ii.item_id]) issueMap[ii.item_id] = new Set();
             issueMap[ii.item_id].add(ii.issues.issue_id);
-            
-            if (ii.items && ii.items.order_number) {
-               if (!orderIssueMap[ii.items.order_number]) orderIssueMap[ii.items.order_number] = new Set();
-               orderIssueMap[ii.items.order_number].add(ii.issues.issue_id);
-            }
           }
         });
       }
-      
-      // Fetch issues directly to get target products mapping
-      const { data: targetIssuesData } = await getSupabase()
-        .from('issues')
-        .select('*')
-        .eq('issue_type', 'FACTORY');
 
       if (targetIssuesData) {
         targetIssuesData.forEach(iss => {
@@ -95,22 +92,16 @@ const ItemsRepo = {
           });
         });
       }
-      
+
       // Map Supabase relation format to match local format
       return data.map(i => {
         const itemTiers = tiersMap[i.id] || [];
-        const set = new Set();
-        if (issueMap[i.id]) {
-          issueMap[i.id].forEach(n => set.add(n));
-        }
-        if (i.order_number && orderIssueMap[i.order_number]) {
-          orderIssueMap[i.order_number].forEach(n => set.add(n));
-        }
+        const itemIssues = issueMap[i.id];
         return {
           ...i,
           category_name: i.categories?.name,
           supplier_name: i.suppliers?.name,
-          issue_numbers: set.size > 0 ? [...set].join(', ') : null,
+          issue_numbers: itemIssues && itemIssues.size > 0 ? [...itemIssues].join(', ') : null,
           price_tiers: itemTiers.length > 0 ? itemTiers : (Number(i.current_stock) > 0 ? [{ quantity: i.current_stock, unit_price: i.unit_price, currency: i.currency, conversion_rate: i.conversion_rate }] : [])
         };
       });
@@ -136,8 +127,7 @@ const ItemsRepo = {
         (SELECT GROUP_CONCAT(DISTINCT iss.issue_id) 
          FROM issue_items ii 
          JOIN issues iss ON ii.issue_id = iss.id 
-         JOIN items ii_item ON ii.item_id = ii_item.id
-         WHERE (ii.item_id = i.id OR (ii_item.order_number = i.order_number AND i.order_number IS NOT NULL AND i.order_number != ''))
+         WHERE ii.item_id = i.id
            AND iss.issue_type = 'FACTORY') as raw_issue_numbers
       FROM items i 
       LEFT JOIN categories c ON i.category_id = c.id 

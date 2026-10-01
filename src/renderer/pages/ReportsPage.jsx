@@ -1,5 +1,5 @@
 import SearchableSelect from '../components/ui/SearchableSelect';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import useStore from '../store/useStore';
 import { Download, FileSpreadsheet, FileText, Eye, ArrowLeft, XCircle, Trash2, ArrowUpDown, ArrowUp, ArrowDown, ClipboardList } from 'lucide-react';
 
@@ -16,6 +16,87 @@ const TABS = [
   { id: 'audit', label: '📋 Audit Report' },
 ];
 
+const PAGE_SIZE = 100;
+
+// Moved outside component — never recreated
+const NUMERIC_FIELDS = new Set([
+  'current_stock', 'order_quantity', 'min_stock_level', 'unit_price', 'conversion_rate',
+  'total_in', 'total_out', 'shipped_quantity', 'total_shipped', 'balance'
+]);
+
+// Pagination bar component
+const PaginationBar = React.memo(({ currentPage, totalPages, totalItems, pageSize, onPageChange, position = 'bottom', loading = false }) => {
+  if (loading || totalPages <= 1) return null;
+  const isTop = position === 'top';
+  const start = totalItems === 0 ? 0 : currentPage * pageSize + 1;
+  const end = Math.min((currentPage + 1) * pageSize, totalItems);
+  return (
+    <div style={{
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      padding: '8px 0',
+      borderTop: isTop ? undefined : '1px solid var(--border)',
+      borderBottom: isTop ? '1px solid var(--border)' : undefined,
+      marginTop: isTop ? 4 : 8,
+      marginBottom: isTop ? 8 : 4
+    }}>
+      <div className="text-muted" style={{ fontSize: 12 }}>
+        Showing {start}–{end} of {totalItems.toLocaleString()} records
+      </div>
+      <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+        <button
+          className="btn btn-outline btn-sm"
+          disabled={currentPage === 0}
+          onClick={() => onPageChange(0)}
+          style={{ padding: '4px 8px', fontSize: 12 }}
+          title="First Page"
+        >«</button>
+        <button
+          className="btn btn-outline btn-sm"
+          disabled={currentPage === 0}
+          onClick={() => onPageChange(currentPage - 1)}
+          style={{ padding: '4px 10px', fontSize: 12 }}
+          title="Previous Page"
+        >‹ PREV</button>
+        <span style={{ padding: '0 10px', fontSize: 12, fontWeight: 600 }}>
+          Page {currentPage + 1} of {totalPages}
+        </span>
+        <button
+          className="btn btn-outline btn-sm"
+          disabled={currentPage >= totalPages - 1}
+          onClick={() => onPageChange(currentPage + 1)}
+          style={{ padding: '4px 10px', fontSize: 12 }}
+          title="Next Page"
+        >NEXT ›</button>
+        <button
+          className="btn btn-outline btn-sm"
+          disabled={currentPage >= totalPages - 1}
+          onClick={() => onPageChange(totalPages - 1)}
+          style={{ padding: '4px 8px', fontSize: 12 }}
+          title="Last Page"
+        >»</button>
+      </div>
+    </div>
+  );
+});
+
+// SortHeader extracted outside component to prevent recreation on every render
+const SortHeader = React.memo(({ label, field, className = "", sortConfig, onSort }) => (
+  <th
+    className={`sortable ${className}`}
+    onClick={() => onSort(field)}
+  >
+    <div className="flex items-center justify-between">
+      {label}
+      <span className={`sort-icon-container ${sortConfig.key === field ? 'active' : ''}`}>
+        {sortConfig.key !== field ? <ArrowUpDown size={12} /> :
+          sortConfig.direction === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />}
+      </span>
+    </div>
+  </th>
+));
+
 
 export default function ReportsPage() {
   const { addToast, showConfirm, user } = useStore();
@@ -25,6 +106,7 @@ export default function ReportsPage() {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [styleName, setStyleName] = useState('');
   const [orderNumber, setOrderNumber] = useState('');
   const [purchaseNo, setPurchaseNo] = useState('');
@@ -42,84 +124,93 @@ export default function ReportsPage() {
   const [auditData, setAuditData] = useState(null);
   const [auditSection, setAuditSection] = useState('wip');
   const [auditCutoffDate, setAuditCutoffDate] = useState('2026-06-30');
+  const [currentPage, setCurrentPage] = useState(0);
 
-  const handleSort = (key) => {
+  // Track if initial metadata has loaded to avoid firing loadReport before ready
+  const [metadataReady, setMetadataReady] = useState(false);
+  const loadReportRef = useRef(null);
+
+  // Debounce search input — wait 350ms after user stops typing
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search), 350);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  const handleSort = useCallback((key) => {
     setSortConfig(prev => ({
       key,
       direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc'
     }));
-  };
-
-  const sortedData = [...data].sort((a, b) => {
-    if (!sortConfig.key) return 0;
-    let valA = a[sortConfig.key];
-    let valB = b[sortConfig.key];
-
-    // Numeric fields
-    const numericFields = [
-      'current_stock', 'order_quantity', 'min_stock_level', 'unit_price', 'conversion_rate',
-      'total_in', 'total_out', 'shipped_quantity', 'total_shipped', 'balance'
-    ];
-
-    if (numericFields.includes(sortConfig.key)) {
-      valA = Number(valA) || 0;
-      valB = Number(valB) || 0;
-    } else {
-      valA = (valA || '').toString().toLowerCase();
-      valB = (valB || '').toString().toLowerCase();
-    }
-
-    if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
-    if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
-    return 0;
-  });
-
-  const SortHeader = ({ label, field, className = "" }) => (
-    <th
-      className={`sortable ${className}`}
-      onClick={() => handleSort(field)}
-    >
-      <div className="flex items-center justify-between">
-        {label}
-        <span className={`sort-icon-container ${sortConfig.key === field ? 'active' : ''}`}>
-          {sortConfig.key !== field ? <ArrowUpDown size={12} /> :
-            sortConfig.direction === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />}
-        </span>
-      </div>
-    </th>
-  );
-
-  useEffect(() => {
-    const fetchDV = async () => {
-      const res = await window.kadal.items.getDistinctValues();
-      if (res?.success) setDistinctValues(res.data);
-    };
-    const fetchRec = async () => {
-      try {
-        const r = await window.kadal.recipients.getAll();
-        if (r?.success) setRecipientsList(r.data);
-        else if (Array.isArray(r)) setRecipientsList(r);
-      } catch (e) { }
-    };
-    const fetchCats = async () => {
-      try {
-        const c = await window.kadal.categories.getAll();
-        if (c?.success) setCategoriesList(c.data);
-        else if (Array.isArray(c)) setCategoriesList(c);
-      } catch (e) { }
-    };
-    fetchDV();
-    fetchRec();
-    fetchCats();
   }, []);
 
-  useEffect(() => { loadReport(); }, [activeTab, dateFrom, dateTo, search, styleName, orderNumber, purchaseNo, buyerName, categoryId, auditCutoffDate, status, receiverName]);
+  // Memoize sorted data — only re-sorts when data or sortConfig changes
+  const sortedData = useMemo(() => {
+    if (!sortConfig.key) return data;
+    return [...data].sort((a, b) => {
+      let valA = a[sortConfig.key];
+      let valB = b[sortConfig.key];
 
-  const loadReport = async () => {
+      if (NUMERIC_FIELDS.has(sortConfig.key)) {
+        valA = Number(valA) || 0;
+        valB = Number(valB) || 0;
+      } else {
+        valA = (valA || '').toString().toLowerCase();
+        valB = (valB || '').toString().toLowerCase();
+      }
+
+      if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
+      if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }, [data, sortConfig]);
+
+  // Paginate sorted data — only render PAGE_SIZE rows
+  const paginatedData = useMemo(() => {
+    const start = currentPage * PAGE_SIZE;
+    return sortedData.slice(start, start + PAGE_SIZE);
+  }, [sortedData, currentPage]);
+
+  // Reset page when data, tab, or sort changes
+  useEffect(() => { setCurrentPage(0); }, [data, activeTab, sortConfig]);
+
+  // Fetch all metadata in parallel on mount, then mark ready
+  useEffect(() => {
+    let cancelled = false;
+    const fetchAll = async () => {
+      const [dvRes, recRes, catRes] = await Promise.allSettled([
+        window.kadal.items.getDistinctValues(),
+        window.kadal.recipients.getAll(),
+        window.kadal.categories.getAll(),
+      ]);
+
+      if (cancelled) return;
+
+      if (dvRes.status === 'fulfilled' && dvRes.value?.success) {
+        setDistinctValues(dvRes.value.data);
+      }
+      if (recRes.status === 'fulfilled') {
+        const r = recRes.value;
+        if (r?.success) setRecipientsList(r.data);
+        else if (Array.isArray(r)) setRecipientsList(r);
+      }
+      if (catRes.status === 'fulfilled') {
+        const c = catRes.value;
+        if (c?.success) setCategoriesList(c.data);
+        else if (Array.isArray(c)) setCategoriesList(c);
+      }
+
+      setMetadataReady(true);
+    };
+    fetchAll();
+    return () => { cancelled = true; };
+  }, []);
+
+  // loadReport as a stable callback
+  const loadReport = useCallback(async () => {
     setLoading(true);
     try {
       let res;
-      const filters = { dateFrom, dateTo, search, styleName, orderNumber, purchaseNo, buyerName, categoryId: categoryId || undefined, status: status || undefined, receiverName: receiverName || undefined };
+      const filters = { dateFrom, dateTo, search: debouncedSearch, styleName, orderNumber, purchaseNo, buyerName, categoryId: categoryId || undefined, status: status || undefined, receiverName: receiverName || undefined };
       switch (activeTab) {
         case 'stock': res = await window.kadal.reports.stockReport(filters); break;
         case 'movement':
@@ -148,9 +239,18 @@ export default function ReportsPage() {
       if (res?.success) setData(res.data || []);
     } catch (e) { addToast('error', 'Failed to load report'); }
     setLoading(false);
-  };
+  }, [activeTab, dateFrom, dateTo, debouncedSearch, styleName, orderNumber, purchaseNo, buyerName, categoryId, auditCutoffDate, status, receiverName, addToast]);
 
-  const getExportOptions = () => {
+  // Store latest loadReport ref for external callers (cancel/delete)
+  loadReportRef.current = loadReport;
+
+  // Only fire loadReport AFTER metadata has loaded — prevents initial double-fetch
+  useEffect(() => {
+    if (metadataReady) loadReport();
+  }, [metadataReady, loadReport]);
+
+  // Memoize export options
+  const getExportOptions = useCallback(() => {
     const options = {};
     if (activeTab === 'monthlyReport' || activeTab === 'dailyDelivery' || activeTab === 'itemDeliverySummary' || activeTab === 'categoryDeliverySummary' || activeTab === 'movement' || activeTab === 'challan' || activeTab === 'itemChallan') {
       if (dateFrom || dateTo) {
@@ -182,10 +282,10 @@ export default function ReportsPage() {
       }
     }
     return options;
-  };
+  }, [activeTab, dateFrom, dateTo, categoryId, categoriesList]);
 
-  // Aggregate data by item for itemDeliverySummary export
-  const getExportData = () => {
+  // Memoize aggregated export data for item/category delivery summaries
+  const getExportData = useCallback(() => {
     if (activeTab === 'itemDeliverySummary') {
       const activeOnly = data.filter(r => r.status === 'ACTIVE');
       const itemMap = {};
@@ -246,30 +346,30 @@ export default function ReportsPage() {
     }
 
     return data;
-  };
+  }, [activeTab, data]);
 
-  const exportExcel = async () => {
+  const exportExcel = useCallback(async () => {
     const res = await window.kadal.reports.exportExcel(activeTab, getExportData(), getExportOptions());
     if (res?.success) addToast('success', 'Excel exported');
     else addToast('error', res?.error || 'Export failed');
-  };
+  }, [activeTab, getExportData, getExportOptions, addToast]);
 
-  const exportPdf = async () => {
+  const exportPdf = useCallback(async () => {
     const res = await window.kadal.reports.exportPdf(activeTab, getExportData(), getExportOptions());
     if (res?.success) addToast('success', 'PDF exported');
     else addToast('error', res?.error || 'Export failed');
-  };
+  }, [activeTab, getExportData, getExportOptions, addToast]);
 
   // Audit section export helpers
-  const getAuditExportType = (section) => {
+  const getAuditExportType = useCallback((section) => {
     switch (section) {
       case 'wip': return 'auditWorkingProcess';
       case 'fg': return 'auditFinishedGoods';
       case 'raw': return 'auditRawMaterial';
       default: return 'auditRawMaterial';
     }
-  };
-  const getAuditSectionData = (section) => {
+  }, []);
+  const getAuditSectionData = useCallback((section) => {
     if (!auditData) return [];
     switch (section) {
       case 'wip': return auditData.workingProcess || [];
@@ -277,17 +377,17 @@ export default function ReportsPage() {
       case 'raw': return auditData.rawMaterials || [];
       default: return [];
     }
-  };
-  const formatCutoffDisplay = (dateStr) => {
+  }, [auditData]);
+  const formatCutoffDisplay = useCallback((dateStr) => {
     const d = new Date(dateStr + 'T00:00:00');
     return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' });
-  };
-  const formatCutoffShort = (dateStr) => {
+  }, []);
+  const formatCutoffShort = useCallback((dateStr) => {
     const d = new Date(dateStr + 'T00:00:00');
     return d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
-  };
+  }, []);
 
-  const exportAuditExcel = async (section) => {
+  const exportAuditExcel = useCallback(async (section) => {
     const type = getAuditExportType(section);
     const sectionData = getAuditSectionData(section);
     const sum = auditData?.summary;
@@ -306,8 +406,9 @@ export default function ReportsPage() {
     const res = await window.kadal.reports.exportExcel(type, sectionData, { subtitles });
     if (res?.success) addToast('success', 'Excel exported');
     else addToast('error', res?.error || 'Export failed');
-  };
-  const exportAuditPdf = async (section) => {
+  }, [getAuditExportType, getAuditSectionData, auditData, auditCutoffDate, categoryId, categoriesList, formatCutoffShort, addToast]);
+
+  const exportAuditPdf = useCallback(async (section) => {
     const type = getAuditExportType(section);
     const sectionData = getAuditSectionData(section);
     const sum = auditData?.summary;
@@ -326,9 +427,9 @@ export default function ReportsPage() {
     const res = await window.kadal.reports.exportPdf(type, sectionData, { subtitles });
     if (res?.success) addToast('success', 'PDF exported');
     else addToast('error', res?.error || 'Export failed');
-  };
+  }, [getAuditExportType, getAuditSectionData, auditData, auditCutoffDate, categoryId, categoriesList, formatCutoffShort, addToast]);
 
-  const exportDetailExcel = async () => {
+  const exportDetailExcel = useCallback(async () => {
     const currencySign = detailItem.currency === 'USD' ? '$' : '৳';
     const currentValue = Number(detailItem.current_stock * (detailItem.unit_price || 0)).toLocaleString(undefined, { minimumFractionDigits: 2 });
     const subtitles = [
@@ -340,9 +441,9 @@ export default function ReportsPage() {
     const res = await window.kadal.reports.exportExcel('movementDetail', detailData, { subtitles });
     if (res?.success) addToast('success', 'Excel exported');
     else addToast('error', res?.error || 'Export failed');
-  };
+  }, [detailItem, detailData, addToast]);
 
-  const exportDetailPdf = async () => {
+  const exportDetailPdf = useCallback(async () => {
     const currencySign = detailItem.currency === 'USD' ? '$' : '৳';
     const currentValue = Number(detailItem.current_stock * (detailItem.unit_price || 0)).toLocaleString(undefined, { minimumFractionDigits: 2 });
     const subtitles = [
@@ -354,9 +455,9 @@ export default function ReportsPage() {
     const res = await window.kadal.reports.exportPdf('movementDetail', detailData, { subtitles });
     if (res?.success) addToast('success', 'PDF exported');
     else addToast('error', res?.error || 'Export failed');
-  };
+  }, [detailItem, detailData, addToast]);
 
-  const showDetails = async (item) => {
+  const showDetails = useCallback(async (item) => {
     setDetailItem(item);
     setDetailLoading(true);
     try {
@@ -364,9 +465,9 @@ export default function ReportsPage() {
       if (res?.success) setDetailData(res.data || []);
     } catch (e) { addToast('error', 'Failed to load details'); }
     setDetailLoading(false);
-  };
+  }, [addToast]);
 
-  const handleCancelReport = async (row) => {
+  const handleCancelReport = useCallback(async (row) => {
     const reason = prompt('Reason for cancellation:');
     if (!reason) return;
     const confirmed = await showConfirm({
@@ -379,12 +480,12 @@ export default function ReportsPage() {
     const res = await window.kadal.challans.cancel(row.challan_id, reason);
     if (res.success) {
       addToast('success', 'Challan cancelled and stock reversed');
-      loadReport();
+      loadReportRef.current();
     }
     else addToast('error', res.error);
-  };
+  }, [showConfirm, addToast]);
 
-  const handleDeleteReport = async (row) => {
+  const handleDeleteReport = useCallback(async (row) => {
     const confirmed = await showConfirm({
       title: 'Delete Challan',
       message: `Permanently DELETE challan ${row.challan_number}? This action cannot be undone and will NOT reverse stock. Use only for data cleanup.`,
@@ -395,10 +496,104 @@ export default function ReportsPage() {
     const res = await window.kadal.challans.delete(row.challan_id);
     if (res.success) {
       addToast('success', 'Challan deleted successfully');
-      loadReport();
+      loadReportRef.current();
     }
     else addToast('error', res.error);
-  };
+  }, [showConfirm, addToast]);
+
+  // Memoize item delivery summary aggregation
+  const itemDeliverySummaryData = useMemo(() => {
+    if (activeTab !== 'itemDeliverySummary') return null;
+    const activeOnly = sortedData.filter(r => r.status === 'ACTIVE');
+    const itemMap = {};
+    activeOnly.forEach(r => {
+      const key = r.item_id || r.item_code;
+      if (!itemMap[key]) {
+        itemMap[key] = {
+          item_name: r.item_name,
+          item_code: r.item_code,
+          size: r.size,
+          color: r.color,
+          unit: r.unit,
+          unit_price: r.unit_price || 0,
+          currency: r.currency || 'BDT',
+          total_delivered: 0,
+          challan_numbers: [],
+          delivery_count: 0,
+        };
+      }
+      itemMap[key].total_delivered += (Number(r.shipped_quantity) || 0);
+      itemMap[key].delivery_count++;
+      if (r.challan_number && !itemMap[key].challan_numbers.includes(r.challan_number)) {
+        itemMap[key].challan_numbers.push(r.challan_number);
+      }
+    });
+    const itemSummary = Object.values(itemMap).sort((a, b) => (a.item_name || '').localeCompare(b.item_name || ''));
+    const sumTotalQty = itemSummary.reduce((s, r) => s + r.total_delivered, 0);
+    const sumTotalBDT = itemSummary.filter(r => r.currency !== 'USD').reduce((s, r) => s + (r.total_delivered * r.unit_price), 0);
+    const sumTotalUSD = itemSummary.filter(r => r.currency === 'USD').reduce((s, r) => s + (r.total_delivered * r.unit_price), 0);
+    const sumUniqueItems = itemSummary.length;
+    return { itemSummary, sumTotalQty, sumTotalBDT, sumTotalUSD, sumUniqueItems };
+  }, [activeTab, sortedData]);
+
+  // Memoize category delivery summary aggregation
+  const categoryDeliverySummaryData = useMemo(() => {
+    if (activeTab !== 'categoryDeliverySummary') return null;
+    const catData = getExportData();
+    const sumTotalQty = catData.reduce((s, r) => s + r.total_delivered, 0);
+    const sumUniqueItems = catData.reduce((s, r) => s + (r.unique_items || 0), 0);
+    const sumTotalBDT = catData.reduce((s, r) => s + r.total_value_bdt, 0);
+    const sumTotalUSD = catData.reduce((s, r) => s + r.total_value_usd, 0);
+    const sumCategories = catData.length;
+    return { catData, sumTotalQty, sumUniqueItems, sumTotalBDT, sumTotalUSD, sumCategories };
+  }, [activeTab, getExportData]);
+
+  // Memoize daily/monthly delivery summary
+  const dailyMonthlyData = useMemo(() => {
+    if (activeTab !== 'dailyDelivery' && activeTab !== 'monthlyReport') return null;
+    const deliveryData = sortedData;
+    const totalItems = deliveryData.length;
+    const totalQty = deliveryData.reduce((s, r) => s + (Number(r.shipped_quantity) || 0), 0);
+    const totalBDT = deliveryData.filter(r => (r.currency || 'BDT') !== 'USD').reduce((s, r) => s + ((Number(r.shipped_quantity) || 0) * (Number(r.unit_price) || 0)), 0);
+    const totalUSD = deliveryData.filter(r => r.currency === 'USD').reduce((s, r) => s + ((Number(r.shipped_quantity) || 0) * (Number(r.unit_price) || 0)), 0);
+
+    const buyerMap = {};
+    deliveryData.forEach(r => {
+      const buyer = r.buyer_name || 'N/A';
+      if (!buyerMap[buyer]) buyerMap[buyer] = { qty: 0, bdt: 0, usd: 0, count: 0 };
+      buyerMap[buyer].count++;
+      buyerMap[buyer].qty += (Number(r.shipped_quantity) || 0);
+      if (r.currency === 'USD') buyerMap[buyer].usd += (Number(r.shipped_quantity) || 0) * (Number(r.unit_price) || 0);
+      else buyerMap[buyer].bdt += (Number(r.shipped_quantity) || 0) * (Number(r.unit_price) || 0);
+    });
+    const buyerSummary = Object.entries(buyerMap).sort((a, b) => (b[1].bdt + b[1].usd) - (a[1].bdt + a[1].usd));
+
+    return { deliveryData, totalItems, totalQty, totalBDT, totalUSD, buyerSummary };
+  }, [activeTab, sortedData]);
+
+  // Calculate total items and total pages dynamically based on active tab
+  const currentTotalItems = useMemo(() => {
+    if (activeTab === 'itemDeliverySummary') {
+      return itemDeliverySummaryData?.itemSummary?.length || 0;
+    }
+    if (activeTab === 'categoryDeliverySummary') {
+      return categoryDeliverySummaryData?.catData?.length || 0;
+    }
+    if (activeTab === 'audit') {
+      return 0;
+    }
+    return sortedData.length;
+  }, [activeTab, itemDeliverySummaryData, categoryDeliverySummaryData, sortedData.length]);
+
+  const totalPages = Math.ceil(currentTotalItems / PAGE_SIZE);
+
+  const tableTopRef = useRef(null);
+  const handlePageChange = useCallback((newPage) => {
+    setCurrentPage(newPage);
+    if (tableTopRef.current) {
+      tableTopRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, []);
 
   const renderTable = () => {
     if (loading) return <div className="loading"><div className="spinner"></div></div>;
@@ -410,19 +605,19 @@ export default function ReportsPage() {
           <table className="data-table">
             <thead>
               <tr>
-                <SortHeader label="Item / Code" field="name" />
-                <SortHeader label="Style / Purchase / Order" field="style_name" />
-                <SortHeader label="Size / Color" field="size" />
-                <SortHeader label="Buyer" field="buyer_name" />
-                <SortHeader label="Unit Price" field="unit_price" className="text-right" />
-                <SortHeader label="Conversion Rate" field="conversion_rate" className="text-right" />
-                <SortHeader label="Stock" field="current_stock" className="text-right" />
+                <SortHeader label="Item / Code" field="name" sortConfig={sortConfig} onSort={handleSort} />
+                <SortHeader label="Style / Purchase / Order" field="style_name" sortConfig={sortConfig} onSort={handleSort} />
+                <SortHeader label="Size / Color" field="size" sortConfig={sortConfig} onSort={handleSort} />
+                <SortHeader label="Buyer" field="buyer_name" sortConfig={sortConfig} onSort={handleSort} />
+                <SortHeader label="Unit Price" field="unit_price" className="text-right" sortConfig={sortConfig} onSort={handleSort} />
+                <SortHeader label="Conversion Rate" field="conversion_rate" className="text-right" sortConfig={sortConfig} onSort={handleSort} />
+                <SortHeader label="Stock" field="current_stock" className="text-right" sortConfig={sortConfig} onSort={handleSort} />
                 <th className="text-right">Total Value</th>
-                <SortHeader label="Unit" field="unit" />
-                <SortHeader label="Min Level" field="min_stock_level" className="text-right" />
+                <SortHeader label="Unit" field="unit" sortConfig={sortConfig} onSort={handleSort} />
+                <SortHeader label="Min Level" field="min_stock_level" className="text-right" sortConfig={sortConfig} onSort={handleSort} />
               </tr>
             </thead>
-            <tbody>{sortedData.map(r => (
+            <tbody>{paginatedData.map(r => (
               <tr key={r.id}>
                 <td>
                   <div style={{ fontWeight: 600 }}>{r.name}</div>
@@ -523,20 +718,20 @@ export default function ReportsPage() {
           <table className="data-table">
             <thead>
               <tr>
-                <SortHeader label="Item / Code" field="item_name" />
-                <SortHeader label="Style / Purchase / Order" field="style_name" />
-                <SortHeader label="Size / Color" field="size" />
-                <SortHeader label="Buyer" field="buyer_name" />
-                <SortHeader label="Order Qty" field="order_quantity" className="text-right" />
-                <SortHeader label="Total IN" field="total_in" className="text-right" />
-                <SortHeader label="Total OUT" field="total_out" className="text-right" />
-                <SortHeader label="Balance" field="balance" className="text-right" />
-                <SortHeader label="Current Stock" field="current_stock" className="text-right" />
-                <SortHeader label="Unit" field="unit" />
+                <SortHeader label="Item / Code" field="item_name" sortConfig={sortConfig} onSort={handleSort} />
+                <SortHeader label="Style / Purchase / Order" field="style_name" sortConfig={sortConfig} onSort={handleSort} />
+                <SortHeader label="Size / Color" field="size" sortConfig={sortConfig} onSort={handleSort} />
+                <SortHeader label="Buyer" field="buyer_name" sortConfig={sortConfig} onSort={handleSort} />
+                <SortHeader label="Order Qty" field="order_quantity" className="text-right" sortConfig={sortConfig} onSort={handleSort} />
+                <SortHeader label="Total IN" field="total_in" className="text-right" sortConfig={sortConfig} onSort={handleSort} />
+                <SortHeader label="Total OUT" field="total_out" className="text-right" sortConfig={sortConfig} onSort={handleSort} />
+                <SortHeader label="Balance" field="balance" className="text-right" sortConfig={sortConfig} onSort={handleSort} />
+                <SortHeader label="Current Stock" field="current_stock" className="text-right" sortConfig={sortConfig} onSort={handleSort} />
+                <SortHeader label="Unit" field="unit" sortConfig={sortConfig} onSort={handleSort} />
                 <th>Action</th>
               </tr>
             </thead>
-            <tbody>{sortedData.map((r, i) => (
+            <tbody>{paginatedData.map((r, i) => (
               <tr key={i}>
                 <td>
                   <div style={{ fontWeight: 600 }}>{r.item_name}</div>
@@ -564,16 +759,16 @@ export default function ReportsPage() {
           <table className="data-table">
             <thead>
               <tr>
-                <SortHeader label="Code" field="item_code" />
-                <SortHeader label="Item" field="name" />
-                <SortHeader label="Buyer" field="buyer_name" />
-                <SortHeader label="Category" field="category_name" />
-                <SortHeader label="Current" field="current_stock" className="text-right" />
-                <SortHeader label="Min Level" field="min_stock_level" className="text-right" />
+                <SortHeader label="Code" field="item_code" sortConfig={sortConfig} onSort={handleSort} />
+                <SortHeader label="Item" field="name" sortConfig={sortConfig} onSort={handleSort} />
+                <SortHeader label="Buyer" field="buyer_name" sortConfig={sortConfig} onSort={handleSort} />
+                <SortHeader label="Category" field="category_name" sortConfig={sortConfig} onSort={handleSort} />
+                <SortHeader label="Current" field="current_stock" className="text-right" sortConfig={sortConfig} onSort={handleSort} />
+                <SortHeader label="Min Level" field="min_stock_level" className="text-right" sortConfig={sortConfig} onSort={handleSort} />
                 <th style={{ textAlign: 'right' }}>Deficit</th>
               </tr>
             </thead>
-            <tbody>{sortedData.map(r => (
+            <tbody>{paginatedData.map(r => (
               <tr key={r.id}>
                 <td className="text-mono" style={{ fontSize: 12 }}>{r.item_code}</td><td style={{ fontWeight: 600 }}>{r.name}</td>
                 <td>{r.buyer_name || '-'}</td>
@@ -590,21 +785,21 @@ export default function ReportsPage() {
           <table className="data-table">
             <thead>
               <tr>
-                <SortHeader label="Challan No" field="challan_number" />
-                <SortHeader label="Date" field="challan_date" />
-                <SortHeader label="Receiver" field="receiver_name" />
-                <SortHeader label="Buyer" field="buyer_name" />
-                <SortHeader label="Item Details" field="item_name" />
-                <SortHeader label="Style / Order / Purchase" field="style_name" />
-                <SortHeader label="Order Qty" field="order_quantity" className="text-right" />
-                <SortHeader label="Shipped" field="shipped_quantity" className="text-right" />
-                <SortHeader label="Total Out" field="total_shipped" className="text-right" />
-                <SortHeader label="Balance" field="balance" className="text-right" />
-                <SortHeader label="Status" field="status" />
+                <SortHeader label="Challan No" field="challan_number" sortConfig={sortConfig} onSort={handleSort} />
+                <SortHeader label="Date" field="challan_date" sortConfig={sortConfig} onSort={handleSort} />
+                <SortHeader label="Receiver" field="receiver_name" sortConfig={sortConfig} onSort={handleSort} />
+                <SortHeader label="Buyer" field="buyer_name" sortConfig={sortConfig} onSort={handleSort} />
+                <SortHeader label="Item Details" field="item_name" sortConfig={sortConfig} onSort={handleSort} />
+                <SortHeader label="Style / Order / Purchase" field="style_name" sortConfig={sortConfig} onSort={handleSort} />
+                <SortHeader label="Order Qty" field="order_quantity" className="text-right" sortConfig={sortConfig} onSort={handleSort} />
+                <SortHeader label="Shipped" field="shipped_quantity" className="text-right" sortConfig={sortConfig} onSort={handleSort} />
+                <SortHeader label="Total Out" field="total_shipped" className="text-right" sortConfig={sortConfig} onSort={handleSort} />
+                <SortHeader label="Balance" field="balance" className="text-right" sortConfig={sortConfig} onSort={handleSort} />
+                <SortHeader label="Status" field="status" sortConfig={sortConfig} onSort={handleSort} />
                 <th>Actions</th>
               </tr>
             </thead>
-            <tbody>{sortedData.map((r, i) => (
+            <tbody>{paginatedData.map((r, i) => (
               <tr key={i}>
                 <td className="text-mono" style={{ fontSize: 12, color: 'var(--accent)' }}>{r.challan_number}</td>
                 <td style={{ fontSize: 11 }}>{new Date(r.challan_date).toLocaleDateString('en-GB')}</td>
@@ -655,19 +850,19 @@ export default function ReportsPage() {
           <table className="data-table">
             <thead>
               <tr>
-                <SortHeader label="Item Details" field="item_name" />
-                <SortHeader label="Style / Order / Purchase" field="style_name" />
-                <SortHeader label="Buyer" field="buyer_name" />
-                <SortHeader label="Challan No" field="challan_number" />
-                <SortHeader label="Date" field="challan_date" />
-                <SortHeader label="Receiver" field="receiver_name" />
-                <SortHeader label="Order Qty" field="order_quantity" className="text-right" />
-                <SortHeader label="Shipped" field="shipped_quantity" className="text-right" />
-                <SortHeader label="Status" field="status" />
+                <SortHeader label="Item Details" field="item_name" sortConfig={sortConfig} onSort={handleSort} />
+                <SortHeader label="Style / Order / Purchase" field="style_name" sortConfig={sortConfig} onSort={handleSort} />
+                <SortHeader label="Buyer" field="buyer_name" sortConfig={sortConfig} onSort={handleSort} />
+                <SortHeader label="Challan No" field="challan_number" sortConfig={sortConfig} onSort={handleSort} />
+                <SortHeader label="Date" field="challan_date" sortConfig={sortConfig} onSort={handleSort} />
+                <SortHeader label="Receiver" field="receiver_name" sortConfig={sortConfig} onSort={handleSort} />
+                <SortHeader label="Order Qty" field="order_quantity" className="text-right" sortConfig={sortConfig} onSort={handleSort} />
+                <SortHeader label="Shipped" field="shipped_quantity" className="text-right" sortConfig={sortConfig} onSort={handleSort} />
+                <SortHeader label="Status" field="status" sortConfig={sortConfig} onSort={handleSort} />
                 <th>Actions</th>
               </tr>
             </thead>
-            <tbody>{sortedData.map((r, i) => (
+            <tbody>{paginatedData.map((r, i) => (
               <tr key={i}>
                 <td>
                   <div style={{ fontWeight: 600 }}>{r.item_name}</div>
@@ -702,37 +897,8 @@ export default function ReportsPage() {
           </table>
         );
       case 'itemDeliverySummary': {
-        // Aggregate by item
-        const activeOnly = sortedData.filter(r => r.status === 'ACTIVE');
-        const itemMap = {};
-        activeOnly.forEach(r => {
-          const key = r.item_id || r.item_code;
-          if (!itemMap[key]) {
-            itemMap[key] = {
-              item_name: r.item_name,
-              item_code: r.item_code,
-              size: r.size,
-              color: r.color,
-              unit: r.unit,
-              unit_price: r.unit_price || 0,
-              currency: r.currency || 'BDT',
-              total_delivered: 0,
-              challan_numbers: [],
-              delivery_count: 0,
-            };
-          }
-          itemMap[key].total_delivered += (Number(r.shipped_quantity) || 0);
-          itemMap[key].delivery_count++;
-          if (r.challan_number && !itemMap[key].challan_numbers.includes(r.challan_number)) {
-            itemMap[key].challan_numbers.push(r.challan_number);
-          }
-        });
-        const itemSummary = Object.values(itemMap).sort((a, b) => (a.item_name || '').localeCompare(b.item_name || ''));
-
-        const sumTotalQty = itemSummary.reduce((s, r) => s + r.total_delivered, 0);
-        const sumTotalBDT = itemSummary.filter(r => r.currency !== 'USD').reduce((s, r) => s + (r.total_delivered * r.unit_price), 0);
-        const sumTotalUSD = itemSummary.filter(r => r.currency === 'USD').reduce((s, r) => s + (r.total_delivered * r.unit_price), 0);
-        const sumUniqueItems = itemSummary.length;
+        if (!itemDeliverySummaryData) return null;
+        const { itemSummary, sumTotalQty, sumTotalBDT, sumTotalUSD, sumUniqueItems } = itemDeliverySummaryData;
 
         const fmtBDT2 = (v) => `৳${Number(v || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
         const fmtUSD2 = (v) => `$${Number(v || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
@@ -765,17 +931,18 @@ export default function ReportsPage() {
               <thead>
                 <tr>
                   <th>SL No.</th>
-                  <SortHeader label="Item Details" field="item_name" />
-                  <SortHeader label="Total Delivered" field="total_delivered" className="text-right" />
-                  <SortHeader label="Unit Price" field="unit_price" className="text-right" />
+                  <SortHeader label="Item Details" field="item_name" sortConfig={sortConfig} onSort={handleSort} />
+                  <SortHeader label="Total Delivered" field="total_delivered" className="text-right" sortConfig={sortConfig} onSort={handleSort} />
+                  <SortHeader label="Unit Price" field="unit_price" className="text-right" sortConfig={sortConfig} onSort={handleSort} />
                   <th className="text-right">Total Value</th>
                   <th>Challans</th>
                 </tr>
               </thead>
-              <tbody>{itemSummary.map((r, i) => {
+              <tbody>{(itemDeliverySummaryData.itemSummary.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE)).map((r, i) => {
+                const slNo = currentPage * PAGE_SIZE + i + 1;
                 return (
                   <tr key={i}>
-                    <td>{i + 1}</td>
+                    <td>{slNo}</td>
                     <td>
                       <div style={{ fontWeight: 600 }}>{r.item_name || '-'}</div>
                       <div className="text-mono text-muted" style={{ fontSize: 11 }}>{r.item_code}</div>
@@ -810,12 +977,8 @@ export default function ReportsPage() {
         );
       }
       case 'categoryDeliverySummary': {
-        const catData = getExportData();
-        const sumTotalQty = catData.reduce((s, r) => s + r.total_delivered, 0);
-        const sumUniqueItems = catData.reduce((s, r) => s + (r.unique_items || 0), 0);
-        const sumTotalBDT = catData.reduce((s, r) => s + r.total_value_bdt, 0);
-        const sumTotalUSD = catData.reduce((s, r) => s + r.total_value_usd, 0);
-        const sumCategories = catData.length;
+        if (!categoryDeliverySummaryData) return null;
+        const { catData, sumTotalQty, sumUniqueItems, sumTotalBDT, sumTotalUSD, sumCategories } = categoryDeliverySummaryData;
 
         const fmtBDT2 = (v) => `৳${Number(v || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
         const fmtUSD2 = (v) => `$${Number(v || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
@@ -852,9 +1015,9 @@ export default function ReportsPage() {
               <thead>
                 <tr>
                   <th>SL No.</th>
-                  <SortHeader label="Category Name" field="category_name" />
-                  <SortHeader label="Unique Items" field="unique_items" className="text-center" />
-                  <SortHeader label="Total Delivered" field="total_delivered" className="text-right" />
+                  <SortHeader label="Category Name" field="category_name" sortConfig={sortConfig} onSort={handleSort} />
+                  <SortHeader label="Unique Items" field="unique_items" className="text-center" sortConfig={sortConfig} onSort={handleSort} />
+                  <SortHeader label="Total Delivered" field="total_delivered" className="text-right" sortConfig={sortConfig} onSort={handleSort} />
                   <th className="text-right">Total Value (BDT)</th>
                   <th className="text-right">Total Value (USD)</th>
                 </tr>
@@ -884,24 +1047,8 @@ export default function ReportsPage() {
       }
       case 'dailyDelivery':
       case 'monthlyReport': {
-        // Compute summary
-        const deliveryData = sortedData;
-        const totalItems = deliveryData.length;
-        const totalQty = deliveryData.reduce((s, r) => s + (Number(r.shipped_quantity) || 0), 0);
-        const totalBDT = deliveryData.filter(r => (r.currency || 'BDT') !== 'USD').reduce((s, r) => s + ((Number(r.shipped_quantity) || 0) * (Number(r.unit_price) || 0)), 0);
-        const totalUSD = deliveryData.filter(r => r.currency === 'USD').reduce((s, r) => s + ((Number(r.shipped_quantity) || 0) * (Number(r.unit_price) || 0)), 0);
-
-        // Buyer-wise breakdown
-        const buyerMap = {};
-        deliveryData.forEach(r => {
-          const buyer = r.buyer_name || 'N/A';
-          if (!buyerMap[buyer]) buyerMap[buyer] = { qty: 0, bdt: 0, usd: 0, count: 0 };
-          buyerMap[buyer].count++;
-          buyerMap[buyer].qty += (Number(r.shipped_quantity) || 0);
-          if (r.currency === 'USD') buyerMap[buyer].usd += (Number(r.shipped_quantity) || 0) * (Number(r.unit_price) || 0);
-          else buyerMap[buyer].bdt += (Number(r.shipped_quantity) || 0) * (Number(r.unit_price) || 0);
-        });
-        const buyerSummary = Object.entries(buyerMap).sort((a, b) => (b[1].bdt + b[1].usd) - (a[1].bdt + a[1].usd));
+        if (!dailyMonthlyData) return null;
+        const { deliveryData, totalItems, totalQty, totalBDT, totalUSD, buyerSummary } = dailyMonthlyData;
 
         const fmtBDT = (v) => `৳${Number(v || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
         const fmtUSD = (v) => `$${Number(v || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
@@ -955,18 +1102,18 @@ export default function ReportsPage() {
               <thead>
                 <tr>
                   <th>SL No.</th>
-                  <SortHeader label="Item Details" field="item_name" />
-                  <SortHeader label="Buyer" field="buyer_name" />
-                  <SortHeader label="Style" field="style_name" />
-                  <SortHeader label="Delivery Qty" field="shipped_quantity" className="text-right" />
-                  <SortHeader label="Unit Price" field="unit_price" className="text-right" />
+                  <SortHeader label="Item Details" field="item_name" sortConfig={sortConfig} onSort={handleSort} />
+                  <SortHeader label="Buyer" field="buyer_name" sortConfig={sortConfig} onSort={handleSort} />
+                  <SortHeader label="Style" field="style_name" sortConfig={sortConfig} onSort={handleSort} />
+                  <SortHeader label="Delivery Qty" field="shipped_quantity" className="text-right" sortConfig={sortConfig} onSort={handleSort} />
+                  <SortHeader label="Unit Price" field="unit_price" className="text-right" sortConfig={sortConfig} onSort={handleSort} />
                   <th className="text-right">Total Value</th>
-                  <SortHeader label="Challan No." field="challan_number" />
+                  <SortHeader label="Challan No." field="challan_number" sortConfig={sortConfig} onSort={handleSort} />
                 </tr>
               </thead>
-              <tbody>{deliveryData.map((r, i) => (
+              <tbody>{paginatedData.map((r, i) => (
                 <tr key={i}>
-                  <td>{i + 1}</td>
+                  <td>{currentPage * PAGE_SIZE + i + 1}</td>
                   <td>
                     <div style={{ fontWeight: 600 }}>{r.item_name || '-'}</div>
                     <div className="text-muted" style={{ fontSize: 11 }}>{[r.size, r.color].filter(Boolean).join(' / ') || '-'}</div>
@@ -1424,7 +1571,26 @@ export default function ReportsPage() {
         </div>
       </div>
 
+      <div ref={tableTopRef} />
+      <PaginationBar
+        position="top"
+        loading={loading}
+        currentPage={currentPage}
+        totalPages={totalPages}
+        totalItems={currentTotalItems}
+        pageSize={PAGE_SIZE}
+        onPageChange={handlePageChange}
+      />
       <div className="table-wrapper">{renderTable()}</div>
+      <PaginationBar
+        position="bottom"
+        loading={loading}
+        currentPage={currentPage}
+        totalPages={totalPages}
+        totalItems={currentTotalItems}
+        pageSize={PAGE_SIZE}
+        onPageChange={handlePageChange}
+      />
     </div>
   );
 }
