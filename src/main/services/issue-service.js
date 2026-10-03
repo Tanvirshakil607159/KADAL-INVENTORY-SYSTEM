@@ -197,21 +197,116 @@ const IssueService = {
     if (!issue) throw new Error('Issue not found');
 
     const user = AuthService.getCurrentUser();
+    const isAdmin = user?.roleName === 'Admin' || user?.roleName === 'Super Admin' || user?.role_name === 'Admin' || user?.role_name === 'Super Admin';
+    const settingVal = await SettingsRepo.get('require_reissue_approval');
+    const requireApproval = settingVal !== 'false';
+
+    if (!isAdmin && requireApproval) {
+      // 1. Pre-validate stock availability so an invalid reissue cannot be queued
+      for (const item of data.items) {
+        const itemId = item.itemId || item.id;
+        const dbItem = await ItemsRepo.getById(itemId);
+        if (!dbItem) throw new Error(`Item not found: ${itemId}`);
+        const qty = Number(item.quantity);
+        if (dbItem.current_stock < qty) {
+          throw new Error(`Insufficient stock for "${dbItem.name}". Available: ${dbItem.current_stock}, Requested: ${qty}`);
+        }
+      }
+
+      // 2. Fully enrich item details for clear approval review display
+      const enrichedItems = [];
+      for (const item of data.items) {
+        const itemId = item.itemId || item.id;
+        const dbItem = await ItemsRepo.getById(itemId);
+        enrichedItems.push({
+          itemId: itemId,
+          name: item.name || dbItem?.name || 'Unknown Item',
+          itemCode: item.itemCode || dbItem?.item_code || '',
+          unit: item.unit || dbItem?.unit || 'Pcs',
+          currentStock: dbItem ? dbItem.current_stock : (item.currentStock ?? 0),
+          quantity: Number(item.quantity),
+          notes: item.notes || '',
+          buyerName: item.buyerName || dbItem?.buyer_name || '',
+          color: item.color || dbItem?.color || '',
+          size: item.size || dbItem?.size || '',
+          styleNo: item.styleNo || dbItem?.style_name || '',
+          orderNumber: item.orderNumber || dbItem?.order_number || '',
+          purchaseNo: item.purchaseNo || dbItem?.purchase_no || '',
+        });
+      }
+
+      // 3. Enrich produced products from the parent issue if present
+      const enrichedProducedProducts = [];
+      const prodItems = (issue.produced_items && issue.produced_items.length > 0)
+        ? issue.produced_items
+        : (issue.produced_item ? [issue.produced_item] : []);
+      if (prodItems.length > 0) {
+        for (const p of prodItems) {
+          enrichedProducedProducts.push({
+            id: p.id,
+            name: p.name,
+            itemCode: p.item_code || p.itemCode,
+            unit: p.unit,
+            styleName: p.style_name || p.styleName,
+            buyerName: p.buyer_name || p.buyerName,
+            color: p.color,
+            size: p.size,
+            orderNumber: p.order_number || p.orderNumber,
+            purchaseNo: p.purchase_no || p.purchaseNo,
+            orderQuantity: p.order_quantity ?? p.orderQuantity,
+          });
+        }
+      }
+
+      const ApprovalService = require('./approval-service');
+      return await ApprovalService.createRequest('REISSUE_ITEM', {
+        issueId: issue.id,
+        issueNumber: issue.issue_id,
+        recipientName: issue.recipient_name,
+        issueType: issue.issue_type,
+        issueDate: issue.issue_date,
+        items: enrichedItems,
+        producedProducts: enrichedProducedProducts,
+        remarks: data.remarks || '',
+        createdBy: user?.id,
+        requesterName: user?.fullName || user?.full_name,
+      });
+    }
+
+    return await this._executeAddItems(data);
+  },
+
+  async _executeAddItems(data) {
+    if (!data.issueId) throw new Error('Issue ID is required');
+    if (!data.items || data.items.length === 0) throw new Error('At least one item is required');
+
+    const issue = await IssuesRepo.getById(data.issueId);
+    if (!issue) throw new Error('Issue not found');
+
+    const user = AuthService.getCurrentUser();
+    const createdBy = data.createdBy || user?.id;
 
     // 1. Validate initial stock availability and prepare stock changes
     const stockChanges = [];
     for (const item of data.items) {
-      const dbItem = await ItemsRepo.getById(item.itemId);
-      if (!dbItem) throw new Error(`Item not found: ${item.itemId}`);
+      const itemId = item.itemId || item.id;
+      const dbItem = await ItemsRepo.getById(itemId);
+      if (!dbItem) throw new Error(`Item not found: ${itemId}`);
       
+      const qty = Number(item.quantity);
       const stockBefore = dbItem.current_stock;
-      const stockAfter = stockBefore - item.quantity;
+      const stockAfter = stockBefore - qty;
       
       if (stockAfter < 0) {
-        throw new Error(`Insufficient stock for "${dbItem.name}". Available: ${stockBefore}, Requested: ${item.quantity}`);
+        throw new Error(`Insufficient stock for "${dbItem.name}". Available: ${stockBefore}, Requested: ${qty}`);
       }
       
-      stockChanges.push({ item, dbItem, stockBefore, stockAfter });
+      stockChanges.push({ 
+        item: { ...item, itemId, quantity: qty }, 
+        dbItem, 
+        stockBefore, 
+        stockAfter 
+      });
     }
 
     // 2. Deduct stock BEFORE saving issue items
@@ -238,7 +333,16 @@ const IssueService = {
     }
 
     try {
-      await IssuesRepo.addItemsToIssue(issue.id, data.items);
+      const normalizedItems = data.items.map(it => ({
+        itemId: it.itemId || it.id,
+        quantity: Number(it.quantity),
+        unit: it.unit || 'pcs',
+        styleNo: it.styleNo || it.style_name || null,
+        orderNumber: it.orderNumber || it.order_number || null,
+        purchaseNo: it.purchaseNo || it.purchase_no || null,
+        notes: it.notes || null,
+      }));
+      await IssuesRepo.addItemsToIssue(issue.id, normalizedItems);
     } catch (err) {
       for (const deduction of completedDeductions) {
         await ItemsRepo.updateStock(deduction.itemId, deduction.stockBefore);
@@ -253,12 +357,12 @@ const IssueService = {
         stockBefore: deduction.stockBefore, stockAfter: deduction.stockAfter,
         reference: `Issue: ${issue.issue_id}`,
         notes: `Re-issued to ${issue.recipient_name} (${issue.issue_type})`,
-        createdBy: user?.id,
+        createdBy,
       });
     }
 
     AuditLogsRepo.create({
-      userId: user?.id, action: 'UPDATE', entityType: 'issue', entityId: issue.id,
+      userId: user?.id || createdBy, action: 'UPDATE', entityType: 'issue', entityId: issue.id,
       newValue: { issueId: issue.issue_id, addedItemsCount: data.items.length },
     });
 

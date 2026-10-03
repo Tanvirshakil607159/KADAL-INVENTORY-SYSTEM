@@ -57,6 +57,11 @@ const ApprovalService = {
           const IssueService = require('./issue-service');
           result = await IssueService._executeCreate(data);
           break;
+        case 'REISSUE_ITEM': {
+          const IssueService = require('./issue-service');
+          result = await IssueService._executeAddItems(data);
+          break;
+        }
         default:
           throw new Error('Unknown approval type: ' + request.type);
       }

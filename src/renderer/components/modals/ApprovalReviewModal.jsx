@@ -98,7 +98,7 @@ export default function ApprovalReviewModal({ data, onSaved }) {
         else await window.kadal.challans.exportExcel(selectedRequest.entityId);
       } else if (selectedRequest.type === 'CREATE_GATE_PASS') {
         await window.kadal.gatePass.exportPdf(selectedRequest.entityId);
-      } else if (selectedRequest.type === 'CREATE_ISSUE') {
+      } else if (selectedRequest.type === 'CREATE_ISSUE' || selectedRequest.type === 'REISSUE_ITEM') {
         if (type === 'pdf') await window.kadal.issues.exportPdf(selectedRequest.entityId);
         else await window.kadal.issues.exportExcel(selectedRequest.entityId);
       }
@@ -112,7 +112,7 @@ export default function ApprovalReviewModal({ data, onSaved }) {
         <div className="modal-header">
           <div className="modal-title flex items-center gap-2">
             <Clock size={18} className="text-warning" />
-            {selectedRequest.status === 'PENDING' ? 'Review Request' : 'Request Details'}: {selectedRequest.type.replace(/_/g, ' ')}
+            {selectedRequest.status === 'PENDING' ? 'Review Request' : 'Request Details'}: {selectedRequest.type === 'REISSUE_ITEM' ? 'Re-issue Items' : selectedRequest.type.replace(/_/g, ' ')}
           </div>
           <div className="modal-controls">
             <button className="btn-control btn-minimize" onClick={() => setModalMinimized(!isMinimized)} title={isMinimized ? 'Restore' : 'Minimize'}>{isMinimized ? '+' : '-'}</button>
@@ -165,7 +165,7 @@ export default function ApprovalReviewModal({ data, onSaved }) {
                     <button className="btn btn-ghost btn-sm" onClick={() => handleDownload('pdf')}>
                       <FileText size={14} /> PDF
                     </button>
-                    {(selectedRequest.type === 'CREATE_CHALLAN' || selectedRequest.type === 'CREATE_ISSUE') && (
+                    {(selectedRequest.type === 'CREATE_CHALLAN' || selectedRequest.type === 'CREATE_ISSUE' || selectedRequest.type === 'REISSUE_ITEM') && (
                       <button className="btn btn-ghost btn-sm" onClick={() => handleDownload('excel')}>
                         <Download size={14} /> Excel
                       </button>

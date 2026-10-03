@@ -1,6 +1,7 @@
 import SearchableSelect from '../components/ui/SearchableSelect';
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import useStore from '../store/useStore';
+import PaginationBar from '../components/common/PaginationBar';
 import { Send, RotateCcw, BarChart3, Plus, Trash2, FileSpreadsheet, FileText, Search, Package, Eye, Clock, Filter, X } from 'lucide-react';
 
 const TABS = [
@@ -46,24 +47,70 @@ function IssueEntryTab({ addToast, user }) {
   const [showForm, setShowForm] = useState(false);
   const [isReturnable, setIsReturnable] = useState(true);
   const [pendingApprovalsCount, setPendingApprovalsCount] = useState(0);
+  const [pendingReissuesList, setPendingReissuesList] = useState([]);
   const canDeleteIssue = ['Super Admin', 'Admin'].includes(user?.role_name) || ['Super Admin', 'Admin'].includes(user?.roleName);
 
+  const PAGE_SIZE = 100;
+  const [currentPage, setCurrentPage] = useState(0);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [typeFilter, setTypeFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+
   const loadData = useCallback(async () => {
-    try { const r = await window.kadal.recipients.getAll(); if (r?.success) setRecipients(r.data); } catch (e) {}
-    try { const r = await window.kadal.items.getAll({}); if (r?.success) setAllItems(r.data); } catch (e) {}
-    try { const r = await window.kadal.items.getDistinctValues(); if (r?.success) setDistinctValues(r.data); } catch (e) {}
-    try { const r = await window.kadal.issues.getNextId(); if (r?.success) setNextId(r.data); } catch (e) {}
-    try { const r = await window.kadal.issues.getAll({}); if (r?.success) setIssues(r.data); } catch (e) {}
     try {
-      const a = await window.kadal.approvals.getAll({ status: 'PENDING' });
+      const [rRec, rIt, rDv, rNext, rIss, a] = await Promise.all([
+        window.kadal.recipients.getAll().catch(() => null),
+        window.kadal.items.getAll({}).catch(() => null),
+        window.kadal.items.getDistinctValues().catch(() => null),
+        window.kadal.issues.getNextId().catch(() => null),
+        window.kadal.issues.getAll({}).catch(() => null),
+        window.kadal.approvals.getAll({ status: 'PENDING' }).catch(() => null),
+      ]);
+      if (rRec?.success) setRecipients(rRec.data);
+      if (rIt?.success) setAllItems(rIt.data);
+      if (rDv?.success) setDistinctValues(rDv.data);
+      if (rNext?.success) setNextId(rNext.data);
+      if (rIss?.success) setIssues(rIss.data);
       if (a?.success && Array.isArray(a.data)) {
-        const issueApprovals = a.data.filter(req => req.type === 'CREATE_ISSUE');
+        const issueApprovals = a.data.filter(req => req.type === 'CREATE_ISSUE' || req.type === 'REISSUE_ITEM');
         setPendingApprovalsCount(issueApprovals.length);
+        setPendingReissuesList(a.data.filter(req => req.type === 'REISSUE_ITEM'));
       }
-    } catch (e) {}
+    } catch (e) {
+      console.error('[IssuePage] loadData error:', e);
+    }
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  const filteredIssues = useMemo(() => {
+    let result = issues;
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase().trim();
+      result = result.filter(iss => 
+        (iss.issue_id || '').toLowerCase().includes(q) ||
+        (iss.recipient_name || '').toLowerCase().includes(q) ||
+        (iss.remarks || '').toLowerCase().includes(q)
+      );
+    }
+    if (typeFilter) {
+      result = result.filter(iss => iss.issue_type === typeFilter);
+    }
+    if (statusFilter) {
+      result = result.filter(iss => iss.status === statusFilter);
+    }
+    return result;
+  }, [issues, searchQuery, typeFilter, statusFilter]);
+
+  useEffect(() => {
+    setCurrentPage(0);
+  }, [searchQuery, typeFilter, statusFilter]);
+
+  const totalPages = Math.ceil(filteredIssues.length / PAGE_SIZE);
+  const paginatedIssues = useMemo(() => {
+    const start = currentPage * PAGE_SIZE;
+    return filteredIssues.slice(start, start + PAGE_SIZE);
+  }, [filteredIssues, currentPage]);
 
   const [selectedDetailIssue, setSelectedDetailIssue] = useState(null);
   const [associatedProduction, setAssociatedProduction] = useState([]);
@@ -200,7 +247,11 @@ function IssueEntryTab({ addToast, user }) {
         }))
       });
       if (res?.success) {
-        addToast('success', `Items successfully added to issue ${selectedDetailIssue.issue_id}`);
+        if (res.data?.pendingApproval || res.pendingApproval) {
+          addToast('success', `Reissue request for ${selectedDetailIssue.issue_id} submitted for Admin approval`);
+        } else {
+          addToast('success', `Items successfully added to issue ${selectedDetailIssue.issue_id}`);
+        }
         setReissueItems([]);
         setIsReissuing(false);
         // Refresh detail view
@@ -399,48 +450,124 @@ function IssueEntryTab({ addToast, user }) {
           color: 'var(--warning)'
         }}>
           <Clock size={16} />
-          <span>There {pendingApprovalsCount === 1 ? 'is 1 issue request' : `are ${pendingApprovalsCount} issue requests`} awaiting Admin approval in the <strong>Approvals</strong> module.</span>
+          <span>There {pendingApprovalsCount === 1 ? 'is 1 issue/reissue request' : `are ${pendingApprovalsCount} issue/reissue requests`} awaiting Admin approval in the <strong>Approvals</strong> module.</span>
         </div>
       )}
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
-        <h3 style={{ margin: 0 }}>Recent Issues</h3>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <div>
+          <h3 style={{ margin: 0 }}>Recent Issues</h3>
+          <p className="text-muted" style={{ margin: '4px 0 0 0', fontSize: 13 }}>
+            Showing {filteredIssues.length} issues • 100 per page
+          </p>
+        </div>
         <button className="btn btn-primary" onClick={() => setShowForm(true)}><Plus size={14} /> New Issue</button>
       </div>
-      {issues.length === 0 ? <div className="empty-state"><h3>No issues yet</h3><p>Create your first issue</p></div> : (
-        <div className="table-wrapper"><table className="data-table"><thead><tr><th>Issue ID</th><th>Date</th><th>Type</th><th>Recipient</th><th style={{textAlign:'center'}}>Items</th><th>Status</th><th style={{textAlign:'right'}}>Actions</th></tr></thead>
-          <tbody>{issues.map(iss => (
-            <tr key={iss.id}>
-              <td 
-                className="text-mono" 
-                style={{color:'var(--accent)',fontSize:12,cursor:'pointer',textDecoration:'underline'}}
-                onClick={() => setSelectedDetailIssue(iss)}
-                title="View Full Details"
-              >
-                {iss.issue_id}
-              </td>
-              <td style={{fontSize:12}}>{new Date(iss.issue_date).toLocaleDateString('en-GB')}</td>
-              <td>
-                <span className={`badge badge-${iss.issue_type==='FACTORY'?'info':'warning'}`}>{iss.issue_type}</span>
-                {iss.issue_type === 'EMPLOYEE' && (
-                  <span style={{ fontSize: 10, marginLeft: 4, color: 'var(--text-muted)' }}>
-                    ({iss.is_returnable ? 'Returnable' : 'Non-Returnable'})
-                  </span>
-                )}
-              </td>
-              <td>{iss.recipient_name}</td>
-              <td className="text-center">{iss.item_count}</td>
-              <td><span className={`badge badge-${iss.status==='RETURNED'?'success':iss.status==='PARTIAL'?'warning':'danger'}`}>{iss.status}</span></td>
-              <td style={{textAlign:'right'}}>
-                <div style={{display:'flex', gap:4, justifyContent:'flex-end'}}>
-                  <button className="btn btn-ghost btn-icon btn-sm" onClick={() => setSelectedDetailIssue(iss)} title="View Details"><Eye size={14} /></button>
-                  <button className="btn btn-ghost btn-icon btn-sm" onClick={() => window.kadal.issues.exportPdf(iss.id)} title="Download PDF"><FileText size={14} /></button>
-                  <button className="btn btn-ghost btn-icon btn-sm" onClick={() => window.kadal.issues.exportExcel(iss.id)} title="Download Excel"><FileSpreadsheet size={14} /></button>
-                  {canDeleteIssue && <button className="btn btn-ghost btn-icon btn-sm" onClick={() => handleDelete(iss)} title="Delete"><Trash2 size={14} color="var(--danger)" /></button>}
-                </div>
-              </td>
-            </tr>
-          ))}</tbody>
-        </table></div>
+
+      {/* Filter and Search controls */}
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
+        <div className="search-bar" style={{ flex: 1, minWidth: 200, maxWidth: 360, margin: 0 }}>
+          <Search size={15} />
+          <input
+            className="form-input"
+            placeholder="Search by Issue ID, recipient..."
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            style={{ fontSize: 13 }}
+          />
+          {searchQuery && (
+            <button className="btn-clear" onClick={() => setSearchQuery('')} title="Clear">✕</button>
+          )}
+        </div>
+
+        <select
+          className="form-select"
+          value={typeFilter}
+          onChange={e => setTypeFilter(e.target.value)}
+          style={{ width: 130, fontSize: 12 }}
+        >
+          <option value="">All Types</option>
+          <option value="FACTORY">FACTORY</option>
+          <option value="EMPLOYEE">EMPLOYEE</option>
+        </select>
+
+        <select
+          className="form-select"
+          value={statusFilter}
+          onChange={e => setStatusFilter(e.target.value)}
+          style={{ width: 130, fontSize: 12 }}
+        >
+          <option value="">All Statuses</option>
+          <option value="PENDING">PENDING</option>
+          <option value="PARTIAL">PARTIAL</option>
+          <option value="RETURNED">RETURNED</option>
+        </select>
+
+        {(searchQuery || typeFilter || statusFilter) && (
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={() => { setSearchQuery(''); setTypeFilter(''); setStatusFilter(''); }}
+            style={{ fontSize: 12 }}
+          >
+            ✕ Reset
+          </button>
+        )}
+      </div>
+
+      {issues.length === 0 ? <div className="empty-state"><h3>No issues yet</h3><p>Create your first issue</p></div> : filteredIssues.length === 0 ? (
+        <div className="empty-state"><h3>No matching issues</h3><p>Try adjusting your search or filters</p></div>
+      ) : (
+        <>
+          <PaginationBar
+            position="top"
+            currentPage={currentPage}
+            totalPages={totalPages}
+            totalItems={filteredIssues.length}
+            pageSize={PAGE_SIZE}
+            onPageChange={setCurrentPage}
+          />
+          <div className="table-wrapper"><table className="data-table"><thead><tr><th>Issue ID</th><th>Date</th><th>Type</th><th>Recipient</th><th style={{textAlign:'center'}}>Items</th><th>Status</th><th style={{textAlign:'right'}}>Actions</th></tr></thead>
+            <tbody>{paginatedIssues.map(iss => (
+              <tr key={iss.id}>
+                <td 
+                  className="text-mono" 
+                  style={{color:'var(--accent)',fontSize:12,cursor:'pointer',textDecoration:'underline'}}
+                  onClick={() => setSelectedDetailIssue(iss)}
+                  title="View Full Details"
+                >
+                  {iss.issue_id}
+                </td>
+                <td style={{fontSize:12}}>{new Date(iss.issue_date).toLocaleDateString('en-GB')}</td>
+                <td>
+                  <span className={`badge badge-${iss.issue_type==='FACTORY'?'info':'warning'}`}>{iss.issue_type}</span>
+                  {iss.issue_type === 'EMPLOYEE' && (
+                    <span style={{ fontSize: 10, marginLeft: 4, color: 'var(--text-muted)' }}>
+                      ({iss.is_returnable ? 'Returnable' : 'Non-Returnable'})
+                    </span>
+                  )}
+                </td>
+                <td>{iss.recipient_name}</td>
+                <td className="text-center">{iss.item_count}</td>
+                <td><span className={`badge badge-${iss.status==='RETURNED'?'success':iss.status==='PARTIAL'?'warning':'danger'}`}>{iss.status}</span></td>
+                <td style={{textAlign:'right'}}>
+                  <div style={{display:'flex', gap:4, justifyContent:'flex-end'}}>
+                    <button className="btn btn-ghost btn-icon btn-sm" onClick={() => setSelectedDetailIssue(iss)} title="View Details"><Eye size={14} /></button>
+                    <button className="btn btn-ghost btn-icon btn-sm" onClick={() => window.kadal.issues.exportPdf(iss.id)} title="Download PDF"><FileText size={14} /></button>
+                    <button className="btn btn-ghost btn-icon btn-sm" onClick={() => window.kadal.issues.exportExcel(iss.id)} title="Download Excel"><FileSpreadsheet size={14} /></button>
+                    {canDeleteIssue && <button className="btn btn-ghost btn-icon btn-sm" onClick={() => handleDelete(iss)} title="Delete"><Trash2 size={14} color="var(--danger)" /></button>}
+                  </div>
+                </td>
+              </tr>
+            ))}</tbody>
+          </table></div>
+          <PaginationBar
+            position="bottom"
+            currentPage={currentPage}
+            totalPages={totalPages}
+            totalItems={filteredIssues.length}
+            pageSize={PAGE_SIZE}
+            onPageChange={setCurrentPage}
+          />
+        </>
       )}
 
       {/* ISSUE DETAILS MODAL */}
@@ -456,7 +583,7 @@ function IssueEntryTab({ addToast, user }) {
             position: 'relative', boxShadow: '0 8px 32px rgba(0,0,0,0.4)'
           }}>
             <div style={{ position: 'absolute', top: 20, right: 20, display: 'flex', gap: 8 }}>
-              {!isReissuing && selectedDetailIssue.issue_type === 'FACTORY' && (
+              {!isReissuing && (
                 <button 
                   className="btn btn-outline btn-sm" 
                   onClick={() => setIsReissuing(true)}
@@ -539,6 +666,26 @@ function IssueEntryTab({ addToast, user }) {
                 </div>
               )}
               </div>
+
+            {pendingReissuesList.find(req => (req.data?.issueId === selectedDetailIssue?.id || req.data?.issueNumber === selectedDetailIssue?.issue_id)) && (
+              <div style={{
+                marginBottom: 20,
+                padding: '12px 16px',
+                background: 'rgba(var(--warning-rgb, 245, 158, 11), 0.12)',
+                border: '1px solid var(--warning)',
+                borderRadius: 8,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+                fontSize: 13,
+                color: 'var(--warning)',
+              }}>
+                <Clock size={18} style={{ flexShrink: 0 }} />
+                <span>
+                  <strong>Re-issue Pending Admin Approval:</strong> A request to re-issue <strong>{pendingReissuesList.find(req => (req.data?.issueId === selectedDetailIssue?.id || req.data?.issueNumber === selectedDetailIssue?.issue_id))?.data?.items?.length || 0} item(s)</strong> requested by <em>{pendingReissuesList.find(req => (req.data?.issueId === selectedDetailIssue?.id || req.data?.issueNumber === selectedDetailIssue?.issue_id))?.requester_name || pendingReissuesList.find(req => (req.data?.issueId === selectedDetailIssue?.id || req.data?.issueNumber === selectedDetailIssue?.issue_id))?.data?.requesterName || 'User'}</em> is currently awaiting review in the Approvals module.
+                </span>
+              </div>
+            )}
 
             {isReissuing && (
               <div className="card" style={{ padding: 16, marginBottom: 20, border: '1px solid var(--accent)', background: 'rgba(var(--accent-rgb, 59, 130, 246), 0.03)' }}>
@@ -627,9 +774,15 @@ function IssueEntryTab({ addToast, user }) {
                         ))}
                       </tbody>
                     </table>
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
-                      <button className="btn btn-primary" onClick={handleReissueSubmit} disabled={reissuing}>
-                        {reissuing ? 'Adding...' : 'Submit Items'}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, flexWrap: 'wrap', gap: 10 }}>
+                      {!canDeleteIssue && (
+                        <div style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <AlertCircle size={14} color="var(--warning)" />
+                          <span>As a non-admin, your re-issue request will be submitted for Admin approval before stock is deducted.</span>
+                        </div>
+                      )}
+                      <button className="btn btn-primary" style={{ marginLeft: canDeleteIssue ? 'auto' : undefined }} onClick={handleReissueSubmit} disabled={reissuing}>
+                        {reissuing ? 'Submitting...' : (canDeleteIssue ? 'Submit Items' : 'Submit for Admin Approval')}
                       </button>
                     </div>
                   </div>

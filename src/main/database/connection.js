@@ -240,6 +240,16 @@ async function seedCoreData() {
         }]);
         if (iErr) throw iErr;
       }
+
+      // Ensure require_reissue_approval exists in cloud settings
+      try {
+        const { data: existSetting } = await supabase.from('settings').select('key').eq('key', 'require_reissue_approval').maybeSingle();
+        if (!existSetting) {
+          await supabase.from('settings').insert([{ key: 'require_reissue_approval', value: 'true', description: 'Require admin approval for reissues' }]);
+        }
+      } catch (sErr) {
+        console.warn('[DB] Setting require_reissue_approval check failed:', sErr.message);
+      }
     } else {
       // Local DB seeding is already handled by migrations, but let's double check here too
       // (This acts as a backup in case migrations were skipped)
@@ -252,6 +262,7 @@ async function seedCoreData() {
           VALUES ('superadmin', ?, 'Super Administrator', ?, 1)
         `, [hash, roleRow.id]);
       }
+      db.run("INSERT OR IGNORE INTO settings (key, value, description) VALUES ('require_reissue_approval', 'true', 'Require admin approval for reissues')");
     }
     console.log('[DB] Core data seeding complete');
   } catch (err) {

@@ -156,9 +156,13 @@ const ApprovalsRepo = {
             r.data.receiverAddress = r.data.receiverAddress || addresses.join('; ');
           }
         }
+        r.entityId = r.entity_id;
+        r.entityNumber = r.entity_number;
         return r;
       } catch (e) {
         console.error('[ApprovalsRepo] Failed to parse data for ID:', r.id);
+        r.entityId = r.entity_id;
+        r.entityNumber = r.entity_number;
         return r;
       }
     });

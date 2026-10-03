@@ -51,7 +51,7 @@ const IssuesRepo = {
         *,
         recipients (name, type),
         users!issues_created_by_fkey (full_name),
-        issue_items (id, item_id, quantity, returned_quantity, damage_quantity, rejected_quantity, unit, items (name, item_code))
+        issue_items (id, quantity)
       `).order('created_at', { ascending: false });
 
       if (filters.issueType) query = query.eq('issue_type', filters.issueType);

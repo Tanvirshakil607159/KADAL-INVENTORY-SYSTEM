@@ -199,6 +199,150 @@ function IssueApprovalDetails({ safeData, renderProperty }) {
   );
 }
 
+function ReissueApprovalDetails({ safeData, renderProperty }) {
+  const [items, setItems] = useState(safeData?.items || []);
+  const prodItems = safeData?.producedProducts || [];
+
+  useEffect(() => {
+    let isMounted = true;
+    const initial = safeData?.items || [];
+    if (initial.some(it => !it.color || it.currentStock == null) && window.kadal?.items?.getById) {
+      Promise.all(initial.map(async (it) => {
+        try {
+          const res = await window.kadal.items.getById(it.itemId);
+          if (res?.success && res?.data) {
+            return {
+              ...it,
+              name: it.name || res.data.name,
+              itemCode: it.itemCode || res.data.item_code,
+              color: it.color || res.data.color || '-',
+              buyerName: it.buyerName || res.data.buyer_name || '-',
+              currentStock: it.currentStock ?? res.data.current_stock,
+              unit: it.unit || res.data.unit,
+              styleNo: it.styleNo || res.data.style_name || '-',
+              orderNumber: it.orderNumber || res.data.order_number || '-',
+              purchaseNo: it.purchaseNo || res.data.purchase_no || '-',
+            };
+          }
+        } catch (e) {}
+        return it;
+      })).then(results => {
+        if (isMounted) setItems(results);
+      });
+    } else {
+      setItems(initial);
+    }
+    return () => { isMounted = false; };
+  }, [safeData]);
+
+  return (
+    <div className="approval-details-rich">
+      <div className="approval-data-grid mb-3">
+        {renderProperty('Target Issue No', safeData?.issueNumber || `ID: ${safeData?.issueId}`)}
+        {renderProperty('Recipient', safeData?.recipientName)}
+        {renderProperty('Issue Type', safeData?.issueType || 'FACTORY')}
+        {safeData?.issueDate && renderProperty('Original Issue Date', new Date(safeData.issueDate).toLocaleDateString())}
+        {safeData?.requesterName && renderProperty('Requester', safeData.requesterName)}
+      </div>
+
+      {prodItems.length > 0 && (
+        <div className="p-3 bg-light rounded mb-3" style={{ border: '1px solid var(--border)' }}>
+          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text)' }}>
+            <Package size={15} color="var(--primary)" /> Target Finished Product(s) for this Issue ({prodItems.length}):
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {prodItems.map((prod, pIdx) => {
+              const buyer = prod.buyerName || prod.buyer_name || '-';
+              const color = prod.color || '-';
+              const orderNo = prod.orderNumber || prod.order_number || '-';
+              const style = prod.styleName || prod.style_name || '-';
+              const purchaseNo = prod.purchaseNo || prod.purchase_no || '-';
+              const size = prod.size || '-';
+              const orderQty = prod.orderQuantity ?? prod.order_quantity;
+
+              return (
+                <div key={prod.id || pIdx} style={{ padding: '10px 14px', background: 'var(--bg-card)', borderRadius: 6, border: '1px solid var(--border)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+                    <div>
+                      <strong style={{ fontSize: 13, color: 'var(--text)' }}>{prod.name}</strong>
+                      <span className="text-mono text-muted" style={{ fontSize: 11, marginLeft: 6 }}>({prod.itemCode || prod.item_code})</span>
+                    </div>
+                    {orderQty != null && (
+                      <span className="badge badge-info" style={{ fontSize: 11 }}>
+                        Order Qty: {orderQty} {prod.unit || ''}
+                      </span>
+                    )}
+                  </div>
+
+                  <div style={{ 
+                    display: 'grid', 
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', 
+                    gap: '6px 12px', 
+                    fontSize: 11, 
+                    background: 'var(--bg-muted)', 
+                    padding: '8px 12px', 
+                    borderRadius: 4,
+                    border: '1px solid var(--border)' 
+                  }}>
+                    <div><span className="text-muted">Buyer:</span> <strong style={{ color: 'var(--text)' }}>{buyer}</strong></div>
+                    <div><span className="text-muted">Color:</span> <strong style={{ color: 'var(--text)' }}>{color}</strong></div>
+                    <div><span className="text-muted">Order No:</span> <strong style={{ color: 'var(--text)' }}>{orderNo}</strong></div>
+                    <div><span className="text-muted">Style:</span> <strong style={{ color: 'var(--text)' }}>{style}</strong></div>
+                    {purchaseNo !== '-' && <div><span className="text-muted">Purchase No:</span> <strong style={{ color: 'var(--text)' }}>{purchaseNo}</strong></div>}
+                    {size !== '-' && size !== 'N/A' && <div><span className="text-muted">Size:</span> <strong style={{ color: 'var(--text)' }}>{size}</strong></div>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>
+        Re-issued Items ({items.length}):
+      </div>
+      <div className="table-wrapper" style={{ maxHeight: 300, border: '1px solid var(--border)' }}>
+        <table className="data-table table-sm">
+          <thead>
+            <tr>
+              <th>Item Name</th>
+              <th>Code</th>
+              <th>Buyer</th>
+              <th>Color</th>
+              <th>Style / Order</th>
+              <th className="text-right">Stock</th>
+              <th className="text-right">Re-issue Qty</th>
+              <th>Unit</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((it, i) => (
+              <tr key={i}>
+                <td style={{ fontWeight: 600 }}>{it.name || `Item #${it.itemId}`}</td>
+                <td className="text-mono" style={{ fontSize: 11 }}>{it.itemCode || '-'}</td>
+                <td style={{ fontSize: 11 }}>{it.buyerName || '-'}</td>
+                <td style={{ fontSize: 11 }}>{it.color || '-'}</td>
+                <td style={{ fontSize: 11 }}>{[it.styleNo, it.orderNumber].filter(Boolean).join(' / ') || '-'}</td>
+                <td className="text-right text-mono" style={{ fontSize: 11 }}>{it.currentStock ?? '-'}</td>
+                <td className="text-right fw-bold" style={{ color: 'var(--primary)' }}>{it.quantity}</td>
+                <td className="text-muted">{it.unit}</td>
+                <td style={{ fontSize: 11 }}>{it.notes || '-'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {safeData?.remarks && (
+        <div className="mt-3 p-2 bg-light rounded" style={{ fontSize: 12 }}>
+          <strong>Remarks:</strong> {safeData.remarks}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function GatePassApprovalDetails({ safeData, renderProperty }) {
   const [challans, setChallans] = useState(safeData?.challans || []);
   const [loading, setLoading] = useState(false);
@@ -547,6 +691,9 @@ export default function ApprovalsPage() {
       case 'CREATE_ISSUE':
         return <IssueApprovalDetails safeData={safeData} renderProperty={renderProperty} />;
 
+      case 'REISSUE_ITEM':
+        return <ReissueApprovalDetails safeData={safeData} renderProperty={renderProperty} />;
+
       default:
         return <pre style={{ fontSize: 11, background: 'var(--bg-glass)', padding: 10, borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>{JSON.stringify(safeData, null, 2)}</pre>;
     }
@@ -614,7 +761,8 @@ export default function ApprovalsPage() {
                            req.type === 'STOCK_MOVEMENT' ? 'Stock' :
                            req.type === 'CREATE_CHALLAN' ? 'Challan' :
                            req.type === 'CREATE_GATE_PASS' ? 'Gate Pass' :
-                           req.type === 'CREATE_ISSUE' ? 'Issue' : req.type}
+                           req.type === 'CREATE_ISSUE' ? 'Issue' :
+                           req.type === 'REISSUE_ITEM' ? 'Reissue' : req.type}
                         </span>
                       </td>
                       <td style={{ fontSize: 13 }}>
@@ -625,6 +773,7 @@ export default function ApprovalsPage() {
                         {req.type === 'CREATE_CHALLAN' && `New Challan: ${req.data.receiverName}`}
                         {req.type === 'CREATE_GATE_PASS' && `New Gate Pass: ${req.data?.receiverName || req.data?.receiver_name ? `${req.data.receiverName || req.data.receiver_name} ` : ''}(${req.data?.challanIds?.length || 0} Challans)`}
                         {req.type === 'CREATE_ISSUE' && `New Issue: ${req.data?.recipientName || '-'} (${req.data?.items?.length || 0} Items)`}
+                        {req.type === 'REISSUE_ITEM' && `Reissue for ${req.data?.issueNumber || req.data?.issueId || '-'}: ${req.data?.recipientName || '-'} (${req.data?.items?.length || 0} Items)`}
                       </td>
                       <td>
                         <span className={`badge badge-${req.status === 'PENDING' ? 'warning' : req.status === 'APPROVED' ? 'success' : 'danger'}`}>

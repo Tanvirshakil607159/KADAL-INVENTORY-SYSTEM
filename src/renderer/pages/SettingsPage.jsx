@@ -183,6 +183,10 @@ function CompanySettings() {
             <input type="checkbox" checked={settings.require_issue_approval === 'true'} onChange={e => set('require_issue_approval', e.target.checked ? 'true' : 'false')} disabled={!canEdit} />
             Require Admin Approval for all Issues (Non-Admins)
           </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontSize: 13 }}>
+            <input type="checkbox" checked={settings.require_reissue_approval !== 'false'} onChange={e => set('require_reissue_approval', e.target.checked ? 'true' : 'false')} disabled={!canEdit} />
+            Require Admin Approval for Reissues (Non-Admins)
+          </label>
         </div>
       </div>
       <div style={{ borderTop: '1px solid var(--border)', paddingTop: 16, marginTop: 16 }}>

@@ -314,6 +314,15 @@ function runMigrations(db) {
     db.run("INSERT INTO _migrations (name) VALUES ('035-add-pi-challan-lifecycle')");
     console.log('[DB] Migration 035-add-pi-challan-lifecycle applied successfully');
   }
+
+  // NEW MIGRATION: 036-add-reissue-approval-setting
+  const applied36 = db.exec("SELECT * FROM _migrations WHERE name = '036-add-reissue-approval-setting'");
+  if (applied36.length === 0 || applied36[0].values.length === 0) {
+    console.log('[DB] Running migration: 036-add-reissue-approval-setting');
+    applyThirtySixthMigration(db);
+    db.run("INSERT INTO _migrations (name) VALUES ('036-add-reissue-approval-setting')");
+    console.log('[DB] Migration 036-add-reissue-approval-setting applied successfully');
+  }
 }
 
 function applyThirtyFifthMigration(db) {
@@ -461,6 +470,7 @@ function applyThirtyFourthMigration(db) {
 function applyThirtyThirdMigration(db) {
   try {
     db.run("INSERT OR IGNORE INTO settings (key, value, description) VALUES ('require_issue_approval', 'true', 'Require admin approval for all issues')");
+    db.run("INSERT OR IGNORE INTO settings (key, value, description) VALUES ('require_reissue_approval', 'true', 'Require admin approval for reissues')");
   } catch (e) {
     console.error('[DB] Migration 033 error:', e.message);
   }
@@ -1157,5 +1167,13 @@ function applyThirtySecondMigration(db) {
     }
   } catch (e) {
     console.error('[DB] Migration 032 error:', e.message);
+  }
+}
+
+function applyThirtySixthMigration(db) {
+  try {
+    db.run("INSERT OR IGNORE INTO settings (key, value, description) VALUES ('require_reissue_approval', 'true', 'Require admin approval for all re-issues')");
+  } catch (e) {
+    console.error('[DB] Migration 036 error:', e.message);
   }
 }
