@@ -62,12 +62,43 @@ export const inventoryApi = {
         query = query.or(`name.ilike.%${filters.search}%,item_code.ilike.%${filters.search}%,color.ilike.%${filters.search}%,buyer_name.ilike.%${filters.search}%,style_name.ilike.%${filters.search}%,purchase_no.ilike.%${filters.search}%,order_number.ilike.%${filters.search}%`);
       }
       let tiersMap = {};
+      let issueMap = {};
       try {
-        const { data: tiers } = await supabase.from('item_price_tiers').select('*').gt('quantity', 0).order('created_at', { ascending: true });
-        if (tiers) {
-          tiers.forEach(t => {
+        const [tiersRes, issueItemsData, targetIssuesData] = await Promise.all([
+          supabase.from('item_price_tiers').select('*').gt('quantity', 0).order('created_at', { ascending: true }),
+          fetchAll(supabase.from('issue_items').select('item_id, issues!inner(issue_id)')).catch(() => []),
+          fetchAll(supabase.from('issues').select('issue_id, produced_item_id, remarks')).catch(() => [])
+        ]);
+        if (tiersRes.data) {
+          tiersRes.data.forEach(t => {
             if (!tiersMap[t.item_id]) tiersMap[t.item_id] = [];
             tiersMap[t.item_id].push(t);
+          });
+        }
+        if (Array.isArray(issueItemsData)) {
+          issueItemsData.forEach(ii => {
+            const issueNum = ii.issues?.issue_id;
+            if (issueNum && ii.item_id) {
+              if (!issueMap[ii.item_id]) issueMap[ii.item_id] = new Set();
+              issueMap[ii.item_id].add(issueNum);
+            }
+          });
+        }
+        if (Array.isArray(targetIssuesData)) {
+          targetIssuesData.forEach(iss => {
+            if (!iss.issue_id) return;
+            const prodIds = new Set();
+            if (iss.produced_item_id) prodIds.add(Number(iss.produced_item_id));
+            if (iss.remarks) {
+              const match = String(iss.remarks).match(/\[PRODUCED_ITEM_IDS:([0-9,\s]+)\]/);
+              if (match && match[1]) {
+                match[1].split(',').map(s => Number(s.trim())).filter(Boolean).forEach(id => prodIds.add(id));
+              }
+            }
+            prodIds.forEach(id => {
+              if (!issueMap[id]) issueMap[id] = new Set();
+              issueMap[id].add(iss.issue_id);
+            });
           });
         }
       } catch (e) {}
@@ -75,10 +106,14 @@ export const inventoryApi = {
       const data = await fetchAll(query.order('name'));
       return data.map(i => {
         const itemTiers = tiersMap[i.id] || [];
+        const itemIssues = issueMap[i.id];
         return {
           ...i,
           category_name: i.categories?.name,
           supplier_name: i.suppliers?.name,
+          issue_numbers: itemIssues && itemIssues.size > 0 
+            ? [...itemIssues].sort((a, b) => a.localeCompare(undefined, { numeric: true, sensitivity: 'base' })).join(', ') 
+            : null,
           price_tiers: itemTiers.length > 0 ? itemTiers : (Number(i.current_stock) > 0 ? [{ quantity: i.current_stock, unit_price: i.unit_price, currency: i.currency, conversion_rate: i.conversion_rate }] : [])
         };
       });

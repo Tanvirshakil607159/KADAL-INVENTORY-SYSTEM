@@ -17,8 +17,42 @@ const ItemsRepo = {
       if (filters.orderNumber) query = query.eq('order_number', filters.orderNumber);
       if (filters.purchaseNo) query = query.eq('purchase_no', filters.purchaseNo);
       if (filters.buyerName) query = query.eq('buyer_name', filters.buyerName);
+      // Enhanced search: if search term matches any issue_id, include the corresponding item IDs
+      let matchingItemIdsFromSearch = [];
       if (filters.search) {
-        query = query.or(`name.ilike.%${filters.search}%,item_code.ilike.%${filters.search}%,color.ilike.%${filters.search}%,size.ilike.%${filters.search}%,buyer_name.ilike.%${filters.search}%,style_name.ilike.%${filters.search}%,purchase_no.ilike.%${filters.search}%,order_number.ilike.%${filters.search}%`);
+        try {
+          const { data: matchedIssues } = await supabase
+            .from('issues')
+            .select('id, issue_id, produced_item_id, remarks')
+            .ilike('issue_id', `%${filters.search}%`);
+          if (matchedIssues && matchedIssues.length > 0) {
+            const matchedIdsSet = new Set();
+            matchedIssues.forEach(iss => {
+              if (iss.produced_item_id) matchedIdsSet.add(Number(iss.produced_item_id));
+              if (iss.remarks) {
+                const m = String(iss.remarks).match(/\[PRODUCED_ITEM_IDS:([0-9,\s]+)\]/);
+                if (m && m[1]) m[1].split(',').map(s => Number(s.trim())).filter(Boolean).forEach(id => matchedIdsSet.add(id));
+              }
+            });
+            const issueDbIds = matchedIssues.map(i => i.id);
+            const { data: matchedIssueItems } = await supabase
+              .from('issue_items')
+              .select('item_id')
+              .in('issue_id', issueDbIds);
+            (matchedIssueItems || []).forEach(ii => {
+              if (ii.item_id) matchedIdsSet.add(Number(ii.item_id));
+            });
+            matchingItemIdsFromSearch = [...matchedIdsSet];
+          }
+        } catch (e) {
+          console.warn('[ItemsRepo] Issue search lookup error:', e.message);
+        }
+
+        let orClause = `name.ilike.%${filters.search}%,item_code.ilike.%${filters.search}%,color.ilike.%${filters.search}%,size.ilike.%${filters.search}%,buyer_name.ilike.%${filters.search}%,style_name.ilike.%${filters.search}%,purchase_no.ilike.%${filters.search}%,order_number.ilike.%${filters.search}%`;
+        if (matchingItemIdsFromSearch.length > 0) {
+          orClause += `,id.in.(${matchingItemIdsFromSearch.join(',')})`;
+        }
+        query = query.or(orClause);
       }
       if (filters.lowStock) {
         query = query.lte('current_stock', 'min_stock_level');
@@ -52,7 +86,7 @@ const ItemsRepo = {
         fetchAll(
           getSupabase()
             .from('issue_items')
-            .select('item_id, order_number, issues!inner(issue_id, issue_type), items!inner(order_number)')
+            .select('item_id, issues!inner(issue_id)')
         ).catch(err => {
           console.warn('[ItemsRepo] Error fetching issue items:', err.message);
           return [];
@@ -68,33 +102,28 @@ const ItemsRepo = {
       ]);
 
       const issueMap = {};
-      const orderIssueMap = {};
       if (Array.isArray(issueItemsData)) {
         issueItemsData.forEach(ii => {
           const issueNum = ii.issues?.issue_id;
-          if (issueNum) {
-            if (ii.item_id) {
-              if (!issueMap[ii.item_id]) issueMap[ii.item_id] = new Set();
-              issueMap[ii.item_id].add(issueNum);
-            }
-            const ord = ii.order_number || ii.items?.order_number;
-            if (ord) {
-              if (!orderIssueMap[ord]) orderIssueMap[ord] = new Set();
-              orderIssueMap[ord].add(issueNum);
-            }
+          if (issueNum && ii.item_id) {
+            if (!issueMap[ii.item_id]) issueMap[ii.item_id] = new Set();
+            issueMap[ii.item_id].add(issueNum);
           }
         });
       }
 
       if (Array.isArray(targetIssuesData)) {
         targetIssuesData.forEach(iss => {
-          let prodIds = [];
+          if (!iss.issue_id) return;
+          const prodIds = new Set();
+          if (iss.produced_item_id) {
+            prodIds.add(Number(iss.produced_item_id));
+          }
           if (iss.remarks) {
             const match = String(iss.remarks).match(/\[PRODUCED_ITEM_IDS:([0-9,\s]+)\]/);
-            if (match && match[1]) prodIds = match[1].split(',').map(s => Number(s.trim())).filter(Boolean);
-          }
-          if (prodIds.length === 0 && iss.produced_item_id) {
-            prodIds = [Number(iss.produced_item_id)];
+            if (match && match[1]) {
+              match[1].split(',').map(s => Number(s.trim())).filter(Boolean).forEach(id => prodIds.add(id));
+            }
           }
           
           prodIds.forEach(id => {
@@ -107,18 +136,14 @@ const ItemsRepo = {
       // Map Supabase relation format to match local format
       return data.map(i => {
         const itemTiers = tiersMap[i.id] || [];
-        const set = new Set();
-        if (issueMap[i.id]) {
-          issueMap[i.id].forEach(n => set.add(n));
-        }
-        if (i.order_number && orderIssueMap[i.order_number]) {
-          orderIssueMap[i.order_number].forEach(n => set.add(n));
-        }
+        const itemIssues = issueMap[i.id];
         return {
           ...i,
           category_name: i.categories?.name,
           supplier_name: i.suppliers?.name,
-          issue_numbers: set.size > 0 ? [...set].join(', ') : null,
+          issue_numbers: itemIssues && itemIssues.size > 0 
+            ? [...itemIssues].sort((a, b) => a.localeCompare(undefined, { numeric: true, sensitivity: 'base' })).join(', ') 
+            : null,
           price_tiers: itemTiers.length > 0 ? itemTiers : (Number(i.current_stock) > 0 ? [{ quantity: i.current_stock, unit_price: i.unit_price, currency: i.currency, conversion_rate: i.conversion_rate }] : [])
         };
       });
@@ -134,8 +159,8 @@ const ItemsRepo = {
     if (filters.purchaseNo) { where.push('i.purchase_no = ?'); params.push(filters.purchaseNo); }
     if (filters.buyerName) { where.push('i.buyer_name = ?'); params.push(filters.buyerName); }
     if (filters.search) {
-      where.push('(i.name LIKE ? OR i.item_code LIKE ? OR i.color LIKE ? OR i.size LIKE ? OR i.buyer_name LIKE ? OR i.style_name LIKE ? OR i.purchase_no LIKE ? OR i.order_number LIKE ?)');
-      const s = `%${filters.search}%`; params.push(s, s, s, s, s, s, s, s);
+      where.push('(i.name LIKE ? OR i.item_code LIKE ? OR i.color LIKE ? OR i.size LIKE ? OR i.buyer_name LIKE ? OR i.style_name LIKE ? OR i.purchase_no LIKE ? OR i.order_number LIKE ? OR i.id IN (SELECT ii.item_id FROM issue_items ii JOIN issues iss ON ii.issue_id = iss.id WHERE iss.issue_id LIKE ?) OR i.id IN (SELECT iss.produced_item_id FROM issues iss WHERE iss.issue_id LIKE ? AND iss.produced_item_id IS NOT NULL))');
+      const s = `%${filters.search}%`; params.push(s, s, s, s, s, s, s, s, s, s);
     }
     if (filters.lowStock) { where.push('i.current_stock <= i.min_stock_level'); }
     const w = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
@@ -144,8 +169,7 @@ const ItemsRepo = {
         (SELECT GROUP_CONCAT(DISTINCT iss.issue_id) 
          FROM issue_items ii 
          JOIN issues iss ON ii.issue_id = iss.id 
-         LEFT JOIN items ii_item ON ii.item_id = ii_item.id
-         WHERE (ii.item_id = i.id OR (ii_item.order_number = i.order_number AND i.order_number IS NOT NULL AND i.order_number != '') OR (ii.order_number = i.order_number AND i.order_number IS NOT NULL AND i.order_number != ''))
+         WHERE ii.item_id = i.id
         ) as raw_issue_numbers
       FROM items i 
       LEFT JOIN categories c ON i.category_id = c.id 
@@ -162,19 +186,22 @@ const ItemsRepo = {
     }
     const issueMap = {};
     allIssues.forEach(iss => {
-      let prodIds = [];
+      if (!iss.issue_id) return;
+      const prodIds = new Set();
       if (iss.produced_item_ids) {
         try {
           const parsed = typeof iss.produced_item_ids === 'string' ? JSON.parse(iss.produced_item_ids) : iss.produced_item_ids;
-          if (Array.isArray(parsed)) prodIds = parsed.map(Number).filter(Boolean);
+          if (Array.isArray(parsed)) parsed.map(Number).filter(Boolean).forEach(id => prodIds.add(id));
         } catch(e){}
       }
-      if (prodIds.length === 0 && iss.remarks) {
+      if (iss.remarks) {
         const match = String(iss.remarks).match(/\[PRODUCED_ITEM_IDS:([0-9,\s]+)\]/);
-        if (match && match[1]) prodIds = match[1].split(',').map(s => Number(s.trim())).filter(Boolean);
+        if (match && match[1]) {
+          match[1].split(',').map(s => Number(s.trim())).filter(Boolean).forEach(id => prodIds.add(id));
+        }
       }
-      if (prodIds.length === 0 && iss.produced_item_id) {
-        prodIds = [Number(iss.produced_item_id)];
+      if (iss.produced_item_id) {
+        prodIds.add(Number(iss.produced_item_id));
       }
       prodIds.forEach(id => {
         if (!issueMap[id]) issueMap[id] = new Set();
@@ -187,14 +214,20 @@ const ItemsRepo = {
       const itemTiers = tiersMap[i.id] || [];
       const set = new Set();
       if (i.raw_issue_numbers) {
-        i.raw_issue_numbers.split(',').forEach(n => set.add(n));
+        i.raw_issue_numbers.split(',').forEach(n => {
+          if (n && n.trim()) set.add(n.trim());
+        });
       }
       if (issueMap[i.id]) {
-        issueMap[i.id].forEach(n => set.add(n));
+        issueMap[i.id].forEach(n => {
+          if (n && n.trim()) set.add(n.trim());
+        });
       }
       return {
         ...i,
-        issue_numbers: set.size > 0 ? [...set].join(', ') : null,
+        issue_numbers: set.size > 0 
+          ? [...set].sort((a, b) => a.localeCompare(undefined, { numeric: true, sensitivity: 'base' })).join(', ') 
+          : null,
         price_tiers: itemTiers.length > 0 ? itemTiers : (Number(i.current_stock) > 0 ? [{ quantity: i.current_stock, unit_price: i.unit_price, currency: i.currency, conversion_rate: i.conversion_rate }] : [])
       };
     });
