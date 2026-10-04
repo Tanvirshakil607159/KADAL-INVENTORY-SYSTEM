@@ -58,6 +58,9 @@ export const inventoryApi = {
       if (filters.categoryId) query = query.eq('category_id', filters.categoryId);
       if (filters.supplierId) query = query.eq('supplier_id', filters.supplierId);
       if (filters.buyerName) query = query.eq('buyer_name', filters.buyerName);
+      if (filters.orderNumber) query = query.eq('order_number', filters.orderNumber);
+      if (filters.styleName) query = query.eq('style_name', filters.styleName);
+      if (filters.purchaseNo) query = query.eq('purchase_no', filters.purchaseNo);
       if (filters.search) {
         query = query.or(`name.ilike.%${filters.search}%,item_code.ilike.%${filters.search}%,color.ilike.%${filters.search}%,buyer_name.ilike.%${filters.search}%,style_name.ilike.%${filters.search}%,purchase_no.ilike.%${filters.search}%,order_number.ilike.%${filters.search}%`);
       }
@@ -261,6 +264,45 @@ export const inventoryApi = {
       const last = data[0]?.item_code || 'KADAL-0000';
       const num = parseInt(last.split('-')[1]) + 1;
       return `KADAL-${num.toString().padStart(4, '0')}`;
+    },
+    getDistinctValues: async () => {
+      const supabase = getSupabase();
+      const data = await fetchAll(
+        supabase.from('items')
+          .select('name, color, size, style_name, purchase_no, order_number, buyer_name, notes')
+          .eq('is_active', true)
+      );
+      const res = { names: new Set(), colors: new Set(), sizes: new Set(), styles: new Set(), purchases: new Set(), orders: new Set(), buyers: new Set(), notes: new Set() };
+      data.forEach(i => {
+        if (i.name) res.names.add(i.name);
+        if (i.color) res.colors.add(i.color);
+        if (i.size) res.sizes.add(i.size);
+        if (i.style_name) res.styles.add(i.style_name);
+        if (i.purchase_no) res.purchases.add(i.purchase_no);
+        if (i.order_number) res.orders.add(i.order_number);
+        if (i.buyer_name) res.buyers.add(i.buyer_name);
+        if (i.notes) res.notes.add(i.notes);
+      });
+      const cData = await fetchAll(
+        supabase.from('challans')
+          .select('receiver_name')
+          .not('receiver_name', 'is', null)
+          .neq('receiver_name', '')
+      ).catch(() => []);
+      const receivers = new Set();
+      if (cData) cData.forEach(c => receivers.add(c.receiver_name));
+
+      return {
+        names: [...res.names].sort(),
+        colors: [...res.colors].sort(),
+        sizes: [...res.sizes].sort(),
+        styles: [...res.styles].sort(),
+        purchases: [...res.purchases].sort(),
+        orders: [...res.orders].sort(),
+        buyers: [...res.buyers].sort(),
+        notes: [...res.notes].sort(),
+        receivers: [...receivers].sort(),
+      };
     }
   },
 

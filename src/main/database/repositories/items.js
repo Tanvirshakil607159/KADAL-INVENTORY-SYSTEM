@@ -2,6 +2,22 @@ const { dbPrepare, getSupabase, isCloudEnabled } = require('../connection');
 const { normalizeBuyerName } = require('../../utils/buyer-normalizer');
 const ItemPriceTiersRepo = require('./item-price-tiers');
 
+async function fetchAll(queryBuilder, pageSize = 1000) {
+  let allData = [];
+  let page = 0;
+  while (true) {
+    const from = page * pageSize;
+    const to = from + pageSize - 1;
+    const { data, error } = await queryBuilder.range(from, to);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    allData = allData.concat(data);
+    if (data.length < pageSize) break;
+    page++;
+  }
+  return allData;
+}
+
 const ItemsRepo = {
   async getAll(filters = {}) {
     if (isCloudEnabled()) {
@@ -56,23 +72,6 @@ const ItemsRepo = {
       }
       if (filters.lowStock) {
         query = query.lte('current_stock', 'min_stock_level');
-      }
-
-      async function fetchAll(queryBuilder) {
-        let allData = [];
-        let page = 0;
-        const pageSize = 1000;
-        while (true) {
-          const from = page * pageSize;
-          const to = from + pageSize - 1;
-          const { data, error } = await queryBuilder.range(from, to);
-          if (error) throw error;
-          if (!data || data.length === 0) break;
-          allData = allData.concat(data);
-          if (data.length < pageSize) break;
-          page++;
-        }
-        return allData;
       }
 
       const data = await fetchAll(query.order('name', { ascending: true }).order('id', { ascending: true }));
@@ -629,13 +628,13 @@ const ItemsRepo = {
 
   async getDistinctValues() {
     if (isCloudEnabled()) {
-      // Fetching only required columns to reduce bandwidth
-      const { data, error } = await getSupabase()
-        .from('items')
-        .select('name, color, size, style_name, purchase_no, order_number, buyer_name, notes')
-        .eq('is_active', true);
-      
-      if (error) throw error;
+      // Fetching all items across pages to avoid Supabase 1,000 row truncation limit
+      const data = await fetchAll(
+        getSupabase()
+          .from('items')
+          .select('name, color, size, style_name, purchase_no, order_number, buyer_name, notes')
+          .eq('is_active', true)
+      );
 
       // Efficient unique extraction
       const res = { names: new Set(), colors: new Set(), sizes: new Set(), styles: new Set(), purchases: new Set(), orders: new Set(), buyers: new Set(), notes: new Set() };
@@ -651,11 +650,13 @@ const ItemsRepo = {
         if (i.notes) res.notes.add(i.notes);
       });
 
-      const { data: cData } = await getSupabase()
-        .from('challans')
-        .select('receiver_name')
-        .not('receiver_name', 'is', null)
-        .neq('receiver_name', '');
+      const cData = await fetchAll(
+        getSupabase()
+          .from('challans')
+          .select('receiver_name')
+          .not('receiver_name', 'is', null)
+          .neq('receiver_name', '')
+      ).catch(() => []);
       const receivers = new Set();
       if (cData) cData.forEach(c => receivers.add(c.receiver_name));
 

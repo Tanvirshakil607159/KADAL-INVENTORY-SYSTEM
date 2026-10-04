@@ -202,6 +202,7 @@ export const webBridge = {
     delete: (id) => wrap(() => inventoryApi.items.delete(id)),
     getNextCode: () => wrap(inventoryApi.items.getNextCode),
     updateTier: (tierId, data) => wrap(() => inventoryApi.items.updateTier(tierId, data)),
+    getDistinctValues: () => wrap(inventoryApi.items.getDistinctValues),
   },
 
   // Stock

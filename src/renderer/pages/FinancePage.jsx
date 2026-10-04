@@ -1605,14 +1605,36 @@ export default function FinancePage() {
                     <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
                     <input
                       type="text"
-                      placeholder="Type to filter orders..."
+                      placeholder="Type to filter or enter order number..."
                       value={orderFilterQuery}
                       onChange={e => setOrderFilterQuery(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' && orderFilterQuery.trim()) {
+                          e.preventDefault();
+                          setSelectedOrderNo(orderFilterQuery.trim());
+                          setSelectedItemsFromOrder(new Set());
+                        }
+                      }}
                       style={{ width: '100%', padding: '7px 10px 7px 32px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 12, background: 'var(--bg-base)', color: 'inherit' }}
                     />
                   </div>
+                  {orderFilterQuery.trim() && orderFilterQuery.trim() !== selectedOrderNo && (
+                    <button 
+                      type="button"
+                      className="btn btn-outline btn-sm" 
+                      onClick={() => {
+                        setSelectedOrderNo(orderFilterQuery.trim());
+                        setSelectedItemsFromOrder(new Set());
+                      }}
+                      style={{ fontSize: 12, padding: '4px 10px', whiteSpace: 'nowrap' }}
+                      title="Select this order directly"
+                    >
+                      Select "{orderFilterQuery.trim()}"
+                    </button>
+                  )}
                   {orderFilterQuery && (
                     <button 
+                      type="button"
                       className="btn btn-ghost btn-sm" 
                       onClick={() => setOrderFilterQuery('')}
                       style={{ fontSize: 12, padding: '4px 8px' }}
@@ -1631,6 +1653,9 @@ export default function FinancePage() {
                   style={{ width: '100%', padding: '9px 12px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 13, background: 'var(--bg-base)', color: 'inherit' }}
                 >
                   <option value="">-- Choose an Order Number ({visibleOrders.length} available) --</option>
+                  {selectedOrderNo && !visibleOrders.includes(selectedOrderNo) && (
+                    <option value={selectedOrderNo}>{selectedOrderNo}</option>
+                  )}
                   {visibleOrders.map(o => (
                     <option key={o} value={o}>{o}</option>
                   ))}
