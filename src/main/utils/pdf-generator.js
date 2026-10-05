@@ -1275,21 +1275,18 @@ const PdfGenerator = {
 
     const sigTopMargin = Math.max(15, Math.min(180, 200 - (items.length * 16)));
 
-    let pdfWidths = [22, '*', 80, 85, 45, 28, 48, 55];
-    if (pi.customColWidths) {
-      const cw = pi.customColWidths;
-      const totalPx = (cw.sl || 32) + (cw.desc || 195) + (cw.purch || 105) + (cw.po || 115) + (cw.qty || 55) + (cw.unit || 40) + (cw.rate || 65) + (cw.total || 75);
-      pdfWidths = [
-        `${((cw.sl || 32) / totalPx * 100).toFixed(2)}%`,
-        `${((cw.desc || 195) / totalPx * 100).toFixed(2)}%`,
-        `${((cw.purch || 105) / totalPx * 100).toFixed(2)}%`,
-        `${((cw.po || 115) / totalPx * 100).toFixed(2)}%`,
-        `${((cw.qty || 55) / totalPx * 100).toFixed(2)}%`,
-        `${((cw.unit || 40) / totalPx * 100).toFixed(2)}%`,
-        `${((cw.rate || 65) / totalPx * 100).toFixed(2)}%`,
-        `${((cw.total || 75) / totalPx * 100).toFixed(2)}%`
-      ];
-    }
+    const cw = pi.customColWidths || { sl: 32, desc: 195, purch: 105, po: 115, qty: 55, unit: 40, rate: 65, total: 75 };
+    const totalPx = (cw.sl || 32) + (cw.desc || 195) + (cw.purch || 105) + (cw.po || 115) + (cw.qty || 55) + (cw.unit || 40) + (cw.rate || 65) + (cw.total || 75);
+    const pdfWidths = [
+      `${((cw.sl || 32) / totalPx * 100).toFixed(2)}%`,
+      `${((cw.desc || 195) / totalPx * 100).toFixed(2)}%`,
+      `${((cw.purch || 105) / totalPx * 100).toFixed(2)}%`,
+      `${((cw.po || 115) / totalPx * 100).toFixed(2)}%`,
+      `${((cw.qty || 55) / totalPx * 100).toFixed(2)}%`,
+      `${((cw.unit || 40) / totalPx * 100).toFixed(2)}%`,
+      `${((cw.rate || 65) / totalPx * 100).toFixed(2)}%`,
+      `${((cw.total || 75) / totalPx * 100).toFixed(2)}%`
+    ];
     const pdfPadding = pi.customRowPadding ? Math.max(1.5, Math.min(10, pi.customRowPadding * 0.8)) : 3;
 
     const docDefinition = {
