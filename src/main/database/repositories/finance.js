@@ -31,7 +31,7 @@ function ensureProformaInvoicesSchema() {
           applicant_address TEXT,
           beneficiary_name TEXT NOT NULL DEFAULT 'K.A. DESIGN ACCESSORIES LTD.',
           beneficiary_address TEXT DEFAULT '356/1, BLOCK-B, TEK KATHORA, SALNA, GAZIPUR-1703, BANGLADESH',
-          beneficiary_bin TEXT DEFAULT '',
+          beneficiary_bin TEXT DEFAULT '009212306-1201',
           bank_details TEXT DEFAULT 'UNITED COMMERCIAL BANK PLC.\nTONGI BRANCH\n18, S.K. MANNAN TOWER, CHERAG ALI\nGAZIPUR-1712, BANGLADESH\nSWIFT CODE: UCBLBDDHTNG',
           buyer TEXT,
           challan_ids TEXT,
@@ -211,7 +211,7 @@ async function saveTrackedSequence(seqKey, nextSeq) {
         key: seqKey,
         value: strVal,
         updated_at: new Date().toISOString()
-      });
+      }, { onConflict: 'key' });
     } catch (e) {
       console.warn('[FinanceRepo] Cloud saveTrackedSequence warning:', e.message);
     }
@@ -565,7 +565,7 @@ const FinanceRepo = {
           applicant_address: applicantAddress || null,
           beneficiary_name: beneficiaryName || 'K.A. DESIGN ACCESSORIES LTD.',
           beneficiary_address: beneficiaryAddress || '356/1, BLOCK-B, TEK KATHORA, SALNA, GAZIPUR-1703, BANGLADESH',
-          beneficiary_bin: beneficiaryBin || null,
+          beneficiary_bin: beneficiaryBin || '009212306-1201',
           bank_details: bankDetails || null,
           buyer: buyer || null,
           challan_ids: challanIds || [],
@@ -645,7 +645,7 @@ const FinanceRepo = {
         applicantAddress || null,
         beneficiaryName || 'K.A. DESIGN ACCESSORIES LTD.',
         beneficiaryAddress || '356/1, BLOCK-B, TEK KATHORA, SALNA, GAZIPUR-1703, BANGLADESH',
-        beneficiaryBin || null,
+        beneficiaryBin || '009212306-1201',
         bankDetails || null,
         buyer || null,
         challanIdsJson,
@@ -802,16 +802,89 @@ const FinanceRepo = {
   },
 
   async delete(id) {
+    const old = await this.getById(id);
+    const piNumber = old?.pi_number;
+    const itemIds = (old?.items || []).map(i => i.id).filter(Boolean);
+
     if (isCloudEnabled()) {
       try {
-        const { error } = await getSupabase().from('proforma_invoices').delete().eq('id', id);
+        const sb = getSupabase();
+        // 1. Unlink challans
+        await sb.from('challans').update({ pi_id: null }).eq('pi_id', id);
+        // 2. Unlink challan items
+        if (itemIds.length > 0) {
+          await sb.from('challan_items').update({ pi_item_id: null }).in('pi_item_id', itemIds);
+        }
+        // 3. Delete items
+        await sb.from('proforma_invoice_items').delete().eq('pi_id', id);
+        // 4. Delete PI
+        const { error } = await sb.from('proforma_invoices').delete().eq('id', id);
         if (error) throw error;
-        return true;
       } catch (cloudErr) {
         console.warn('[FinanceRepo] Cloud delete failed, falling back to SQLite:', cloudErr.message);
       }
     }
-    dbPrepare('DELETE FROM proforma_invoices WHERE id = ?').run(id);
+
+    // Local SQLite cleanup
+    try {
+      dbPrepare('UPDATE challans SET pi_id = NULL WHERE pi_id = ?').run(id);
+      dbPrepare('DELETE FROM proforma_invoice_items WHERE pi_id = ?').run(id);
+      dbPrepare('DELETE FROM proforma_invoices WHERE id = ?').run(id);
+    } catch (e) {
+      console.warn('[FinanceRepo] Local delete warning:', e.message);
+    }
+
+    // Recalculate and restore sequence counter if deleted PI was the highest sequence
+    try {
+      if (piNumber) {
+        const parts = piNumber.split('/');
+        if (parts.length >= 4) {
+          const prefix = parts[0];
+          const year = parts[2];
+          const deletedSeq = parseInt(parts[3], 10);
+          const seqKey = `seq:pi:${prefix}:${year}`;
+          const pattern = `${prefix}/KADAL/${year}/%`;
+
+          let maxDbSeq = 0;
+          if (isCloudEnabled()) {
+            try {
+              const { data } = await getSupabase()
+                .from('proforma_invoices')
+                .select('pi_number')
+                .ilike('pi_number', pattern);
+              (data || []).forEach(row => {
+                const p = (row.pi_number || '').split('/');
+                if (p.length >= 4) {
+                  const s = parseInt(p[3], 10);
+                  if (!isNaN(s) && s > maxDbSeq) maxDbSeq = s;
+                }
+              });
+            } catch (e) {}
+          }
+
+          try {
+            const rows = dbPrepare(`SELECT pi_number FROM proforma_invoices WHERE pi_number LIKE ?`).all(pattern);
+            rows.forEach(row => {
+              const p = (row.pi_number || '').split('/');
+              if (p.length >= 4) {
+                const s = parseInt(p[3], 10);
+                if (!isNaN(s) && s > maxDbSeq) maxDbSeq = s;
+              }
+            });
+          } catch (e) {}
+
+          const trackedSeq = await getTrackedSequence(seqKey);
+          if (deletedSeq >= trackedSeq || trackedSeq > maxDbSeq) {
+            await saveTrackedSequence(seqKey, maxDbSeq);
+          }
+        }
+      }
+    } catch (seqErr) {
+      console.warn('[FinanceRepo] Sequence reset on delete warning:', seqErr.message);
+    }
+
+    const { saveDatabase } = require('../connection');
+    if (typeof saveDatabase === 'function') saveDatabase();
     return true;
   },
 

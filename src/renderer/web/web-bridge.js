@@ -1552,7 +1552,7 @@ export const webBridge = {
         applicant_address: data.applicantAddress || null,
         beneficiary_name: data.beneficiaryName || 'K.A. DESIGN ACCESSORIES LTD.',
         beneficiary_address: data.beneficiaryAddress || '356/1, BLOCK-B, TEK KATHORA, SALNA, GAZIPUR-1703, BANGLADESH',
-        beneficiary_bin: data.beneficiaryBin || null,
+        beneficiary_bin: data.beneficiaryBin || '009212306-1201',
         bank_details: data.bankDetails || null,
         buyer: data.buyer || null,
         challan_ids: data.challanIds || [],
@@ -1628,8 +1628,67 @@ export const webBridge = {
     delete: (id) => wrap(async () => {
       const supabase = getSupabase();
       if (!supabase) throw new Error('Database not connected');
+
+      // Fetch PI details first
+      const { data: pi } = await supabase
+        .from('proforma_invoices')
+        .select('*, proforma_invoice_items(*)')
+        .eq('id', id)
+        .maybeSingle();
+
+      const itemIds = (pi?.proforma_invoice_items || []).map(i => i.id);
+
+      // Unlink challans
+      await supabase.from('challans').update({ pi_id: null }).eq('pi_id', id);
+      if (itemIds.length > 0) {
+        await supabase.from('challan_items').update({ pi_item_id: null }).in('pi_item_id', itemIds);
+      }
+      // Delete child items
+      await supabase.from('proforma_invoice_items').delete().eq('pi_id', id);
+      // Delete PI
       const { error } = await supabase.from('proforma_invoices').delete().eq('id', id);
       if (error) throw error;
+
+      // Restore sequence if needed
+      if (pi?.pi_number) {
+        const parts = pi.pi_number.split('/');
+        if (parts.length >= 4) {
+          const prefix = parts[0];
+          const year = parts[2];
+          const deletedSeq = parseInt(parts[3], 10);
+          const pattern = `${prefix}/KADAL/${year}/%`;
+          const seqKey = `seq:pi:${prefix}:${year}`;
+
+          let maxSeq = 0;
+          const { data: remaining } = await supabase
+            .from('proforma_invoices')
+            .select('pi_number')
+            .ilike('pi_number', pattern);
+          (remaining || []).forEach(row => {
+            const p = (row.pi_number || '').split('/');
+            if (p.length >= 4) {
+              const s = parseInt(p[3], 10);
+              if (!isNaN(s) && s > maxSeq) maxSeq = s;
+            }
+          });
+
+          // Check setting
+          const { data: seqSetting } = await supabase
+            .from('settings')
+            .select('value')
+            .eq('key', seqKey)
+            .maybeSingle();
+          const tracked = parseInt(seqSetting?.value || '0', 10);
+          if (deletedSeq >= tracked || tracked > maxSeq) {
+            await supabase.from('settings').upsert({
+              key: seqKey,
+              value: maxSeq.toString(),
+              updated_at: new Date().toISOString()
+            }, { onConflict: 'key' });
+          }
+        }
+      }
+
       return true;
     }),
 

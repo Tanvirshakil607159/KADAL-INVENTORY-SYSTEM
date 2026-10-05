@@ -10,8 +10,9 @@
 .pi-document {
   position: relative;
   width: 210mm;
+  height: 297mm;
   min-height: 297mm;
-  padding: 15mm 16mm 15mm 16mm;
+  padding: 12mm 16mm 12mm 16mm;
   background: #ffffff;
   color: #000000;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
@@ -47,6 +48,9 @@
   flex: 1;
   display: flex;
   flex-direction: column;
+  height: 100%;
+  min-height: calc(297mm - 24mm);
+  box-sizing: border-box;
 }
 
 /* Header */
@@ -227,8 +231,9 @@
   justify-content: space-between;
   align-items: flex-end;
   margin-top: auto;
-  padding-top: 15px;
-  padding-bottom: 15px;
+  padding-top: 10px;
+  padding-bottom: 8px;
+  flex-shrink: 0;
 }
 
 .pi-sign-col {
@@ -240,7 +245,7 @@
 }
 
 .pi-sign-stamp {
-  min-height: 48px;
+  min-height: 44px;
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
@@ -268,16 +273,17 @@
   line-height: 1.25;
 }
 
-/* Document Footer */
+/* Document Footer (Frozen at lower side) */
 .pi-footer {
-  border-top: 1px solid #10b981;
-  padding-top: 8px;
-  margin-top: 10px;
+  border-top: 1.5px solid #10b981;
+  padding-top: 6px;
+  margin-top: 0;
   display: flex;
   justify-content: space-between;
   font-size: 9.5px;
   color: #1f2937;
   font-family: Arial, Helvetica, sans-serif;
+  flex-shrink: 0;
 }
 
 .pi-footer-block-title {
@@ -304,18 +310,42 @@
     position: absolute;
     left: 0;
     top: 0;
-    width: 100%;
+    width: 210mm;
     margin: 0;
     padding: 0;
     background: transparent;
     box-shadow: none;
   }
   .pi-document {
-    width: 100% !important;
-    min-height: 100vh !important;
+    width: 210mm !important;
+    height: 297mm !important;
+    min-height: 297mm !important;
+    max-height: 297mm !important;
     box-shadow: none !important;
-    padding: 12mm 14mm 12mm 14mm !important;
+    padding: 12mm 16mm 12mm 16mm !important;
     margin: 0 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: space-between !important;
+    box-sizing: border-box !important;
+    page-break-after: always;
+    break-after: page;
+    overflow: hidden !important;
+  }
+  .pi-content {
+    height: 100% !important;
+    min-height: calc(297mm - 24mm) !important;
+    display: flex !important;
+    flex-direction: column !important;
+    box-sizing: border-box !important;
+  }
+  .pi-signatures {
+    margin-top: auto !important;
+    flex-shrink: 0 !important;
+  }
+  .pi-footer {
+    margin-top: 0 !important;
+    flex-shrink: 0 !important;
   }
   .no-print {
     display: none !important;

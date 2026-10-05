@@ -36,7 +36,7 @@ export default function FinancePage() {
   const [applicantAddress, setApplicantAddress] = useState('');
   const [beneficiaryName, setBeneficiaryName] = useState('K.A. DESIGN ACCESSORIES LTD.');
   const [beneficiaryAddress, setBeneficiaryAddress] = useState('356/1, BLOCK-B, TEK KATHORA, SALNA, GAZIPUR-1703, BANGLADESH');
-  const [beneficiaryBin, setBeneficiaryBin] = useState('');
+  const [beneficiaryBin, setBeneficiaryBin] = useState('009212306-1201');
   const [bankDetails, setBankDetails] = useState(
     'UNITED COMMERCIAL BANK PLC.\nTONGI BRANCH\n18, S.K. MANNAN TOWER, CHERAG ALI\nGAZIPUR-1712, BANGLADESH\nSWIFT CODE: UCBLBDDHTNG'
   );
@@ -188,8 +188,26 @@ export default function FinancePage() {
       });
 
     setPiItems(prev => {
-      const combined = [...prev, ...newItems];
-      return combined.map((item, idx) => ({ ...item, slNo: idx + 1 }));
+      const map = new Map();
+      [...prev, ...newItems].forEach(it => {
+        const desc = (it.itemDescription || it.item_description || it.name || '').trim();
+        const purch = (it.purchaseNo || it.purchase_no || '').trim();
+        const poStyle = (it.poStyleNo || it.po_style_no || '').trim();
+        const unit = (it.unit || 'PCS').toUpperCase().trim();
+        const rate = Number(it.unitPrice !== undefined ? it.unitPrice : it.unit_price) || 0;
+
+        const key = `${desc.toLowerCase()}:::${purch.toLowerCase()}:::${poStyle.toLowerCase().replace(/[\s/]+/g, ' ')}:::${unit}:::${rate.toFixed(4)}`;
+
+        if (map.has(key)) {
+          const existing = map.get(key);
+          const summedQty = (Number(existing.quantity) || 0) + (Number(it.quantity) || 0);
+          existing.quantity = summedQty;
+          existing.totalAmount = Number((summedQty * rate).toFixed(2));
+        } else {
+          map.set(key, { ...it });
+        }
+      });
+      return Array.from(map.values()).map((item, idx) => ({ ...item, slNo: idx + 1 }));
     });
 
     setSelectedItemsFromOrder(new Set());
@@ -438,7 +456,7 @@ export default function FinancePage() {
         applicantAddress: applicantAddress.trim() || null,
         beneficiaryName,
         beneficiaryAddress,
-        beneficiaryBin,
+        beneficiaryBin: (beneficiaryBin || '009212306-1201').trim(),
         bankDetails,
         buyer: buyer.trim() || null,
         currency,
@@ -486,6 +504,7 @@ export default function FinancePage() {
         setCustomBuyerMode(false);
         setPiNumber('');
         setPurchaseNumber('');
+        setBeneficiaryBin('009212306-1201');
         setPiSubTab('orders');
         await loadInitialData();
       } else {
@@ -543,10 +562,101 @@ export default function FinancePage() {
     }
   };
 
+  // Delete Proforma Invoice
+  const handleDeletePi = async (pi) => {
+    if (pi.status === 'BILLED') {
+      addToast('warning', 'Billed Proforma Invoices cannot be deleted because they are linked to finalized commercial bills.');
+      return;
+    }
+    const confirmed = await showConfirm({
+      title: 'Delete Proforma Invoice',
+      message: `Are you sure you want to delete Proforma Invoice "${pi.pi_number}"? This will unlink any challans, remove PI line items, and restore the sequence number.`,
+      confirmText: 'Delete PI',
+      cancelText: 'Cancel',
+      type: 'danger'
+    });
+    if (!confirmed) return;
+
+    try {
+      const res = await window.kadal.finance.delete(pi.id);
+      if (res?.success) {
+        addToast('success', `Proforma Invoice ${pi.pi_number} deleted successfully.`);
+        await loadInitialData();
+      } else {
+        addToast('error', res?.error || 'Failed to delete Proforma Invoice');
+      }
+    } catch (e) {
+      addToast('error', e.message || 'Error deleting Proforma Invoice');
+    }
+  };
+
   // Open Preview Modal
   const handlePreview = (item, mode = 'pi') => {
     setPreviewPi(item);
     setPreviewMode(mode);
+  };
+
+  // Preview current draft PI before confirming/approving
+  const handlePreviewCurrentPi = () => {
+    if (!applicantName.trim()) {
+      addToast('warning', 'Please select or enter Applicant Name / Recipient to preview');
+      return;
+    }
+    if (piItems.length === 0) {
+      addToast('warning', 'Please add at least one item to the Proforma Invoice to preview');
+      return;
+    }
+
+    const pNum = purchaseNumber.trim();
+    const draftPi = {
+      id: null,
+      isDraft: true,
+      pi_number: piNumber.trim() || 'DRAFT-PI',
+      pi_date: piDate || new Date().toISOString(),
+      recipient_id: selectedRecipientId || null,
+      applicant_name: applicantName.trim(),
+      applicant_address: applicantAddress.trim() || null,
+      beneficiary_name: beneficiaryName,
+      beneficiary_address: beneficiaryAddress,
+      beneficiary_bin: (beneficiaryBin || '009212306-1201').trim(),
+      beneficiaryBin: (beneficiaryBin || '009212306-1201').trim(),
+      bank_details: bankDetails,
+      buyer: buyer.trim() || null,
+      purchase_no: pNum,
+      purchaseNo: pNum,
+      currency,
+      currency_symbol: currencySymbol,
+      total_quantity: totalQuantity,
+      total_amount: totalAmount,
+      amount_in_words: amountInWords,
+      net_weight: netWeight,
+      gross_weight: grossWeight,
+      terms_conditions: termsConditions,
+      status: 'APPROVED',
+      notes: pNum ? `Purchase No: ${pNum}` : null,
+      items: piItems.map((it, idx) => {
+        const itemPurch = (it.purchaseNo || pNum || '').trim();
+        const poStyle = (it.poStyleNo || '').trim() || '-';
+        return {
+          sl_no: it.slNo || idx + 1,
+          item_description: (it.itemDescription || '').trim() || 'Custom Accessory Item',
+          itemDescription: (it.itemDescription || '').trim() || 'Custom Accessory Item',
+          purchase_no: itemPurch,
+          purchaseNo: itemPurch,
+          po_style_no: poStyle,
+          poStyleNo: poStyle,
+          quantity: Number(it.quantity) || 0,
+          unit: (it.unit || 'PCS').toUpperCase(),
+          unit_price: Number(it.unitPrice) || 0,
+          unitPrice: Number(it.unitPrice) || 0,
+          total_amount: Number(it.totalAmount) || 0,
+          totalAmount: Number(it.totalAmount) || 0
+        };
+      })
+    };
+
+    setPreviewPi(draftPi);
+    setPreviewMode('create_preview');
   };
 
   // Filter records
@@ -917,6 +1027,16 @@ export default function FinancePage() {
                                 >
                                   <Download size={15} />
                                 </button>
+                                {pi.status !== 'BILLED' && (
+                                  <button
+                                    className="btn btn-ghost btn-sm btn-icon"
+                                    onClick={() => handleDeletePi(pi)}
+                                    title="Delete Proforma Invoice & restore sequence"
+                                    style={{ color: 'var(--danger, #ef4444)' }}
+                                  >
+                                    <Trash2 size={15} />
+                                  </button>
+                                )}
                               </div>
                             </td>
                           </tr>
@@ -1359,15 +1479,42 @@ export default function FinancePage() {
                     style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 12 }}
                   />
                 </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Beneficiary BIN</label>
+                  <input
+                    type="text"
+                    value={beneficiaryBin}
+                    onChange={e => setBeneficiaryBin(e.target.value)}
+                    placeholder="009212306-1201"
+                    style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 12, background: 'var(--bg-base)' }}
+                  />
+                </div>
               </div>
 
               {/* Action buttons */}
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
-                <button className="btn btn-outline" onClick={() => setPiSubTab('orders')} disabled={savingPi}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12 }}>
+                <button className="btn btn-outline" type="button" onClick={() => setPiSubTab('orders')} disabled={savingPi}>
                   Cancel
                 </button>
-                <button className="btn btn-primary" onClick={() => handleSavePi('APPROVED')} disabled={savingPi} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <CheckCircle size={16} /> {savingPi ? 'Creating PI...' : 'Create & Approve Proforma Invoice'}
+                <button 
+                  className="btn btn-outline" 
+                  type="button" 
+                  onClick={handlePreviewCurrentPi} 
+                  disabled={savingPi} 
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, borderColor: 'var(--primary)', color: 'var(--primary)', fontWeight: 600 }}
+                  title="Check and preview document before confirming"
+                >
+                  <Eye size={16} /> Preview Proforma Invoice
+                </button>
+                <button 
+                  className="btn btn-primary" 
+                  type="button" 
+                  onClick={() => handleSavePi('APPROVED')} 
+                  disabled={savingPi} 
+                  style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                >
+                  <CheckCircle size={16} /> {savingPi ? 'Creating PI...' : 'Confirm & Approve Proforma Invoice'}
                 </button>
               </div>
 
@@ -1774,10 +1921,15 @@ export default function FinancePage() {
           }}>
             <ProformaInvoicePrintView
               pi={previewPi}
-              mode={previewMode}
+              mode={previewMode === 'create_preview' ? 'pi' : previewMode}
               isModal={true}
               onClose={() => setPreviewPi(null)}
               onPrint={() => window.print()}
+              onConfirm={previewMode === 'create_preview' ? async () => {
+                setPreviewPi(null);
+                await handleSavePi('APPROVED');
+              } : null}
+              confirmLabel="Confirm & Approve PI"
               onExportPdf={async () => {
                 try {
                   const res = await window.kadal.finance.exportPdf(previewPi.id || previewPi);

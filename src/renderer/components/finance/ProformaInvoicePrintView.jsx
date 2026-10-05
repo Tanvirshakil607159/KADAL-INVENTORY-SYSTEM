@@ -1,15 +1,18 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import './ProformaInvoicePrintView.css';
 import logoImg from '../../assets/logo.png';
 import letterheadImg from '../../assets/letterhead.png';
 import watermarkImg from '../../assets/watermark.png';
-import { Printer, Download, X } from 'lucide-react';
+import { Printer, Download, X, CheckCircle } from 'lucide-react';
+import { numberToCurrencyWords } from '../../utils/numberToWords';
 
 export default function ProformaInvoicePrintView({ 
   pi, 
   onPrint, 
   onExportPdf, 
   onClose,
+  onConfirm,
+  confirmLabel = 'Confirm & Approve PI',
   isModal = false,
   mode = null // 'pi' or 'bill'
 }) {
@@ -28,9 +31,6 @@ export default function ProformaInvoicePrintView({
   };
 
   const currencySym = pi.currency_symbol || '$';
-  const items = pi.items || [];
-  const totalQty = pi.total_quantity || items.reduce((sum, it) => sum + (Number(it.quantity) || 0), 0);
-  const totalAmt = pi.total_amount || items.reduce((sum, it) => sum + (Number(it.total_amount) || 0), 0);
 
   const getPiPurchaseNo = (piObj) => {
     if (!piObj) return '';
@@ -52,6 +52,90 @@ export default function ProformaInvoicePrintView({
     return '';
   };
   const purchaseNo = getPiPurchaseNo(pi);
+
+  // Group and merge rows having the same Item Description, same Purchase Number, and same PO & Style Number
+  const displayItems = useMemo(() => {
+    const rawList = pi.items || [];
+    const map = new Map();
+
+    rawList.forEach((item) => {
+      const desc = (item.item_description || item.itemDescription || item.item_name || item.name || '').trim();
+      let itemPurch = (item.purchase_no || item.purchaseNo || item.purchase_number || item.purchaseNumber || '').trim();
+      let poStyle = (item.po_style_no || item.poStyleNo || '').trim();
+
+      if (!itemPurch && poStyle) {
+        const match = poStyle.match(/Purchase(?:\s*No)?\s*[:=]\s*([^/\n;]+)/i);
+        if (match) itemPurch = match[1].trim();
+      }
+      if (!itemPurch && purchaseNo) {
+        itemPurch = purchaseNo;
+      }
+
+      if (poStyle && poStyle !== '-') {
+        poStyle = poStyle.replace(/\s*\/\s*Purchase(?:\s*No)?\s*[:=]\s*[^/\n;]+/i, '').trim();
+      }
+
+      const poVal = (item.order_number || item.orderNumber || '').trim();
+      const styleVal = (item.style_name || item.styleName || '').trim();
+
+      if (poStyle && poStyle !== '-') {
+        let updated = poStyle;
+        if (poVal && !updated.toLowerCase().includes('po:') && !updated.includes(poVal)) {
+          updated = `PO: ${poVal} / ` + updated.replace(/^Style:\s*/i, 'Style: ');
+        }
+        poStyle = updated;
+      } else {
+        const parts = [];
+        if (poVal) parts.push(`PO: ${poVal}`);
+        if (styleVal) parts.push(`Style: ${styleVal}`);
+        poStyle = parts.length > 0 ? parts.join(' / ') : '-';
+      }
+
+      const qty = Number(item.quantity || 0);
+      const unit = (item.unit || 'PCS').toUpperCase().trim();
+      const rate = Number(item.unit_price !== undefined ? item.unit_price : (item.unitPrice !== undefined ? item.unitPrice : 0));
+      const lineTotal = Number(item.total_amount !== undefined ? item.total_amount : (item.totalAmount !== undefined ? item.totalAmount : (qty * rate).toFixed(2)));
+
+      // Grouping key: Item Description + Purchase No + PO & Style + Unit + Unit Price
+      const cleanDesc = desc.toLowerCase().replace(/\s+/g, ' ');
+      const cleanPurch = itemPurch.toLowerCase().replace(/\s+/g, ' ');
+      const cleanPoStyle = poStyle.toLowerCase().replace(/[\s/]+/g, ' ');
+      const cleanUnit = unit.toLowerCase();
+      const rateKey = rate.toFixed(4);
+
+      const groupKey = `${cleanDesc}:::${cleanPurch}:::${cleanPoStyle}:::${cleanUnit}:::${rateKey}`;
+
+      if (map.has(groupKey)) {
+        const existing = map.get(groupKey);
+        existing.qty += qty;
+        existing.total = Number((existing.total + lineTotal).toFixed(2));
+      } else {
+        map.set(groupKey, {
+          desc,
+          itemPurch,
+          poStyle,
+          qty,
+          unit,
+          rate,
+          total: lineTotal
+        });
+      }
+    });
+
+    return Array.from(map.values()).map((m, idx) => ({
+      slNo: idx + 1,
+      desc: m.desc,
+      itemPurch: m.itemPurch,
+      poStyle: m.poStyle,
+      qty: m.qty,
+      unit: m.unit,
+      rate: m.rate,
+      total: Number((m.qty * m.rate).toFixed(2))
+    }));
+  }, [pi.items, purchaseNo]);
+
+  const totalQty = displayItems.reduce((sum, it) => sum + (Number(it.qty) || 0), 0);
+  const totalAmt = displayItems.reduce((sum, it) => sum + (Number(it.total) || 0), 0);
 
   const handleNativePrint = () => {
     if (onPrint) {
@@ -77,6 +161,26 @@ export default function ProformaInvoicePrintView({
           boxShadow: '0 4px 16px rgba(0,0,0,0.25)',
           border: '1px solid var(--border-color, #cbd5e1)'
         }}>
+          {onConfirm && (
+            <button 
+              className="btn btn-sm" 
+              onClick={onConfirm}
+              style={{ 
+                display: 'inline-flex', 
+                alignItems: 'center', 
+                gap: 6, 
+                background: 'var(--success, #10b981)', 
+                color: '#fff', 
+                fontWeight: 600,
+                border: 'none',
+                padding: '6px 12px',
+                borderRadius: 6,
+                cursor: 'pointer'
+              }}
+            >
+              <CheckCircle size={15} /> {confirmLabel}
+            </button>
+          )}
           <button className="btn btn-primary btn-sm" onClick={handleNativePrint}>
             <Printer size={15} style={{ marginRight: 6 }} /> {isBill ? 'Print Bill' : 'Print PI'}
           </button>
@@ -122,7 +226,7 @@ export default function ProformaInvoicePrintView({
                 <div className="pi-info-text">
                   <div>{pi.beneficiary_name || 'K.A. DESIGN ACCESSORIES LTD.'}</div>
                   <div>{pi.beneficiary_address || '356/1, BLOCK- B, TEK KATHORA, SALNA\nGAZIPUR- 1703, BANGLADESH'}</div>
-                  {pi.beneficiary_bin ? <div>BIN: {pi.beneficiary_bin}</div> : <div>BIN</div>}
+                  <div>BIN: {(pi.beneficiary_bin || pi.beneficiaryBin || '009212306-1201').trim()}</div>
                 </div>
               </div>
 
@@ -145,12 +249,6 @@ export default function ProformaInvoicePrintView({
                 <span className="pi-info-label">BUYER : </span>
                 <span style={{ fontWeight: 500 }}>{pi.buyer || '-'}</span>
               </div>
-              {purchaseNo && (
-                <div className="pi-buyer-row" style={{ marginTop: 4 }}>
-                  <span className="pi-info-label">PURCHASE NO : </span>
-                  <strong style={{ fontWeight: 600 }}>{purchaseNo}</strong>
-                </div>
-              )}
             </div>
 
             <div className="pi-meta-right">
@@ -171,12 +269,6 @@ export default function ProformaInvoicePrintView({
                       <strong>{pi.pi_number}</strong>
                     </div>
                   )}
-                  {purchaseNo && (
-                    <div className="pi-meta-row" style={{ marginTop: 4 }}>
-                      <span>PURCHASE NO. :</span>
-                      <strong>{purchaseNo}</strong>
-                    </div>
-                  )}
                   {pi.challan_numbers && (
                     <div className="pi-meta-row" style={{ marginTop: 4 }}>
                       <span>CHALLAN NO(S) :</span>
@@ -195,12 +287,6 @@ export default function ProformaInvoicePrintView({
                     <span>Date :</span>
                     <strong>{formatDate(pi.pi_date)}</strong>
                   </div>
-                  {purchaseNo && (
-                    <div className="pi-meta-row" style={{ marginTop: 4 }}>
-                      <span>PURCHASE NO. :</span>
-                      <strong>{purchaseNo}</strong>
-                    </div>
-                  )}
                 </>
               )}
             </div>
@@ -222,62 +308,22 @@ export default function ProformaInvoicePrintView({
               </tr>
             </thead>
             <tbody>
-              {items.map((item, idx) => {
-                const slNo = item.sl_no !== undefined ? item.sl_no : (item.slNo !== undefined ? item.slNo : idx + 1);
-                const desc = item.item_description || item.itemDescription || item.item_name || item.name || '';
-                let itemPurch = item.purchase_no || item.purchaseNo || item.purchase_number || item.purchaseNumber || '';
-                let poStyle = item.po_style_no || item.poStyleNo || '';
-
-                if (!itemPurch && poStyle) {
-                  const match = poStyle.match(/Purchase(?:\s*No)?\s*[:=]\s*([^/\n;]+)/i);
-                  if (match) itemPurch = match[1].trim();
-                }
-                if (!itemPurch && purchaseNo) {
-                  itemPurch = purchaseNo;
-                }
-
-                if (poStyle && poStyle !== '-') {
-                  poStyle = poStyle.replace(/\s*\/\s*Purchase(?:\s*No)?\s*[:=]\s*[^/\n;]+/i, '').trim();
-                }
-
-                const poVal = item.order_number || item.orderNumber || '';
-                const styleVal = item.style_name || item.styleName || '';
-
-                if (poStyle && poStyle !== '-') {
-                  let updated = poStyle;
-                  if (poVal && !updated.toLowerCase().includes('po:') && !updated.includes(poVal)) {
-                    updated = `PO: ${poVal} / ` + updated.replace(/^Style:\s*/i, 'Style: ');
-                  }
-                  poStyle = updated;
-                } else {
-                  const parts = [];
-                  if (poVal) parts.push(`PO: ${poVal}`);
-                  if (styleVal) parts.push(`Style: ${styleVal}`);
-                  poStyle = parts.length > 0 ? parts.join(' / ') : '-';
-                }
-
-                const qty = Number(item.quantity || 0);
-                const unit = (item.unit || 'PCS').toUpperCase();
-                const rate = Number(item.unit_price !== undefined ? item.unit_price : (item.unitPrice !== undefined ? item.unitPrice : 0));
-                const total = Number(item.total_amount !== undefined ? item.total_amount : (item.totalAmount !== undefined ? item.totalAmount : (qty * rate).toFixed(2)));
-
-                return (
-                  <tr key={idx}>
-                    <td className="col-sl">{slNo}</td>
-                    <td className="col-desc">{desc}</td>
-                    <td className="col-purch">{itemPurch || '-'}</td>
-                    <td className="col-po" style={{ whiteSpace: 'pre-line' }}>{poStyle}</td>
-                    <td className="col-qty">{qty.toLocaleString('en-US')}</td>
-                    <td className="col-unit">{unit}</td>
-                    <td className="col-rate">
-                      {currencySym} {rate.toFixed(4)}
-                    </td>
-                    <td className="col-total">
-                      {currencySym} {total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </td>
-                  </tr>
-                );
-              })}
+              {displayItems.map((item) => (
+                <tr key={item.slNo}>
+                  <td className="col-sl">{item.slNo}</td>
+                  <td className="col-desc">{item.desc}</td>
+                  <td className="col-purch">{item.itemPurch || '-'}</td>
+                  <td className="col-po" style={{ whiteSpace: 'pre-line' }}>{item.poStyle}</td>
+                  <td className="col-qty">{item.qty.toLocaleString('en-US')}</td>
+                  <td className="col-unit">{item.unit}</td>
+                  <td className="col-rate">
+                    {currencySym} {item.rate.toFixed(4)}
+                  </td>
+                  <td className="col-total">
+                    {currencySym} {item.total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </td>
+                </tr>
+              ))}
               <tr className="pi-total-row">
                 <td colSpan={4} style={{ textAlign: 'right', fontWeight: 'bold' }}>TOTAL</td>
                 <td className="col-qty" style={{ fontWeight: 'bold' }}>
@@ -295,7 +341,7 @@ export default function ProformaInvoicePrintView({
           {/* Summary / Terms */}
           <div className="pi-summary-section">
             <div className="pi-in-words">
-              {pi.amount_in_words || ''}
+              {pi.amount_in_words || (totalAmt > 0 ? `IN WORDS: ${numberToCurrencyWords(totalAmt, pi.currency || 'USD')}` : '')}
             </div>
             <div className="pi-spec-line">
               <strong>NET WEIGHT:</strong> {pi.net_weight || '250 KGS'}

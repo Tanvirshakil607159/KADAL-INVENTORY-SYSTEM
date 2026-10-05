@@ -1139,11 +1139,12 @@ const PdfGenerator = {
     };
     const purchaseNo = getPiPurchaseNo(pi);
 
-    const items = (pi.items || []).map((it, idx) => {
-      const slNo = it.sl_no !== undefined ? it.sl_no : (it.slNo !== undefined ? it.slNo : idx + 1);
-      const desc = it.item_description || it.itemDescription || it.item_name || it.name || '';
-      let itemPurch = it.purchase_no || it.purchaseNo || it.purchase_number || it.purchaseNumber || '';
-      let poStyle = it.po_style_no || it.poStyleNo || '';
+    // Group and merge rows with: Same Item Description, Same Purchase Number, Same PO & Style Number
+    const mergedMap = new Map();
+    (pi.items || []).forEach((it) => {
+      const desc = (it.item_description || it.itemDescription || it.item_name || it.name || '').trim();
+      let itemPurch = (it.purchase_no || it.purchaseNo || it.purchase_number || it.purchaseNumber || '').trim();
+      let poStyle = (it.po_style_no || it.poStyleNo || '').trim();
 
       if (!itemPurch && poStyle) {
         const match = poStyle.match(/Purchase(?:\s*No)?\s*[:=]\s*([^/\n;]+)/i);
@@ -1157,8 +1158,8 @@ const PdfGenerator = {
         poStyle = poStyle.replace(/\s*\/\s*Purchase(?:\s*No)?\s*[:=]\s*[^/\n;]+/i, '').trim();
       }
 
-      const poVal = it.order_number || it.orderNumber || '';
-      const styleVal = it.style_name || it.styleName || '';
+      const poVal = (it.order_number || it.orderNumber || '').trim();
+      const styleVal = (it.style_name || it.styleName || '').trim();
 
       if (poStyle && poStyle !== '-') {
         let updated = poStyle;
@@ -1173,26 +1174,57 @@ const PdfGenerator = {
         poStyle = parts.length > 0 ? parts.join(' / ') : '-';
       }
 
-      if (poStyle && poStyle.includes(' / ')) {
-        poStyle = poStyle.split(' / ').join('\n');
-      }
-
       const qty = Number(it.quantity || 0);
-      const unit = (it.unit || 'PCS').toUpperCase();
+      const unit = (it.unit || 'PCS').toUpperCase().trim();
       const rate = Number(it.unit_price !== undefined ? it.unit_price : (it.unitPrice !== undefined ? it.unitPrice : 0));
-      const total = Number(it.total_amount !== undefined ? it.total_amount : (it.totalAmount !== undefined ? it.totalAmount : (qty * rate).toFixed(2)));
+      const lineTotal = Number(it.total_amount !== undefined ? it.total_amount : (it.totalAmount !== undefined ? it.totalAmount : (qty * rate).toFixed(2)));
+
+      const cleanDesc = desc.toLowerCase().replace(/\s+/g, ' ');
+      const cleanPurch = itemPurch.toLowerCase().replace(/\s+/g, ' ');
+      const cleanPoStyle = poStyle.toLowerCase().replace(/[\s/]+/g, ' ');
+      const cleanUnit = unit.toLowerCase();
+      const rateKey = rate.toFixed(4);
+
+      const groupKey = `${cleanDesc}:::${cleanPurch}:::${cleanPoStyle}:::${cleanUnit}:::${rateKey}`;
+
+      if (mergedMap.has(groupKey)) {
+        const existing = mergedMap.get(groupKey);
+        existing.qty += qty;
+        existing.total = Number((existing.total + lineTotal).toFixed(2));
+      } else {
+        mergedMap.set(groupKey, {
+          desc,
+          itemPurch,
+          poStyle,
+          qty,
+          unit,
+          rate,
+          total: lineTotal
+        });
+      }
+    });
+
+    const items = Array.from(mergedMap.values()).map((m, idx) => {
+      let displayPoStyle = m.poStyle;
+      if (displayPoStyle && displayPoStyle.includes(' / ')) {
+        displayPoStyle = displayPoStyle.split(' / ').join('\n');
+      }
+      const lineTotal = Number((m.qty * m.rate).toFixed(2));
 
       return [
-        { text: String(slNo), alignment: 'center', style: 'piTableCell' },
-        { text: desc, alignment: 'left', style: 'piTableCell' },
-        { text: itemPurch || '-', alignment: 'center', style: 'piTableCell' },
-        { text: poStyle || '-', alignment: 'center', style: 'piTableCell' },
-        { text: qty.toLocaleString('en-US'), alignment: 'right', style: 'piTableCell' },
-        { text: unit, alignment: 'center', style: 'piTableCell' },
-        { text: `${currencySym} ${rate.toFixed(4)}`, alignment: 'right', style: 'piTableCell' },
-        { text: `${currencySym} ${total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, alignment: 'right', style: 'piTableCell' },
+        { text: String(idx + 1), alignment: 'center', style: 'piTableCell' },
+        { text: m.desc, alignment: 'left', style: 'piTableCell' },
+        { text: m.itemPurch || '-', alignment: 'center', style: 'piTableCell' },
+        { text: displayPoStyle || '-', alignment: 'center', style: 'piTableCell' },
+        { text: m.qty.toLocaleString('en-US'), alignment: 'right', style: 'piTableCell' },
+        { text: m.unit, alignment: 'center', style: 'piTableCell' },
+        { text: `${currencySym} ${m.rate.toFixed(4)}`, alignment: 'right', style: 'piTableCell' },
+        { text: `${currencySym} ${lineTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, alignment: 'right', style: 'piTableCell' },
       ];
     });
+
+    const totalQty = Array.from(mergedMap.values()).reduce((sum, it) => sum + it.qty, 0);
+    const totalAmt = Array.from(mergedMap.values()).reduce((sum, it) => sum + Number((it.qty * it.rate).toFixed(2)), 0);
 
     // Total row
     const totalRow = [
@@ -1200,15 +1232,17 @@ const PdfGenerator = {
       {},
       {},
       {},
-      { text: Number(pi.total_quantity || 0).toLocaleString('en-US'), alignment: 'right', bold: true, style: 'piTableTotal' },
+      { text: totalQty.toLocaleString('en-US'), alignment: 'right', bold: true, style: 'piTableTotal' },
       { text: '', style: 'piTableTotal' },
       { text: '', style: 'piTableTotal' },
-      { text: `${currencySym} ${Number(pi.total_amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, alignment: 'right', bold: true, style: 'piTableTotal' },
+      { text: `${currencySym} ${totalAmt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, alignment: 'right', bold: true, style: 'piTableTotal' },
     ];
+
+    const sigTopMargin = Math.max(15, Math.min(180, 200 - (items.length * 16)));
 
     const docDefinition = {
       pageSize: 'A4',
-      pageMargins: [35, 30, 35, 35],
+      pageMargins: [35, 28, 35, 62],
       background: (currentPage, pageSize) => {
         if (!watermark) return null;
         return {
@@ -1218,6 +1252,31 @@ const PdfGenerator = {
           absolutePosition: { x: (pageSize.width - 340) / 2, y: (pageSize.height - 340) / 2 }
         };
       },
+      footer: (currentPage, pageCount) => ({
+        margin: [35, 0, 35, 0],
+        stack: [
+          { canvas: [{ type: 'line', x1: 0, y1: 0, x2: 525, y2: 0, lineWidth: 0.6, lineColor: '#10b981' }], margin: [0, 0, 0, 5] },
+          {
+            columns: [
+              {
+                width: '*',
+                stack: [
+                  { text: 'Office & Factory :', bold: true, fontSize: 8, color: '#047857' },
+                  { text: '356/1, Block-B, Tek Kathora, Salna, Gazipur-1703, Bangladesh', fontSize: 7.5, color: '#334155', margin: [0, 1, 0, 0] }
+                ]
+              },
+              {
+                width: 230,
+                alignment: 'right',
+                stack: [
+                  { text: 'Contact Details:', bold: true, fontSize: 8, color: '#047857', alignment: 'right' },
+                  { text: 'Cell: +88 01766 671724  |  Web: www.kadesignaccessoriesltd.com\nE-mail: maksudakumu@kadesignaccessoriesltd.com', fontSize: 7.5, color: '#334155', alignment: 'right', margin: [0, 1, 0, 0] }
+                ]
+              }
+            ]
+          }
+        ]
+      }),
       content: [
         // Top Letterhead
         letterhead ? {
@@ -1250,15 +1309,12 @@ const PdfGenerator = {
                 { text: `${pi.applicant_name || ''}\n${pi.applicant_address || ''}`, fontSize: 8.5, color: '#1e293b', margin: [0, 2, 0, 6] },
 
                 { text: 'BENIFICARY:', bold: true, fontSize: 8.5, color: '#000' },
-                { text: `${pi.beneficiary_name || 'K.A. DESIGN ACCESSORIES LTD.'}\n${pi.beneficiary_address || '356/1, BLOCK-B, TEK KATHORA, SALNA\nGAZIPUR-1703, BANGLADESH'}${pi.beneficiary_bin ? '\nBIN: ' + pi.beneficiary_bin : ''}`, fontSize: 8.5, color: '#1e293b', margin: [0, 2, 0, 6] },
+                { text: `${pi.beneficiary_name || 'K.A. DESIGN ACCESSORIES LTD.'}\n${pi.beneficiary_address || '356/1, BLOCK-B, TEK KATHORA, SALNA\nGAZIPUR-1703, BANGLADESH'}\nBIN: ${(pi.beneficiary_bin || pi.beneficiaryBin || '009212306-1201').trim()}`, fontSize: 8.5, color: '#1e293b', margin: [0, 2, 0, 6] },
 
                 { text: 'BANK DETAIL:', bold: true, fontSize: 8.5, color: '#000' },
                 { text: pi.bank_details || 'UNITED COMMERCIAL BANK PLC.\nTONGI BRANCH\n18, S.K. MANNAN TOWER, CHERAG ALI\nGAZIPUR-1712, BANGLADESH\nSWIFT CODE: UCBLBDDHTNG', fontSize: 8.5, color: '#1e293b', margin: [0, 2, 0, 6] },
 
-                { text: [{ text: 'BUYER : ', bold: true, fontSize: 8.5 }, { text: pi.buyer || '', fontSize: 8.5 }], margin: [0, 2, 0, 4] },
-                ...(purchaseNo ? [
-                  { text: [{ text: 'PURCHASE NO : ', bold: true, fontSize: 8.5 }, { text: purchaseNo, fontSize: 8.5, bold: true }], margin: [0, 0, 0, 4] }
-                ] : [])
+                { text: [{ text: 'BUYER : ', bold: true, fontSize: 8.5 }, { text: pi.buyer || '', fontSize: 8.5 }], margin: [0, 2, 0, 4] }
               ]
             },
             {
@@ -1270,18 +1326,12 @@ const PdfGenerator = {
                   { text: [{ text: 'BILL : ', bold: true }, { text: pi.bill_number || '-' }], fontSize: 9, alignment: 'right', margin: [0, 0, 0, 4] },
                   { text: `Date : ${formatDate(pi.bill_date || pi.pi_date)}`, fontSize: 9, alignment: 'right', margin: [0, 0, 0, 6] },
                   { text: [{ text: 'PROFORMA INVOICE NO. : ', bold: true }, { text: pi.pi_number || '-' }], fontSize: 9, bold: true, alignment: 'right', margin: [0, 0, 0, 4] },
-                  ...(purchaseNo ? [
-                    { text: [{ text: 'PURCHASE NO. : ', bold: true }, { text: purchaseNo }], fontSize: 9, bold: true, alignment: 'right', margin: [0, 0, 0, 4] }
-                  ] : []),
                   ...(pi.challan_numbers ? [
                     { text: [{ text: 'CHALLAN NO(S) : ', bold: true }, { text: pi.challan_numbers }], fontSize: 8.5, alignment: 'right', margin: [0, 0, 0, 4] }
                   ] : [])
                 ] : [
                   { text: `Date : ${formatDate(pi.pi_date)}`, fontSize: 9, alignment: 'right', margin: [0, 0, 0, 4] },
-                  { text: [{ text: 'PROFORMA INVOICE NO. : ', bold: true }, { text: pi.pi_number || '-' }], fontSize: 9, bold: true, alignment: 'right', margin: [0, 0, 0, 4] },
-                  ...(purchaseNo ? [
-                    { text: [{ text: 'PURCHASE NO. : ', bold: true }, { text: purchaseNo }], fontSize: 9, bold: true, alignment: 'right', margin: [0, 0, 0, 4] }
-                  ] : [])
+                  { text: [{ text: 'PROFORMA INVOICE NO. : ', bold: true }, { text: pi.pi_number || '-' }], fontSize: 9, bold: true, alignment: 'right', margin: [0, 0, 0, 4] }
                 ])
               ]
             }
@@ -1327,10 +1377,11 @@ const PdfGenerator = {
         { text: (pi.amount_in_words || '').toUpperCase(), bold: true, fontSize: 8.5, margin: [0, 3, 0, 3] },
         { text: `NET WEIGHT: ${pi.net_weight || '250 KGS'}`, fontSize: 8.5, margin: [0, 1, 0, 1] },
         { text: `GROSS WEIGHT: ${pi.gross_weight || '260 KGS'}`, fontSize: 8.5, margin: [0, 1, 0, 1] },
-        { text: `TERMS AND CONDITIONS : ${pi.terms_conditions || 'CASH ON DELIVERY.'}`, fontSize: 8.5, margin: [0, 1, 0, 12] },
+        { text: `TERMS AND CONDITIONS : ${pi.terms_conditions || 'CASH ON DELIVERY.'}`, fontSize: 8.5, margin: [0, 1, 0, 6] },
 
-        // Signatures
+        // Signatures (anchored at lower side)
         {
+          unbreakable: true,
           columns: [
             {
               width: '32%',
@@ -1357,29 +1408,7 @@ const PdfGenerator = {
               ]
             }
           ],
-          margin: [0, 0, 0, 12]
-        },
-
-        // Clean Footer
-        { canvas: [{ type: 'line', x1: 0, y1: 0, x2: 525, y2: 0, lineWidth: 0.5, lineColor: '#94a3b8' }], margin: [0, 4, 0, 4] },
-        {
-          columns: [
-            {
-              width: '*',
-              stack: [
-                { text: 'Office & Factory :', bold: true, fontSize: 8, color: '#065f46' },
-                { text: '356/1, Block-B, Tek Kathora, Salna, Gazipur-1703, Bangladesh', fontSize: 7.5, color: '#334155' }
-              ]
-            },
-            {
-              width: 220,
-              alignment: 'right',
-              stack: [
-                { text: 'Contact Details:', bold: true, fontSize: 8, color: '#065f46' },
-                { text: 'Cell: +88 01766 671724  |  Web: www.kadesignaccessoriesltd.com\nE-mail: maksudakumu@kadesignaccessoriesltd.com', fontSize: 7.5, color: '#334155' }
-              ]
-            }
-          ]
+          margin: [0, sigTopMargin, 0, 4]
         }
       ],
       styles: {
