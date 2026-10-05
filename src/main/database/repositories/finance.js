@@ -83,16 +83,17 @@ function normalizePiItem(it, idx) {
     if (match) purchaseVal = match[1].trim();
   }
 
-  // Build clean poStyleClean for dedicated PO & Style column
+  // Build clean poStyleClean for dedicated Order & Style column
   let poStyleClean = poStyle;
   if (poStyleClean && poStyleClean !== '-') {
     poStyleClean = poStyleClean.replace(/\s*\/\s*Purchase(?:\s*No)?\s*[:=]\s*[^/\n;]+/i, '').trim();
-    if (poVal && !poStyleClean.toLowerCase().includes('po:') && !poStyleClean.includes(poVal)) {
-      poStyleClean = `PO: ${poVal} / ` + poStyleClean.replace(/^Style:\s*/i, 'Style: ');
+    if (poVal && !poStyleClean.toLowerCase().includes('order:') && !poStyleClean.toLowerCase().includes('po:') && !poStyleClean.includes(poVal)) {
+      poStyleClean = `Order: ${poVal} / ` + poStyleClean.replace(/^Style:\s*/i, 'Style: ');
     }
+    poStyleClean = poStyleClean.replace(/^PO:\s*/i, 'Order: ').replace(/\s*\/\s*PO:\s*/gi, ' / Order: ');
   } else {
     const parts = [];
-    if (poVal) parts.push(`PO: ${poVal}`);
+    if (poVal) parts.push(`Order: ${poVal}`);
     if (styleVal) parts.push(`Style: ${styleVal}`);
     poStyleClean = parts.length > 0 ? parts.join(' / ') : '-';
   }
@@ -578,8 +579,8 @@ const FinanceRepo = {
           net_weight: netWeight || '250 KGS',
           gross_weight: grossWeight || '260 KGS',
           terms_conditions: termsConditions || 'CASH ON DELIVERY.',
-          prepared_by: preparedBy || 'Md. Ariful Rahman\nAccounts & Admin\nK. A. Design Accessories Ltd.',
-          authorized_by: authorizedBy || 'Maksudha Akter Kumu\nChairman\nK.A. DESIGN ACCESSORIES LTD.',
+          prepared_by: preparedBy || null,
+          authorized_by: authorizedBy || null,
           accepted_by: acceptedBy || null,
           status: safeStatus,
           notes: finalNotes || null,
@@ -658,8 +659,8 @@ const FinanceRepo = {
         netWeight || '250 KGS',
         grossWeight || '260 KGS',
         termsConditions || 'CASH ON DELIVERY.',
-        preparedBy || 'Md. Ariful Rahman\nAccounts & Admin\nK. A. Design Accessories Ltd.',
-        authorizedBy || 'Maksudha Akter Kumu\nChairman\nK.A. DESIGN ACCESSORIES LTD.',
+        preparedBy || null,
+        authorizedBy || null,
         acceptedBy || null,
         safeStatus,
         finalNotes || null,
@@ -705,8 +706,8 @@ const FinanceRepo = {
           netWeight || '250 KGS',
           grossWeight || '260 KGS',
           termsConditions || 'CASH ON DELIVERY.',
-          preparedBy || 'Md. Ariful Rahman\nAccounts & Admin\nK. A. Design Accessories Ltd.',
-          authorizedBy || 'Maksudha Akter Kumu\nChairman\nK.A. DESIGN ACCESSORIES LTD.',
+          preparedBy || null,
+          authorizedBy || null,
           acceptedBy || null,
           'ACTIVE',
           finalNotes || null,

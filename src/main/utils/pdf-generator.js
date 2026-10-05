@@ -1163,13 +1163,14 @@ const PdfGenerator = {
 
       if (poStyle && poStyle !== '-') {
         let updated = poStyle;
-        if (poVal && !updated.toLowerCase().includes('po:') && !updated.includes(poVal)) {
-          updated = `PO: ${poVal} / ` + updated.replace(/^Style:\s*/i, 'Style: ');
+        if (poVal && !updated.toLowerCase().includes('order:') && !updated.toLowerCase().includes('po:') && !updated.includes(poVal)) {
+          updated = `Order: ${poVal} / ` + updated.replace(/^Style:\s*/i, 'Style: ');
         }
+        updated = updated.replace(/^PO:\s*/i, 'Order: ').replace(/\s*\/\s*PO:\s*/gi, ' / Order: ');
         poStyle = updated;
       } else {
         const parts = [];
-        if (poVal) parts.push(`PO: ${poVal}`);
+        if (poVal) parts.push(`Order: ${poVal}`);
         if (styleVal) parts.push(`Style: ${styleVal}`);
         poStyle = parts.length > 0 ? parts.join(' / ') : '-';
       }
@@ -1239,6 +1240,24 @@ const PdfGenerator = {
     ];
 
     const sigTopMargin = Math.max(15, Math.min(180, 200 - (items.length * 16)));
+
+    let pdfWidths = [22, '*', 80, 85, 45, 28, 48, 55];
+    if (pi.customColWidths) {
+      const cw = pi.customColWidths;
+      const totalPx = (cw.sl || 32) + (cw.desc || 195) + (cw.purch || 105) + (cw.po || 115) + (cw.qty || 55) + (cw.unit || 40) + (cw.rate || 65) + (cw.total || 75);
+      const scale = 525 / Math.max(300, totalPx);
+      pdfWidths = [
+        Math.max(18, Math.round((cw.sl || 32) * scale)),
+        Math.max(50, Math.round((cw.desc || 195) * scale)),
+        Math.max(40, Math.round((cw.purch || 105) * scale)),
+        Math.max(40, Math.round((cw.po || 115) * scale)),
+        Math.max(25, Math.round((cw.qty || 55) * scale)),
+        Math.max(20, Math.round((cw.unit || 40) * scale)),
+        Math.max(30, Math.round((cw.rate || 65) * scale)),
+        Math.max(35, Math.round((cw.total || 75) * scale))
+      ];
+    }
+    const pdfPadding = pi.customRowPadding ? Math.max(1.5, Math.min(10, pi.customRowPadding * 0.8)) : 3;
 
     const docDefinition = {
       pageSize: 'A4',
@@ -1344,13 +1363,13 @@ const PdfGenerator = {
         {
           table: {
             headerRows: 1,
-            widths: [22, '*', 80, 85, 45, 28, 48, 55],
+            widths: pdfWidths,
             body: [
               [
                 { text: 'SL. NO', alignment: 'center', bold: true, style: 'piTableHeader' },
                 { text: 'ITEM DESCRIPTION', alignment: 'center', bold: true, style: 'piTableHeader' },
                 { text: 'PURCHASE NO.', alignment: 'center', bold: true, style: 'piTableHeader' },
-                { text: 'PO & STYLE NO.', alignment: 'center', bold: true, style: 'piTableHeader' },
+                { text: 'ORDER & STYLE NO.', alignment: 'center', bold: true, style: 'piTableHeader' },
                 { text: 'QTY', alignment: 'center', bold: true, style: 'piTableHeader' },
                 { text: 'UNIT', alignment: 'center', bold: true, style: 'piTableHeader' },
                 { text: 'UNIT PRICE', alignment: 'center', bold: true, style: 'piTableHeader' },
@@ -1367,8 +1386,8 @@ const PdfGenerator = {
             vLineColor: () => '#475569',
             paddingLeft: () => 4,
             paddingRight: () => 4,
-            paddingTop: () => 3,
-            paddingBottom: () => 3,
+            paddingTop: () => pdfPadding,
+            paddingBottom: () => pdfPadding,
           },
           margin: [0, 0, 0, 8]
         },
@@ -1386,7 +1405,7 @@ const PdfGenerator = {
             {
               width: '32%',
               stack: [
-                { text: 'Md. Ariful Rahman\nAccounts & Admin\nK. A. Design Accessories Ltd.', fontSize: 8, alignment: 'center', margin: [0, 15, 0, 3] },
+                { text: '', margin: [0, 27, 0, 3] },
                 { canvas: [{ type: 'line', x1: 10, y1: 0, x2: 140, y2: 0, lineWidth: 0.8, lineColor: '#64748b' }] },
                 { text: 'Prepared By\nFor KADAL', fontSize: 8, bold: true, alignment: 'center', margin: [0, 3, 0, 0] }
               ]
@@ -1394,7 +1413,7 @@ const PdfGenerator = {
             {
               width: '36%',
               stack: [
-                { text: 'Maksudha Akter Kumu\nChairman\nK.A. DESIGN ACCESSORIES LTD.', fontSize: 8, alignment: 'center', margin: [0, 15, 0, 3] },
+                { text: '', margin: [0, 27, 0, 3] },
                 { canvas: [{ type: 'line', x1: 15, y1: 0, x2: 155, y2: 0, lineWidth: 0.8, lineColor: '#64748b' }] },
                 { text: 'Authorized By\nFor KADAL', fontSize: 8, bold: true, alignment: 'center', margin: [0, 3, 0, 0] }
               ]

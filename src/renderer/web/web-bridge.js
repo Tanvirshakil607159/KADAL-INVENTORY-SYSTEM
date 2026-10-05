@@ -53,12 +53,13 @@ function formatBridgePoStyle(it) {
   let cleanVal = val;
   if (cleanVal && cleanVal !== '-') {
     cleanVal = cleanVal.replace(/\s*\/\s*Purchase(?:\s*No)?\s*[:=]\s*[^/\n;]+/i, '').trim();
-    if (po && !cleanVal.toLowerCase().includes('po:') && !cleanVal.includes(po)) {
-      cleanVal = `PO: ${po} / ` + cleanVal;
+    if (po && !cleanVal.toLowerCase().includes('order:') && !cleanVal.toLowerCase().includes('po:') && !cleanVal.includes(po)) {
+      cleanVal = `Order: ${po} / ` + cleanVal.replace(/^Style:\s*/i, 'Style: ');
     }
+    cleanVal = cleanVal.replace(/^PO:\s*/i, 'Order: ').replace(/\s*\/\s*PO:\s*/gi, ' / Order: ');
   } else {
     const parts = [];
-    if (po) parts.push(`PO: ${po}`);
+    if (po) parts.push(`Order: ${po}`);
     if (style) parts.push(`Style: ${style}`);
     cleanVal = parts.length > 0 ? parts.join(' / ') : '-';
   }
@@ -1565,8 +1566,8 @@ export const webBridge = {
         net_weight: data.netWeight || '250 KGS',
         gross_weight: data.grossWeight || '260 KGS',
         terms_conditions: data.termsConditions || 'CASH ON DELIVERY.',
-        prepared_by: data.preparedBy || 'Md. Ariful Rahman\nAccounts & Admin\nK. A. Design Accessories Ltd.',
-        authorized_by: data.authorizedBy || 'Maksudha Akter Kumu\nChairman\nK.A. DESIGN ACCESSORIES LTD.',
+        prepared_by: data.preparedBy || null,
+        authorized_by: data.authorizedBy || null,
         accepted_by: data.acceptedBy || null,
         status: data.status || 'ACTIVE',
         notes: finalNotes || null,

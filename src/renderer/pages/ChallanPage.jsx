@@ -1,6 +1,19 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import useStore from '../store/useStore';
-import { Plus, Search, Trash2, FileText, ArrowLeft, Package, Clock, X, AlertCircle, FileCheck, Layers } from 'lucide-react';
+import { Plus, Search, Trash2, FileText, ArrowLeft, Package, Clock, X, AlertCircle, FileCheck, Layers, Printer, Move, RotateCcw } from 'lucide-react';
+
+const DEFAULT_CHALLAN_COL_WIDTHS = {
+  sl: 30,
+  item: 140,
+  code: 70,
+  variant: 85,
+  buyer: 75,
+  order: 75,
+  orderQty: 60,
+  qty: 55,
+  balance: 60,
+  unit: 45
+};
 
 export default function ChallanPage() {
   const { 
@@ -23,6 +36,71 @@ export default function ChallanPage() {
   const [contactSuggestions, setContactSuggestions] = useState([]);
   const [availablePis, setAvailablePis] = useState([]);
   const [selectedPiId, setSelectedPiId] = useState(challanForm?.piId || '');
+
+  // Preview Column & Row Resizing State
+  const [challanColWidths, setChallanColWidths] = useState({ ...DEFAULT_CHALLAN_COL_WIDTHS });
+  const [challanRowHeights, setChallanRowHeights] = useState({});
+  const [challanPaddingY, setChallanPaddingY] = useState(6);
+
+  const handleChallanColMouseDown = (colKey, e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const startWidth = challanColWidths[colKey] || DEFAULT_CHALLAN_COL_WIDTHS[colKey] || 50;
+
+    const onMouseMove = (moveEvent) => {
+      moveEvent.preventDefault();
+      const diff = moveEvent.clientX - startX;
+      const minW = colKey === 'sl' ? 24 : 35;
+      const newWidth = Math.max(minW, Math.round(startWidth + diff));
+      setChallanColWidths(prev => ({ ...prev, [colKey]: newWidth }));
+    };
+
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  };
+
+  const handleChallanRowMouseDown = (rowKey, e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startY = e.clientY;
+    const trElem = e.currentTarget.closest('tr');
+    const startHeight = trElem ? trElem.getBoundingClientRect().height : (challanRowHeights[rowKey] || 26);
+
+    const onMouseMove = (moveEvent) => {
+      moveEvent.preventDefault();
+      const diff = moveEvent.clientY - startY;
+      const newHeight = Math.max(20, Math.round(startHeight + diff));
+      setChallanRowHeights(prev => ({ ...prev, [rowKey]: newHeight }));
+    };
+
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    document.body.style.cursor = 'row-resize';
+    document.body.style.userSelect = 'none';
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  };
+
+  const handleResetChallanSizes = () => {
+    setChallanColWidths({ ...DEFAULT_CHALLAN_COL_WIDTHS });
+    setChallanRowHeights({});
+    setChallanPaddingY(6);
+  };
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -293,39 +371,160 @@ export default function ChallanPage() {
             {challanForm?.receiverContact && <p>Contact: {challanForm.receiverContact}</p>}
             {challanForm?.receiverAddress && <p>Address: {challanForm.receiverAddress}</p>}
           </div>
-          <table>
+          {/* Column & Row Resizing Toolbar */}
+          <div className="table-resize-toolbar no-print">
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: '#475569', fontWeight: 500 }}>
+              <Move size={12} /> Drag column (↔) or row (↕) borders to resize
+            </span>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 11, color: '#64748b' }}>Row:</span>
+              <button
+                type="button"
+                className={`btn btn-xs ${challanPaddingY === 3 ? 'btn-primary' : 'btn-outline'}`}
+                onClick={() => setChallanPaddingY(3)}
+              >
+                Compact
+              </button>
+              <button
+                type="button"
+                className={`btn btn-xs ${challanPaddingY === 6 ? 'btn-primary' : 'btn-outline'}`}
+                onClick={() => setChallanPaddingY(6)}
+              >
+                Normal
+              </button>
+              <button
+                type="button"
+                className={`btn btn-xs ${challanPaddingY === 10 ? 'btn-primary' : 'btn-outline'}`}
+                onClick={() => setChallanPaddingY(10)}
+              >
+                Spacious
+              </button>
+              <button
+                type="button"
+                className="btn btn-xs btn-ghost"
+                onClick={handleResetChallanSizes}
+                style={{ marginLeft: 4 }}
+                title="Reset column and row sizes"
+              >
+                <RotateCcw size={11} style={{ marginRight: 3 }} /> Reset
+              </button>
+            </div>
+          </div>
+
+          <table style={{ tableLayout: 'fixed' }}>
+            <colgroup>
+              <col style={{ width: `${challanColWidths.sl}px` }} />
+              <col style={{ width: `${challanColWidths.item}px` }} />
+              <col style={{ width: `${challanColWidths.code}px` }} />
+              <col style={{ width: `${challanColWidths.variant}px` }} />
+              <col style={{ width: `${challanColWidths.buyer}px` }} />
+              <col style={{ width: `${challanColWidths.order}px` }} />
+              <col style={{ width: `${challanColWidths.orderQty}px` }} />
+              <col style={{ width: `${challanColWidths.qty}px` }} />
+              <col style={{ width: `${challanColWidths.balance}px` }} />
+              <col style={{ width: `${challanColWidths.unit}px` }} />
+            </colgroup>
             <thead>
-              <tr>
-                <th>#</th>
-                <th>Item</th>
-                <th>Code</th>
-                <th>Size/Color</th>
-                <th>Buyer</th>
-                <th>Order No</th>
-                <th style={{ textAlign: 'right' }}>Order Qty</th>
-                <th style={{ textAlign: 'right' }}>Qty</th>
-                <th style={{ textAlign: 'right' }}>Balance</th>
-                <th>Unit</th>
+              <tr style={{ height: challanRowHeights.header ? `${challanRowHeights.header}px` : undefined }}>
+                <th style={{ padding: `${challanPaddingY}px 8px`, position: 'relative' }}>
+                  #
+                  <div className="table-col-resizer no-print" onMouseDown={(e) => handleChallanColMouseDown('sl', e)} title="Drag column width (↔)" />
+                  <div className="table-row-resizer no-print" onMouseDown={(e) => handleChallanRowMouseDown('header', e)} title="Drag row height (↕)" />
+                </th>
+                <th style={{ padding: `${challanPaddingY}px 8px`, position: 'relative' }}>
+                  Item
+                  <div className="table-col-resizer no-print" onMouseDown={(e) => handleChallanColMouseDown('item', e)} title="Drag column width (↔)" />
+                  <div className="table-row-resizer no-print" onMouseDown={(e) => handleChallanRowMouseDown('header', e)} title="Drag row height (↕)" />
+                </th>
+                <th style={{ padding: `${challanPaddingY}px 8px`, position: 'relative' }}>
+                  Code
+                  <div className="table-col-resizer no-print" onMouseDown={(e) => handleChallanColMouseDown('code', e)} title="Drag column width (↔)" />
+                  <div className="table-row-resizer no-print" onMouseDown={(e) => handleChallanRowMouseDown('header', e)} title="Drag row height (↕)" />
+                </th>
+                <th style={{ padding: `${challanPaddingY}px 8px`, position: 'relative' }}>
+                  Size/Color
+                  <div className="table-col-resizer no-print" onMouseDown={(e) => handleChallanColMouseDown('variant', e)} title="Drag column width (↔)" />
+                  <div className="table-row-resizer no-print" onMouseDown={(e) => handleChallanRowMouseDown('header', e)} title="Drag row height (↕)" />
+                </th>
+                <th style={{ padding: `${challanPaddingY}px 8px`, position: 'relative' }}>
+                  Buyer
+                  <div className="table-col-resizer no-print" onMouseDown={(e) => handleChallanColMouseDown('buyer', e)} title="Drag column width (↔)" />
+                  <div className="table-row-resizer no-print" onMouseDown={(e) => handleChallanRowMouseDown('header', e)} title="Drag row height (↕)" />
+                </th>
+                <th style={{ padding: `${challanPaddingY}px 8px`, position: 'relative' }}>
+                  Order No
+                  <div className="table-col-resizer no-print" onMouseDown={(e) => handleChallanColMouseDown('order', e)} title="Drag column width (↔)" />
+                  <div className="table-row-resizer no-print" onMouseDown={(e) => handleChallanRowMouseDown('header', e)} title="Drag row height (↕)" />
+                </th>
+                <th style={{ padding: `${challanPaddingY}px 8px`, textAlign: 'right', position: 'relative' }}>
+                  Order Qty
+                  <div className="table-col-resizer no-print" onMouseDown={(e) => handleChallanColMouseDown('orderQty', e)} title="Drag column width (↔)" />
+                  <div className="table-row-resizer no-print" onMouseDown={(e) => handleChallanRowMouseDown('header', e)} title="Drag row height (↕)" />
+                </th>
+                <th style={{ padding: `${challanPaddingY}px 8px`, textAlign: 'right', position: 'relative' }}>
+                  Qty
+                  <div className="table-col-resizer no-print" onMouseDown={(e) => handleChallanColMouseDown('qty', e)} title="Drag column width (↔)" />
+                  <div className="table-row-resizer no-print" onMouseDown={(e) => handleChallanRowMouseDown('header', e)} title="Drag row height (↕)" />
+                </th>
+                <th style={{ padding: `${challanPaddingY}px 8px`, textAlign: 'right', position: 'relative' }}>
+                  Balance
+                  <div className="table-col-resizer no-print" onMouseDown={(e) => handleChallanColMouseDown('balance', e)} title="Drag column width (↔)" />
+                  <div className="table-row-resizer no-print" onMouseDown={(e) => handleChallanRowMouseDown('header', e)} title="Drag row height (↕)" />
+                </th>
+                <th style={{ padding: `${challanPaddingY}px 8px`, position: 'relative' }}>
+                  Unit
+                  <div className="table-col-resizer no-print" onMouseDown={(e) => handleChallanColMouseDown('unit', e)} title="Drag column width (↔)" />
+                  <div className="table-row-resizer no-print" onMouseDown={(e) => handleChallanRowMouseDown('header', e)} title="Drag row height (↕)" />
+                </th>
               </tr>
             </thead>
             <tbody>
               {(challanItems || []).map((item, idx) => {
                 const totalAfter = (item.totalDelivered || 0) + item.quantity;
                 const balance = item.orderQuantity ? (item.orderQuantity - totalAfter) : null;
+                const rowKey = `row_${idx}`;
                 return (
-                  <tr key={idx}>
-                    <td>{idx + 1}</td>
-                    <td style={{ fontWeight: 600 }}>{item.itemName}</td>
-                    <td className="text-mono" style={{ fontSize: 11 }}>{item.itemCode}</td>
-                    <td>{item.size} / {item.color}</td>
-                    <td>{item.buyerName || '-'}</td>
-                    <td>{item.orderNumber || '-'}</td>
-                    <td style={{ textAlign: 'right' }}>{item.orderQuantity || '-'}</td>
-                    <td style={{ textAlign: 'right', fontWeight: 700 }}>{item.quantity}</td>
-                    <td style={{ textAlign: 'right', fontWeight: 700, color: balance < 0 ? 'var(--danger)' : 'inherit' }}>
-                      {balance !== null ? balance : '-'}
+                  <tr key={idx} style={{ height: challanRowHeights[rowKey] ? `${challanRowHeights[rowKey]}px` : undefined }}>
+                    <td style={{ padding: `${challanPaddingY}px 8px`, position: 'relative' }}>
+                      {idx + 1}
+                      <div className="table-row-resizer no-print" onMouseDown={(e) => handleChallanRowMouseDown(rowKey, e)} title="Drag row height (↕)" />
                     </td>
-                    <td>{item.unit}</td>
+                    <td style={{ fontWeight: 600, padding: `${challanPaddingY}px 8px`, position: 'relative' }}>
+                      {item.itemName}
+                      <div className="table-row-resizer no-print" onMouseDown={(e) => handleChallanRowMouseDown(rowKey, e)} title="Drag row height (↕)" />
+                    </td>
+                    <td className="text-mono" style={{ fontSize: 11, padding: `${challanPaddingY}px 8px`, position: 'relative' }}>
+                      {item.itemCode}
+                      <div className="table-row-resizer no-print" onMouseDown={(e) => handleChallanRowMouseDown(rowKey, e)} title="Drag row height (↕)" />
+                    </td>
+                    <td style={{ padding: `${challanPaddingY}px 8px`, position: 'relative' }}>
+                      {item.size} / {item.color}
+                      <div className="table-row-resizer no-print" onMouseDown={(e) => handleChallanRowMouseDown(rowKey, e)} title="Drag row height (↕)" />
+                    </td>
+                    <td style={{ padding: `${challanPaddingY}px 8px`, position: 'relative' }}>
+                      {item.buyerName || '-'}
+                      <div className="table-row-resizer no-print" onMouseDown={(e) => handleChallanRowMouseDown(rowKey, e)} title="Drag row height (↕)" />
+                    </td>
+                    <td style={{ padding: `${challanPaddingY}px 8px`, position: 'relative' }}>
+                      {item.orderNumber || '-'}
+                      <div className="table-row-resizer no-print" onMouseDown={(e) => handleChallanRowMouseDown(rowKey, e)} title="Drag row height (↕)" />
+                    </td>
+                    <td style={{ textAlign: 'right', padding: `${challanPaddingY}px 8px`, position: 'relative' }}>
+                      {item.orderQuantity || '-'}
+                      <div className="table-row-resizer no-print" onMouseDown={(e) => handleChallanRowMouseDown(rowKey, e)} title="Drag row height (↕)" />
+                    </td>
+                    <td style={{ textAlign: 'right', fontWeight: 700, padding: `${challanPaddingY}px 8px`, position: 'relative' }}>
+                      {item.quantity}
+                      <div className="table-row-resizer no-print" onMouseDown={(e) => handleChallanRowMouseDown(rowKey, e)} title="Drag row height (↕)" />
+                    </td>
+                    <td style={{ textAlign: 'right', fontWeight: 700, color: balance < 0 ? 'var(--danger)' : 'inherit', padding: `${challanPaddingY}px 8px`, position: 'relative' }}>
+                      {balance !== null ? balance : '-'}
+                      <div className="table-row-resizer no-print" onMouseDown={(e) => handleChallanRowMouseDown(rowKey, e)} title="Drag row height (↕)" />
+                    </td>
+                    <td style={{ padding: `${challanPaddingY}px 8px`, position: 'relative' }}>
+                      {item.unit}
+                      <div className="table-row-resizer no-print" onMouseDown={(e) => handleChallanRowMouseDown(rowKey, e)} title="Drag row height (↕)" />
+                    </td>
                   </tr>
                 );
               })}
@@ -351,6 +550,9 @@ export default function ChallanPage() {
 
         </div>
         <div style={{ marginTop: 20, display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
+          <button className="btn btn-outline" onClick={() => window.print()} title="Print Challan">
+            <Printer size={15} style={{ marginRight: 4 }} /> Print Challan
+          </button>
           <button className="btn btn-outline" onClick={() => setPreview(false)}>Edit More</button>
           <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
             {saving ? 'Processing...' : 'Confirm & Create Challan'}

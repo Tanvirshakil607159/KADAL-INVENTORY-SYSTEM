@@ -197,7 +197,17 @@ const FinanceService = {
   async exportPdf(target) {
     let pi;
     if (typeof target === 'object' && target !== null) {
-      pi = target;
+      if (target.id) {
+        pi = await FinanceRepo.getById(target.id);
+        if (pi) {
+          pi.customColWidths = target.customColWidths;
+          pi.customRowPadding = target.customRowPadding;
+        } else {
+          pi = target;
+        }
+      } else {
+        pi = target;
+      }
     } else {
       pi = await FinanceRepo.getById(target);
     }

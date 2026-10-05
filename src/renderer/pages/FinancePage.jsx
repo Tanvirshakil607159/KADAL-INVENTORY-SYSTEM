@@ -87,7 +87,7 @@ export default function FinancePage() {
     return list.filter(o => o && o.toLowerCase().includes(q));
   }, [orderModalMode, orderNumbers, purchaseNumbers, orderFilterQuery]);
 
-  // Helper to format PO and Style (PO == Order Number) for dedicated column
+  // Helper to format Order and Style (PO == Order Number) for dedicated column
   const formatPoStyle = (it) => {
     if (!it) return '';
     let val = it.po_style_no || it.poStyleNo || '';
@@ -97,14 +97,15 @@ export default function FinancePage() {
     if (val && val !== '-') {
       // Remove any Purchase No from this value
       let cleanVal = val.replace(/\s*\/\s*Purchase(?:\s*No)?\s*[:=]\s*[^/\n;]+/i, '').trim();
-      if (po && !cleanVal.toLowerCase().includes('po:') && !cleanVal.includes(po)) {
-        cleanVal = `PO: ${po} / ` + cleanVal.replace(/^Style:\s*/i, 'Style: ');
+      if (po && !cleanVal.toLowerCase().includes('order:') && !cleanVal.toLowerCase().includes('po:') && !cleanVal.includes(po)) {
+        cleanVal = `Order: ${po} / ` + cleanVal.replace(/^Style:\s*/i, 'Style: ');
       }
+      cleanVal = cleanVal.replace(/^PO:\s*/i, 'Order: ').replace(/\s*\/\s*PO:\s*/gi, ' / Order: ');
       return cleanVal || '-';
     }
 
     const parts = [];
-    if (po) parts.push(`PO: ${po}`);
+    if (po) parts.push(`Order: ${po}`);
     if (style) parts.push(`Style: ${style}`);
 
     return parts.length > 0 ? parts.join(' / ') : '-';
@@ -187,27 +188,12 @@ export default function FinancePage() {
         };
       });
 
+    let addedCount = 0;
     setPiItems(prev => {
-      const map = new Map();
-      [...prev, ...newItems].forEach(it => {
-        const desc = (it.itemDescription || it.item_description || it.name || '').trim();
-        const purch = (it.purchaseNo || it.purchase_no || '').trim();
-        const poStyle = (it.poStyleNo || it.po_style_no || '').trim();
-        const unit = (it.unit || 'PCS').toUpperCase().trim();
-        const rate = Number(it.unitPrice !== undefined ? it.unitPrice : it.unit_price) || 0;
-
-        const key = `${desc.toLowerCase()}:::${purch.toLowerCase()}:::${poStyle.toLowerCase().replace(/[\s/]+/g, ' ')}:::${unit}:::${rate.toFixed(4)}`;
-
-        if (map.has(key)) {
-          const existing = map.get(key);
-          const summedQty = (Number(existing.quantity) || 0) + (Number(it.quantity) || 0);
-          existing.quantity = summedQty;
-          existing.totalAmount = Number((summedQty * rate).toFixed(2));
-        } else {
-          map.set(key, { ...it });
-        }
-      });
-      return Array.from(map.values()).map((item, idx) => ({ ...item, slNo: idx + 1 }));
+      const existingItemIds = new Set(prev.map(it => it.itemId).filter(Boolean));
+      const itemsToAdd = newItems.filter(it => !existingItemIds.has(it.itemId));
+      addedCount = itemsToAdd.length;
+      return [...prev, ...itemsToAdd].map((item, idx) => ({ ...item, slNo: idx + 1 }));
     });
 
     setSelectedItemsFromOrder(new Set());
@@ -219,7 +205,11 @@ export default function FinancePage() {
         if (firstPurch?.purchase_no) setPurchaseNumber(firstPurch.purchase_no);
       }
     }
-    addToast('success', `Added ${newItems.length} item(s) from ${orderModalMode === 'order' ? 'Order' : 'Purchase Order'} ${activeVal} to PI`);
+    if (addedCount > 0) {
+      addToast('success', `Linked & added ${addedCount} item(s) from ${orderModalMode === 'order' ? 'Order' : 'Purchase Order'} ${activeVal} to PI`);
+    } else if (newItems.length > 0) {
+      addToast('info', `Selected item(s) are already linked in this PI`);
+    }
   };
 
   // Debounced search for manual item picker
@@ -1211,7 +1201,16 @@ export default function FinancePage() {
               {/* Line Items Table */}
               <div style={{ marginBottom: 24 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                  <h4 style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>Ordered Items & Unit Pricing</h4>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                    <h4 style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>
+                      Ordered Items & Unit Pricing {piItems.length > 0 && `(${piItems.length})`}
+                    </h4>
+                    {piItems.length > 1 && (
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)', background: 'var(--bg-base)', padding: '2px 8px', borderRadius: 4, border: '1px solid var(--border)' }}>
+                        Items with same Description, Purchase No, and Order & Style are linked individually for recipient tracking, and auto-merged on Invoice Print & PDF
+                      </span>
+                    )}
+                  </div>
                   <div style={{ display: 'flex', gap: 10 }}>
                     <button 
                       type="button" 
@@ -1248,7 +1247,7 @@ export default function FinancePage() {
                         <th style={{ padding: '8px 10px', width: 140 }}>INVENTORY LINK</th>
                         <th style={{ padding: '8px 10px' }}>ITEM DESCRIPTION *</th>
                         <th style={{ padding: '8px 10px', width: 145 }}>PURCHASE NO.</th>
-                        <th style={{ padding: '8px 10px', width: 170 }}>PO & STYLE NO.</th>
+                        <th style={{ padding: '8px 10px', width: 170 }}>ORDER & STYLE NO.</th>
                         <th style={{ padding: '8px 10px', width: 95, textAlign: 'right' }}>ORDER QTY *</th>
                         <th style={{ padding: '8px 10px', width: 65, textAlign: 'center' }}>UNIT</th>
                         <th style={{ padding: '8px 10px', width: 90, textAlign: 'right' }}>UNIT PRICE *</th>
@@ -1371,7 +1370,7 @@ export default function FinancePage() {
                                 value={item.poStyleNo || ''}
                                 onChange={e => handleUpdateItemField(idx, 'poStyleNo', e.target.value)}
                                 disabled={item.isReadOnly}
-                                placeholder="PO: ... / Style: ..."
+                                placeholder="Order: ... / Style: ..."
                                 style={{ width: '100%', padding: '5px 8px', borderRadius: 4, border: '1px solid var(--border)', fontSize: 12, background: item.isReadOnly ? 'var(--bg-card)' : 'var(--bg-base)', color: 'inherit' }}
                               />
                             </td>
@@ -1930,9 +1929,14 @@ export default function FinancePage() {
                 await handleSavePi('APPROVED');
               } : null}
               confirmLabel="Confirm & Approve PI"
-              onExportPdf={async () => {
+              onExportPdf={async (customDimensions) => {
                 try {
-                  const res = await window.kadal.finance.exportPdf(previewPi.id || previewPi);
+                  const payload = {
+                    ...(typeof previewPi === 'object' ? previewPi : { id: previewPi }),
+                    customColWidths: customDimensions?.colWidths,
+                    customRowPadding: customDimensions?.cellPaddingY
+                  };
+                  const res = await window.kadal.finance.exportPdf(payload);
                   if (res?.success) addToast('success', 'PDF exported successfully');
                 } catch (e) {
                   addToast('error', e.message || 'Failed to export PDF');

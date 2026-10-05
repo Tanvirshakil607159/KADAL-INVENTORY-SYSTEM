@@ -3,8 +3,16 @@ import useStore from '../store/useStore';
 import { 
   PackageCheck, Search, Filter, RefreshCw, CheckCircle, AlertTriangle, 
   Clock, Truck, Check, X, Printer, Eye, FileText, ChevronRight, Layers,
-  Calendar, Building, User, Info, ArrowRight, ShieldCheck, Hash
+  Calendar, Building, User, Info, ArrowRight, ShieldCheck, Hash,
+  Move, RotateCcw
 } from 'lucide-react';
+
+const DEFAULT_SLIP_COL_WIDTHS = {
+  item: 260,
+  shipped: 110,
+  received: 110,
+  status: 120
+};
 
 export default function ChallanReceiptPage() {
   const { addToast, user } = useStore();
@@ -25,6 +33,69 @@ export default function ChallanReceiptPage() {
 
   // View Receipt Slip state
   const [viewingSlipChallan, setViewingSlipChallan] = useState(null);
+  const [slipColWidths, setSlipColWidths] = useState({ ...DEFAULT_SLIP_COL_WIDTHS });
+  const [slipRowHeights, setSlipRowHeights] = useState({});
+  const [slipPaddingY, setSlipPaddingY] = useState(8);
+
+  const handleSlipColMouseDown = (colKey, e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const startWidth = slipColWidths[colKey] || DEFAULT_SLIP_COL_WIDTHS[colKey] || 80;
+
+    const onMouseMove = (moveEvent) => {
+      moveEvent.preventDefault();
+      const diff = moveEvent.clientX - startX;
+      const minW = 50;
+      const newWidth = Math.max(minW, Math.round(startWidth + diff));
+      setSlipColWidths(prev => ({ ...prev, [colKey]: newWidth }));
+    };
+
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  };
+
+  const handleSlipRowMouseDown = (rowKey, e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startY = e.clientY;
+    const trElem = e.currentTarget.closest('tr');
+    const startHeight = trElem ? trElem.getBoundingClientRect().height : (slipRowHeights[rowKey] || 32);
+
+    const onMouseMove = (moveEvent) => {
+      moveEvent.preventDefault();
+      const diff = moveEvent.clientY - startY;
+      const newHeight = Math.max(22, Math.round(startHeight + diff));
+      setSlipRowHeights(prev => ({ ...prev, [rowKey]: newHeight }));
+    };
+
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    document.body.style.cursor = 'row-resize';
+    document.body.style.userSelect = 'none';
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  };
+
+  const handleResetSlipSizes = () => {
+    setSlipColWidths({ ...DEFAULT_SLIP_COL_WIDTHS });
+    setSlipRowHeights({});
+    setSlipPaddingY(8);
+  };
 
   const loadChallans = useCallback(async () => {
     setLoading(true);
@@ -594,31 +665,106 @@ export default function ChallanReceiptPage() {
               {viewingSlipChallan.received_notes && <div style={{ gridColumn: '1 / -1' }}><strong>Notes:</strong> {viewingSlipChallan.received_notes}</div>}
             </div>
 
+            {/* Column & Row Resizing Toolbar */}
+            <div className="table-resize-toolbar no-print" style={{ marginBottom: 10 }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: '#475569', fontWeight: 500 }}>
+                <Move size={12} /> Drag column (↔) or row (↕) borders to resize
+              </span>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 11, color: '#64748b' }}>Row:</span>
+                <button
+                  type="button"
+                  className={`btn btn-xs ${slipPaddingY === 4 ? 'btn-primary' : 'btn-outline'}`}
+                  onClick={() => setSlipPaddingY(4)}
+                >
+                  Compact
+                </button>
+                <button
+                  type="button"
+                  className={`btn btn-xs ${slipPaddingY === 8 ? 'btn-primary' : 'btn-outline'}`}
+                  onClick={() => setSlipPaddingY(8)}
+                >
+                  Normal
+                </button>
+                <button
+                  type="button"
+                  className={`btn btn-xs ${slipPaddingY === 12 ? 'btn-primary' : 'btn-outline'}`}
+                  onClick={() => setSlipPaddingY(12)}
+                >
+                  Spacious
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-xs btn-ghost"
+                  onClick={handleResetSlipSizes}
+                  style={{ marginLeft: 4 }}
+                  title="Reset column and row sizes"
+                >
+                  <RotateCcw size={11} style={{ marginRight: 3 }} /> Reset
+                </button>
+              </div>
+            </div>
+
             <div style={{ border: '1px solid var(--border)', borderRadius: 6, overflow: 'hidden', marginBottom: 16 }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, tableLayout: 'fixed' }}>
+                <colgroup>
+                  <col style={{ width: `${slipColWidths.item}px` }} />
+                  <col style={{ width: `${slipColWidths.shipped}px` }} />
+                  <col style={{ width: `${slipColWidths.received}px` }} />
+                  <col style={{ width: `${slipColWidths.status}px` }} />
+                </colgroup>
                 <thead>
-                  <tr style={{ background: 'var(--bg-base)', borderBottom: '1px solid var(--border)' }}>
-                    <th style={{ padding: '8px 10px' }}>Item</th>
-                    <th style={{ padding: '8px 10px', textAlign: 'right' }}>Shipped Qty</th>
-                    <th style={{ padding: '8px 10px', textAlign: 'right' }}>Received Qty</th>
-                    <th style={{ padding: '8px 10px', textAlign: 'right' }}>Status</th>
+                  <tr style={{ background: 'var(--bg-base)', borderBottom: '1px solid var(--border)', height: slipRowHeights.header ? `${slipRowHeights.header}px` : undefined }}>
+                    <th style={{ padding: `${slipPaddingY}px 10px`, position: 'relative' }}>
+                      Item
+                      <div className="table-col-resizer no-print" onMouseDown={(e) => handleSlipColMouseDown('item', e)} title="Drag column width (↔)" />
+                      <div className="table-row-resizer no-print" onMouseDown={(e) => handleSlipRowMouseDown('header', e)} title="Drag row height (↕)" />
+                    </th>
+                    <th style={{ padding: `${slipPaddingY}px 10px`, textAlign: 'right', position: 'relative' }}>
+                      Shipped Qty
+                      <div className="table-col-resizer no-print" onMouseDown={(e) => handleSlipColMouseDown('shipped', e)} title="Drag column width (↔)" />
+                      <div className="table-row-resizer no-print" onMouseDown={(e) => handleSlipRowMouseDown('header', e)} title="Drag row height (↕)" />
+                    </th>
+                    <th style={{ padding: `${slipPaddingY}px 10px`, textAlign: 'right', position: 'relative' }}>
+                      Received Qty
+                      <div className="table-col-resizer no-print" onMouseDown={(e) => handleSlipColMouseDown('received', e)} title="Drag column width (↔)" />
+                      <div className="table-row-resizer no-print" onMouseDown={(e) => handleSlipRowMouseDown('header', e)} title="Drag row height (↕)" />
+                    </th>
+                    <th style={{ padding: `${slipPaddingY}px 10px`, textAlign: 'right', position: 'relative' }}>
+                      Status
+                      <div className="table-col-resizer no-print" onMouseDown={(e) => handleSlipColMouseDown('status', e)} title="Drag column width (↔)" />
+                      <div className="table-row-resizer no-print" onMouseDown={(e) => handleSlipRowMouseDown('header', e)} title="Drag row height (↕)" />
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {(viewingSlipChallan.items || []).map((it, i) => (
-                    <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
-                      <td style={{ padding: '8px 10px' }}>{it.item_name || it.name}</td>
-                      <td style={{ padding: '8px 10px', textAlign: 'right' }}>{it.quantity} {it.unit}</td>
-                      <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600 }}>{it.received_quantity || it.quantity} {it.unit}</td>
-                      <td style={{ padding: '8px 10px', textAlign: 'right' }}>
-                        {Number(it.received_quantity || it.quantity) >= Number(it.quantity) ? (
-                          <span style={{ color: 'var(--success, #10b981)', fontWeight: 600 }}>Accepted</span>
-                        ) : (
-                          <span style={{ color: 'var(--danger, #ef4444)', fontWeight: 600 }}>Shortage: {Number(it.quantity) - Number(it.received_quantity || 0)}</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
+                  {(viewingSlipChallan.items || []).map((it, i) => {
+                    const rowKey = `row_${i}`;
+                    return (
+                      <tr key={i} style={{ borderBottom: '1px solid var(--border)', height: slipRowHeights[rowKey] ? `${slipRowHeights[rowKey]}px` : undefined }}>
+                        <td style={{ padding: `${slipPaddingY}px 10px`, position: 'relative', wordBreak: 'break-word' }}>
+                          {it.item_name || it.name}
+                          <div className="table-row-resizer no-print" onMouseDown={(e) => handleSlipRowMouseDown(rowKey, e)} title="Drag row height (↕)" />
+                        </td>
+                        <td style={{ padding: `${slipPaddingY}px 10px`, textAlign: 'right', position: 'relative' }}>
+                          {it.quantity} {it.unit}
+                          <div className="table-row-resizer no-print" onMouseDown={(e) => handleSlipRowMouseDown(rowKey, e)} title="Drag row height (↕)" />
+                        </td>
+                        <td style={{ padding: `${slipPaddingY}px 10px`, textAlign: 'right', fontWeight: 600, position: 'relative' }}>
+                          {it.received_quantity || it.quantity} {it.unit}
+                          <div className="table-row-resizer no-print" onMouseDown={(e) => handleSlipRowMouseDown(rowKey, e)} title="Drag row height (↕)" />
+                        </td>
+                        <td style={{ padding: `${slipPaddingY}px 10px`, textAlign: 'right', position: 'relative' }}>
+                          {Number(it.received_quantity || it.quantity) >= Number(it.quantity) ? (
+                            <span style={{ color: 'var(--success, #10b981)', fontWeight: 600 }}>Accepted</span>
+                          ) : (
+                            <span style={{ color: 'var(--danger, #ef4444)', fontWeight: 600 }}>Shortage: {Number(it.quantity) - Number(it.received_quantity || 0)}</span>
+                          )}
+                          <div className="table-row-resizer no-print" onMouseDown={(e) => handleSlipRowMouseDown(rowKey, e)} title="Drag row height (↕)" />
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

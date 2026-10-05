@@ -1,10 +1,21 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import './ProformaInvoicePrintView.css';
 import logoImg from '../../assets/logo.png';
 import letterheadImg from '../../assets/letterhead.png';
 import watermarkImg from '../../assets/watermark.png';
-import { Printer, Download, X, CheckCircle } from 'lucide-react';
+import { Printer, Download, X, CheckCircle, Move, RotateCcw } from 'lucide-react';
 import { numberToCurrencyWords } from '../../utils/numberToWords';
+
+const DEFAULT_COL_WIDTHS = {
+  sl: 32,
+  desc: 195,
+  purch: 105,
+  po: 115,
+  qty: 55,
+  unit: 40,
+  rate: 65,
+  total: 75
+};
 
 export default function ProformaInvoicePrintView({ 
   pi, 
@@ -80,13 +91,14 @@ export default function ProformaInvoicePrintView({
 
       if (poStyle && poStyle !== '-') {
         let updated = poStyle;
-        if (poVal && !updated.toLowerCase().includes('po:') && !updated.includes(poVal)) {
-          updated = `PO: ${poVal} / ` + updated.replace(/^Style:\s*/i, 'Style: ');
+        if (poVal && !updated.toLowerCase().includes('order:') && !updated.toLowerCase().includes('po:') && !updated.includes(poVal)) {
+          updated = `Order: ${poVal} / ` + updated.replace(/^Style:\s*/i, 'Style: ');
         }
+        updated = updated.replace(/^PO:\s*/i, 'Order: ').replace(/\s*\/\s*PO:\s*/gi, ' / Order: ');
         poStyle = updated;
       } else {
         const parts = [];
-        if (poVal) parts.push(`PO: ${poVal}`);
+        if (poVal) parts.push(`Order: ${poVal}`);
         if (styleVal) parts.push(`Style: ${styleVal}`);
         poStyle = parts.length > 0 ? parts.join(' / ') : '-';
       }
@@ -137,6 +149,86 @@ export default function ProformaInvoicePrintView({
   const totalQty = displayItems.reduce((sum, it) => sum + (Number(it.qty) || 0), 0);
   const totalAmt = displayItems.reduce((sum, it) => sum + (Number(it.total) || 0), 0);
 
+  // Column and Row Resizing State
+  const [colWidths, setColWidths] = useState(() => ({ ...DEFAULT_COL_WIDTHS }));
+  const [rowHeights, setRowHeights] = useState({});
+  const [cellPaddingY, setCellPaddingY] = useState(4);
+
+  const isCustomized = useMemo(() => {
+    const hasCustomCols = Object.keys(DEFAULT_COL_WIDTHS).some(
+      k => colWidths[k] !== DEFAULT_COL_WIDTHS[k]
+    );
+    const hasCustomRows = Object.keys(rowHeights).length > 0;
+    const hasCustomPadding = cellPaddingY !== 4;
+    return hasCustomCols || hasCustomRows || hasCustomPadding;
+  }, [colWidths, rowHeights, cellPaddingY]);
+
+  const handleResetSizes = () => {
+    setColWidths({ ...DEFAULT_COL_WIDTHS });
+    setRowHeights({});
+    setCellPaddingY(4);
+  };
+
+  const handleColMouseDown = (colKey, e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const startWidth = colWidths[colKey] || DEFAULT_COL_WIDTHS[colKey] || 50;
+
+    const onMouseMove = (moveEvent) => {
+      moveEvent.preventDefault();
+      const diff = moveEvent.clientX - startX;
+      const minW = colKey === 'sl' ? 24 : (colKey === 'unit' ? 28 : (colKey === 'qty' ? 35 : 45));
+      const newWidth = Math.max(minW, Math.round(startWidth + diff));
+      setColWidths(prev => ({
+        ...prev,
+        [colKey]: newWidth
+      }));
+    };
+
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  };
+
+  const handleRowMouseDown = (rowKey, e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startY = e.clientY;
+    const trElem = e.currentTarget.closest('tr');
+    const startHeight = trElem ? trElem.getBoundingClientRect().height : (rowHeights[rowKey] || 26);
+
+    const onMouseMove = (moveEvent) => {
+      moveEvent.preventDefault();
+      const diff = moveEvent.clientY - startY;
+      const newHeight = Math.max(20, Math.round(startHeight + diff));
+      setRowHeights(prev => ({
+        ...prev,
+        [rowKey]: newHeight
+      }));
+    };
+
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    document.body.style.cursor = 'row-resize';
+    document.body.style.userSelect = 'none';
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  };
+
   const handleNativePrint = () => {
     if (onPrint) {
       onPrint();
@@ -185,7 +277,7 @@ export default function ProformaInvoicePrintView({
             <Printer size={15} style={{ marginRight: 6 }} /> {isBill ? 'Print Bill' : 'Print PI'}
           </button>
           {onExportPdf && (
-            <button className="btn btn-outline btn-sm" onClick={onExportPdf}>
+            <button className="btn btn-outline btn-sm" onClick={() => onExportPdf({ colWidths, cellPaddingY, rowHeights })}>
               <Download size={15} style={{ marginRight: 6 }} /> Export PDF
             </button>
           )}
@@ -292,47 +384,163 @@ export default function ProformaInvoicePrintView({
             </div>
           </div>
 
-          {/* Goods Table Section */}
-          <div className="pi-table-title">DESCRIPTION OF GOODS :</div>
+          {/* Goods Table Section with Resizable Columns and Rows */}
+          <div className="pi-table-header-bar">
+            <div className="pi-table-title">DESCRIPTION OF GOODS :</div>
+            <div className="pi-resize-toolbar no-print">
+              <span className="pi-resize-hint">
+                <Move size={12} /> Drag column (↔) or row (↕) borders to resize
+              </span>
+              <div className="pi-density-group">
+                <span style={{ fontSize: 10.5, color: '#64748b' }}>Row:</span>
+                <button
+                  type="button"
+                  className={`pi-pill-btn ${cellPaddingY === 2 ? 'active' : ''}`}
+                  onClick={() => setCellPaddingY(2)}
+                  title="Compact rows"
+                >
+                  Compact
+                </button>
+                <button
+                  type="button"
+                  className={`pi-pill-btn ${cellPaddingY === 4 ? 'active' : ''}`}
+                  onClick={() => setCellPaddingY(4)}
+                  title="Normal rows"
+                >
+                  Normal
+                </button>
+                <button
+                  type="button"
+                  className={`pi-pill-btn ${cellPaddingY === 8 ? 'active' : ''}`}
+                  onClick={() => setCellPaddingY(8)}
+                  title="Spacious rows"
+                >
+                  Spacious
+                </button>
+              </div>
+              {isCustomized && (
+                <button
+                  type="button"
+                  className="pi-reset-btn"
+                  onClick={handleResetSizes}
+                  title="Reset column and row sizes to default"
+                >
+                  <RotateCcw size={11} /> Reset
+                </button>
+              )}
+            </div>
+          </div>
+
           <table className="pi-goods-table">
+            <colgroup>
+              <col style={{ width: `${colWidths.sl}px` }} />
+              <col style={{ width: `${colWidths.desc}px` }} />
+              <col style={{ width: `${colWidths.purch}px` }} />
+              <col style={{ width: `${colWidths.po}px` }} />
+              <col style={{ width: `${colWidths.qty}px` }} />
+              <col style={{ width: `${colWidths.unit}px` }} />
+              <col style={{ width: `${colWidths.rate}px` }} />
+              <col style={{ width: `${colWidths.total}px` }} />
+            </colgroup>
             <thead>
-              <tr>
-                <th className="col-sl">SL. NO</th>
-                <th className="col-desc">ITEM DESCRIPTION</th>
-                <th className="col-purch">PURCHASE NO.</th>
-                <th className="col-po">PO & STYLE NO.</th>
-                <th className="col-qty">QTY</th>
-                <th className="col-unit">UNIT</th>
-                <th className="col-rate">UNIT PRICE</th>
-                <th className="col-total">TOTAL</th>
+              <tr style={{ height: rowHeights.header ? `${rowHeights.header}px` : undefined }}>
+                <th className="col-sl pi-col-th" style={{ padding: `${cellPaddingY}px 4px` }}>
+                  SL. NO
+                  <div className="pi-col-resizer no-print" onMouseDown={(e) => handleColMouseDown('sl', e)} title="Drag column width (↔)" />
+                  <div className="pi-row-resizer no-print" onMouseDown={(e) => handleRowMouseDown('header', e)} title="Drag row height (↕)" />
+                </th>
+                <th className="col-desc pi-col-th" style={{ padding: `${cellPaddingY}px 4px` }}>
+                  ITEM DESCRIPTION
+                  <div className="pi-col-resizer no-print" onMouseDown={(e) => handleColMouseDown('desc', e)} title="Drag column width (↔)" />
+                  <div className="pi-row-resizer no-print" onMouseDown={(e) => handleRowMouseDown('header', e)} title="Drag row height (↕)" />
+                </th>
+                <th className="col-purch pi-col-th" style={{ padding: `${cellPaddingY}px 4px` }}>
+                  PURCHASE NO.
+                  <div className="pi-col-resizer no-print" onMouseDown={(e) => handleColMouseDown('purch', e)} title="Drag column width (↔)" />
+                  <div className="pi-row-resizer no-print" onMouseDown={(e) => handleRowMouseDown('header', e)} title="Drag row height (↕)" />
+                </th>
+                <th className="col-po pi-col-th" style={{ padding: `${cellPaddingY}px 4px` }}>
+                  ORDER & STYLE NO.
+                  <div className="pi-col-resizer no-print" onMouseDown={(e) => handleColMouseDown('po', e)} title="Drag column width (↔)" />
+                  <div className="pi-row-resizer no-print" onMouseDown={(e) => handleRowMouseDown('header', e)} title="Drag row height (↕)" />
+                </th>
+                <th className="col-qty pi-col-th" style={{ padding: `${cellPaddingY}px 4px` }}>
+                  QTY
+                  <div className="pi-col-resizer no-print" onMouseDown={(e) => handleColMouseDown('qty', e)} title="Drag column width (↔)" />
+                  <div className="pi-row-resizer no-print" onMouseDown={(e) => handleRowMouseDown('header', e)} title="Drag row height (↕)" />
+                </th>
+                <th className="col-unit pi-col-th" style={{ padding: `${cellPaddingY}px 4px` }}>
+                  UNIT
+                  <div className="pi-col-resizer no-print" onMouseDown={(e) => handleColMouseDown('unit', e)} title="Drag column width (↔)" />
+                  <div className="pi-row-resizer no-print" onMouseDown={(e) => handleRowMouseDown('header', e)} title="Drag row height (↕)" />
+                </th>
+                <th className="col-rate pi-col-th" style={{ padding: `${cellPaddingY}px 4px` }}>
+                  UNIT PRICE
+                  <div className="pi-col-resizer no-print" onMouseDown={(e) => handleColMouseDown('rate', e)} title="Drag column width (↔)" />
+                  <div className="pi-row-resizer no-print" onMouseDown={(e) => handleRowMouseDown('header', e)} title="Drag row height (↕)" />
+                </th>
+                <th className="col-total pi-col-th" style={{ padding: `${cellPaddingY}px 4px` }}>
+                  TOTAL
+                  <div className="pi-col-resizer no-print" onMouseDown={(e) => handleColMouseDown('total', e)} title="Drag column width (↔)" />
+                  <div className="pi-row-resizer no-print" onMouseDown={(e) => handleRowMouseDown('header', e)} title="Drag row height (↕)" />
+                </th>
               </tr>
             </thead>
             <tbody>
               {displayItems.map((item) => (
-                <tr key={item.slNo}>
-                  <td className="col-sl">{item.slNo}</td>
-                  <td className="col-desc">{item.desc}</td>
-                  <td className="col-purch">{item.itemPurch || '-'}</td>
-                  <td className="col-po" style={{ whiteSpace: 'pre-line' }}>{item.poStyle}</td>
-                  <td className="col-qty">{item.qty.toLocaleString('en-US')}</td>
-                  <td className="col-unit">{item.unit}</td>
-                  <td className="col-rate">
-                    {currencySym} {item.rate.toFixed(4)}
+                <tr key={item.slNo} style={{ height: rowHeights[item.slNo] ? `${rowHeights[item.slNo]}px` : undefined }}>
+                  <td className="col-sl" style={{ padding: `${cellPaddingY}px 4px`, position: 'relative' }}>
+                    {item.slNo}
+                    <div className="pi-row-resizer no-print" onMouseDown={(e) => handleRowMouseDown(item.slNo, e)} title="Drag row height (↕)" />
                   </td>
-                  <td className="col-total">
+                  <td className="col-desc" style={{ padding: `${cellPaddingY}px 4px`, position: 'relative' }}>
+                    {item.desc}
+                    <div className="pi-row-resizer no-print" onMouseDown={(e) => handleRowMouseDown(item.slNo, e)} title="Drag row height (↕)" />
+                  </td>
+                  <td className="col-purch" style={{ padding: `${cellPaddingY}px 4px`, position: 'relative' }}>
+                    {item.itemPurch || '-'}
+                    <div className="pi-row-resizer no-print" onMouseDown={(e) => handleRowMouseDown(item.slNo, e)} title="Drag row height (↕)" />
+                  </td>
+                  <td className="col-po" style={{ padding: `${cellPaddingY}px 4px`, whiteSpace: 'pre-line', position: 'relative' }}>
+                    {item.poStyle}
+                    <div className="pi-row-resizer no-print" onMouseDown={(e) => handleRowMouseDown(item.slNo, e)} title="Drag row height (↕)" />
+                  </td>
+                  <td className="col-qty" style={{ padding: `${cellPaddingY}px 4px`, position: 'relative' }}>
+                    {item.qty.toLocaleString('en-US')}
+                    <div className="pi-row-resizer no-print" onMouseDown={(e) => handleRowMouseDown(item.slNo, e)} title="Drag row height (↕)" />
+                  </td>
+                  <td className="col-unit" style={{ padding: `${cellPaddingY}px 4px`, position: 'relative' }}>
+                    {item.unit}
+                    <div className="pi-row-resizer no-print" onMouseDown={(e) => handleRowMouseDown(item.slNo, e)} title="Drag row height (↕)" />
+                  </td>
+                  <td className="col-rate" style={{ padding: `${cellPaddingY}px 4px`, position: 'relative' }}>
+                    {currencySym} {item.rate.toFixed(4)}
+                    <div className="pi-row-resizer no-print" onMouseDown={(e) => handleRowMouseDown(item.slNo, e)} title="Drag row height (↕)" />
+                  </td>
+                  <td className="col-total" style={{ padding: `${cellPaddingY}px 4px`, position: 'relative' }}>
                     {currencySym} {item.total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    <div className="pi-row-resizer no-print" onMouseDown={(e) => handleRowMouseDown(item.slNo, e)} title="Drag row height (↕)" />
                   </td>
                 </tr>
               ))}
-              <tr className="pi-total-row">
-                <td colSpan={4} style={{ textAlign: 'right', fontWeight: 'bold' }}>TOTAL</td>
-                <td className="col-qty" style={{ fontWeight: 'bold' }}>
-                  {Number(totalQty).toLocaleString('en-US')}
+              <tr className="pi-total-row" style={{ height: rowHeights.total ? `${rowHeights.total}px` : undefined }}>
+                <td colSpan={4} style={{ textAlign: 'right', fontWeight: 'bold', padding: `${cellPaddingY}px 4px`, position: 'relative' }}>
+                  TOTAL
+                  <div className="pi-row-resizer no-print" onMouseDown={(e) => handleRowMouseDown('total', e)} title="Drag row height (↕)" />
                 </td>
-                <td className="col-unit"></td>
-                <td className="col-rate"></td>
-                <td className="col-total" style={{ fontWeight: 'bold' }}>
+                <td className="col-qty" style={{ fontWeight: 'bold', padding: `${cellPaddingY}px 4px`, position: 'relative' }}>
+                  {Number(totalQty).toLocaleString('en-US')}
+                  <div className="pi-row-resizer no-print" onMouseDown={(e) => handleRowMouseDown('total', e)} title="Drag row height (↕)" />
+                </td>
+                <td className="col-unit" style={{ padding: `${cellPaddingY}px 4px`, position: 'relative' }}>
+                  <div className="pi-row-resizer no-print" onMouseDown={(e) => handleRowMouseDown('total', e)} title="Drag row height (↕)" />
+                </td>
+                <td className="col-rate" style={{ padding: `${cellPaddingY}px 4px`, position: 'relative' }}>
+                  <div className="pi-row-resizer no-print" onMouseDown={(e) => handleRowMouseDown('total', e)} title="Drag row height (↕)" />
+                </td>
+                <td className="col-total" style={{ fontWeight: 'bold', padding: `${cellPaddingY}px 4px`, position: 'relative' }}>
                   {currencySym} {Number(totalAmt).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  <div className="pi-row-resizer no-print" onMouseDown={(e) => handleRowMouseDown('total', e)} title="Drag row height (↕)" />
                 </td>
               </tr>
             </tbody>
@@ -357,22 +565,14 @@ export default function ProformaInvoicePrintView({
           {/* Signatures */}
           <div className="pi-signatures">
             <div className="pi-sign-col">
-              <div className="pi-sign-stamp">
-                <div className="pi-stamp-name">Md. Ariful Rahman</div>
-                <div className="pi-stamp-role">Accounts & Admin</div>
-                <div className="pi-stamp-role" style={{ fontSize: 9 }}>K. A. Design Accessories Ltd.</div>
-              </div>
+              <div className="pi-sign-stamp"></div>
               <div className="pi-sign-line">
                 Prepared By<br />For KADAL
               </div>
             </div>
 
             <div className="pi-sign-col">
-              <div className="pi-sign-stamp">
-                <div className="pi-stamp-name" style={{ color: '#047857' }}>Maksudha Akter Kumu</div>
-                <div className="pi-stamp-role" style={{ color: '#047857' }}>Chairman</div>
-                <div className="pi-stamp-role" style={{ fontSize: 9, color: '#047857' }}>K.A. DESIGN ACCESSORIES LTD.</div>
-              </div>
+              <div className="pi-sign-stamp"></div>
               <div className="pi-sign-line">
                 Authorized By<br />For KADAL
               </div>
