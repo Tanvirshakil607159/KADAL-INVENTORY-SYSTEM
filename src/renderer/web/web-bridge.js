@@ -38,6 +38,45 @@ function safeParseJSON(val, fallback = {}) {
   }
 }
 
+function formatBridgePoStyle(it) {
+  if (!it) return { poStyle: '-', purchaseNo: '', combined: '-' };
+  let val = it.po_style_no || it.poStyleNo || '';
+  const po = it.order_number || it.orderNumber || '';
+  const style = it.style_name || it.styleName || '';
+  let purchase = it.purchase_no || it.purchaseNo || it.purchase_number || it.purchaseNumber || '';
+
+  if (!purchase && val) {
+    const match = val.match(/Purchase(?:\s*No)?\s*[:=]\s*([^/\n;]+)/i);
+    if (match) purchase = match[1].trim();
+  }
+
+  let cleanVal = val;
+  if (cleanVal && cleanVal !== '-') {
+    cleanVal = cleanVal.replace(/\s*\/\s*Purchase(?:\s*No)?\s*[:=]\s*[^/\n;]+/i, '').trim();
+    if (po && !cleanVal.toLowerCase().includes('po:') && !cleanVal.includes(po)) {
+      cleanVal = `PO: ${po} / ` + cleanVal;
+    }
+  } else {
+    const parts = [];
+    if (po) parts.push(`PO: ${po}`);
+    if (style) parts.push(`Style: ${style}`);
+    cleanVal = parts.length > 0 ? parts.join(' / ') : '-';
+  }
+
+  let combinedVal = cleanVal;
+  if (purchase && !combinedVal.toLowerCase().includes('purchase')) {
+    combinedVal = combinedVal !== '-'
+      ? `${combinedVal} / Purchase No: ${purchase}`
+      : `Purchase No: ${purchase}`;
+  }
+
+  return {
+    poStyle: cleanVal || '-',
+    purchaseNo: purchase || '',
+    combined: combinedVal || '-'
+  };
+}
+
 export const webBridge = {
   // Auth
   auth: {
@@ -1337,7 +1376,7 @@ export const webBridge = {
     getVersion: () => wrap(async () => '1.1.41-web'),
     clearData: () => wrap(async () => { throw new Error('Not available in web version'); }),
   },
-  
+
   // Finance (Proforma Invoices)
   finance: {
     getAll: (filters = {}) => wrap(async () => {
@@ -1361,7 +1400,7 @@ export const webBridge = {
       const normalizePiItem = (it, idx) => {
         const slNo = it.sl_no !== undefined ? it.sl_no : (it.slNo !== undefined ? it.slNo : idx + 1);
         const desc = it.item_description || it.itemDescription || it.item_name || it.name || '';
-        const poStyle = it.po_style_no || it.poStyleNo || it.style_name || it.order_number || it.purchase_no || '-';
+        const { poStyle, purchaseNo: itPurch, combined } = formatBridgePoStyle(it);
         const qty = Number(it.quantity || 0);
         const unit = (it.unit || 'PCS').toUpperCase();
         const unitPrice = Number(it.unit_price !== undefined ? it.unit_price : (it.unitPrice !== undefined ? it.unitPrice : 0));
@@ -1376,8 +1415,10 @@ export const webBridge = {
           item_id: it.item_id || it.itemId || null,
           itemDescription: desc,
           item_description: desc,
+          purchaseNo: itPurch,
+          purchase_no: itPurch,
           poStyleNo: poStyle,
-          po_style_no: poStyle,
+          po_style_no: combined,
           quantity: qty,
           unit,
           unitPrice,
@@ -1389,11 +1430,27 @@ export const webBridge = {
 
       let result = (data || []).map(pi => {
         const items = (pi.proforma_invoice_items || []).map((it, idx) => normalizePiItem(it, idx));
+        let piPurchase = pi.purchase_no || pi.purchaseNo || '';
+        if (!piPurchase && pi.notes) {
+          const match = pi.notes.match(/Purchase(?:\s*No)?\s*[:=]\s*([^/\n;]+)/i);
+          if (match) piPurchase = match[1].trim();
+        }
+        if (!piPurchase && items.length > 0) {
+          const itPurch = items.find(it => it.purchaseNo || it.purchase_no);
+          if (itPurch) piPurchase = itPurch.purchaseNo || itPurch.purchase_no;
+        }
+        const totalOrdered = Number(pi.total_quantity) || items.reduce((s, it) => s + (Number(it.quantity) || 0), 0);
         return {
           ...pi,
           created_by_name: pi.users?.full_name,
+          purchaseNo: piPurchase,
+          purchase_no: piPurchase,
           items,
-          item_count: items.length
+          item_count: items.length,
+          total_quantity: totalOrdered,
+          fulfillment_pct: pi.bill_number ? 100 : (pi.fulfillment_pct || 0),
+          is_100_percent_received: pi.bill_number ? true : (pi.is_100_percent_received || false),
+          can_transfer_to_bill: pi.status !== 'BILLED' && (pi.is_100_percent_received || false)
         };
       });
 
@@ -1425,7 +1482,7 @@ export const webBridge = {
       data.items = (data.proforma_invoice_items || []).sort((a, b) => a.sl_no - b.sl_no).map((it, idx) => {
         const slNo = it.sl_no !== undefined ? it.sl_no : (it.slNo !== undefined ? it.slNo : idx + 1);
         const desc = it.item_description || it.itemDescription || it.item_name || it.name || '';
-        const poStyle = it.po_style_no || it.poStyleNo || it.style_name || it.order_number || it.purchase_no || '-';
+        const { poStyle, purchaseNo: itPurch, combined } = formatBridgePoStyle(it);
         const qty = Number(it.quantity || 0);
         const unit = (it.unit || 'PCS').toUpperCase();
         const unitPrice = Number(it.unit_price !== undefined ? it.unit_price : (it.unitPrice !== undefined ? it.unitPrice : 0));
@@ -1434,7 +1491,8 @@ export const webBridge = {
           ...it,
           slNo, sl_no: slNo,
           itemDescription: desc, item_description: desc,
-          poStyleNo: poStyle, po_style_no: poStyle,
+          purchaseNo: itPurch, purchase_no: itPurch,
+          poStyleNo: poStyle, po_style_no: combined,
           quantity: qty, unit, unitPrice, unit_price: unitPrice,
           totalAmount, total_amount: totalAmount
         };
@@ -1455,7 +1513,7 @@ export const webBridge = {
       data.items = (data.proforma_invoice_items || []).sort((a, b) => a.sl_no - b.sl_no).map((it, idx) => {
         const slNo = it.sl_no !== undefined ? it.sl_no : (it.slNo !== undefined ? it.slNo : idx + 1);
         const desc = it.item_description || it.itemDescription || it.item_name || it.name || '';
-        const poStyle = it.po_style_no || it.poStyleNo || it.style_name || it.order_number || it.purchase_no || '-';
+        const { poStyle, purchaseNo: itPurch, combined } = formatBridgePoStyle(it);
         const qty = Number(it.quantity || 0);
         const unit = (it.unit || 'PCS').toUpperCase();
         const unitPrice = Number(it.unit_price !== undefined ? it.unit_price : (it.unitPrice !== undefined ? it.unitPrice : 0));
@@ -1464,7 +1522,8 @@ export const webBridge = {
           ...it,
           slNo, sl_no: slNo,
           itemDescription: desc, item_description: desc,
-          poStyleNo: poStyle, po_style_no: poStyle,
+          purchaseNo: itPurch, purchase_no: itPurch,
+          poStyleNo: poStyle, po_style_no: combined,
           quantity: qty, unit, unitPrice, unit_price: unitPrice,
           totalAmount, total_amount: totalAmount
         };
@@ -1476,6 +1535,12 @@ export const webBridge = {
       const supabase = getSupabase();
       if (!supabase) throw new Error('Database not connected');
       const currentUser = JSON.parse(sessionStorage.getItem('kadal_user') || '{}');
+
+      let finalNotes = data.notes || '';
+      const pNum = (data.purchaseNumber || data.purchaseNo || '').trim();
+      if (pNum && !finalNotes.toLowerCase().includes('purchase no')) {
+        finalNotes = finalNotes ? `${finalNotes} | Purchase No: ${pNum}` : `Purchase No: ${pNum}`;
+      }
 
       const { data: inserted, error: piErr } = await supabase.from('proforma_invoices').insert([{
         pi_number: data.piNumber,
@@ -1504,7 +1569,7 @@ export const webBridge = {
         authorized_by: data.authorizedBy || 'Maksudha Akter Kumu\nChairman\nK.A. DESIGN ACCESSORIES LTD.',
         accepted_by: data.acceptedBy || null,
         status: data.status || 'ACTIVE',
-        notes: data.notes || null,
+        notes: finalNotes || null,
         created_by: currentUser.id || null
       }]).select().single();
 
@@ -1513,7 +1578,7 @@ export const webBridge = {
       if (data.items && data.items.length > 0) {
         const itemRows = data.items.map((it, idx) => {
           const desc = it.itemDescription || it.item_description || it.item_name || it.name || '';
-          const poStyle = it.poStyleNo || it.po_style_no || it.style_name || it.order_number || it.purchase_no || null;
+          const { combined } = formatBridgePoStyle(it);
           const rate = Number(it.unitPrice !== undefined ? it.unitPrice : it.unit_price) || 0;
           const lineTotal = Number(it.totalAmount !== undefined ? it.totalAmount : (it.total_amount !== undefined ? it.total_amount : 0));
           return {
@@ -1522,7 +1587,7 @@ export const webBridge = {
             challan_id: it.challanId || it.challan_id || null,
             item_id: it.itemId || it.item_id || null,
             item_description: desc,
-            po_style_no: poStyle,
+            po_style_no: combined,
             quantity: Number(it.quantity) || 0,
             unit: (it.unit || 'PCS').toUpperCase(),
             unit_price: rate,

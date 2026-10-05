@@ -32,6 +32,27 @@ export default function ProformaInvoicePrintView({
   const totalQty = pi.total_quantity || items.reduce((sum, it) => sum + (Number(it.quantity) || 0), 0);
   const totalAmt = pi.total_amount || items.reduce((sum, it) => sum + (Number(it.total_amount) || 0), 0);
 
+  const getPiPurchaseNo = (piObj) => {
+    if (!piObj) return '';
+    if (piObj.purchase_no) return piObj.purchase_no;
+    if (piObj.purchase_number) return piObj.purchase_number;
+    if (piObj.purchaseNo) return piObj.purchaseNo;
+    if (piObj.notes) {
+      const match = piObj.notes.match(/Purchase(?:\s*No|\s*Order)?\s*[:=]\s*([^\n;]+)/i);
+      if (match) return match[1].trim();
+    }
+    const piItemsList = piObj.items || [];
+    for (const it of piItemsList) {
+      if (it.purchase_no) return it.purchase_no;
+      if (it.purchaseNo) return it.purchaseNo;
+      const poStyle = it.po_style_no || it.poStyleNo || '';
+      const match = poStyle.match(/Purchase(?:\s*No)?\s*[:=]\s*([^/\n;]+)/i);
+      if (match) return match[1].trim();
+    }
+    return '';
+  };
+  const purchaseNo = getPiPurchaseNo(pi);
+
   const handleNativePrint = () => {
     if (onPrint) {
       onPrint();
@@ -124,6 +145,12 @@ export default function ProformaInvoicePrintView({
                 <span className="pi-info-label">BUYER : </span>
                 <span style={{ fontWeight: 500 }}>{pi.buyer || '-'}</span>
               </div>
+              {purchaseNo && (
+                <div className="pi-buyer-row" style={{ marginTop: 4 }}>
+                  <span className="pi-info-label">PURCHASE NO : </span>
+                  <strong style={{ fontWeight: 600 }}>{purchaseNo}</strong>
+                </div>
+              )}
             </div>
 
             <div className="pi-meta-right">
@@ -144,6 +171,12 @@ export default function ProformaInvoicePrintView({
                       <strong>{pi.pi_number}</strong>
                     </div>
                   )}
+                  {purchaseNo && (
+                    <div className="pi-meta-row" style={{ marginTop: 4 }}>
+                      <span>PURCHASE NO. :</span>
+                      <strong>{purchaseNo}</strong>
+                    </div>
+                  )}
                   {pi.challan_numbers && (
                     <div className="pi-meta-row" style={{ marginTop: 4 }}>
                       <span>CHALLAN NO(S) :</span>
@@ -162,6 +195,12 @@ export default function ProformaInvoicePrintView({
                     <span>Date :</span>
                     <strong>{formatDate(pi.pi_date)}</strong>
                   </div>
+                  {purchaseNo && (
+                    <div className="pi-meta-row" style={{ marginTop: 4 }}>
+                      <span>PURCHASE NO. :</span>
+                      <strong>{purchaseNo}</strong>
+                    </div>
+                  )}
                 </>
               )}
             </div>
@@ -174,6 +213,7 @@ export default function ProformaInvoicePrintView({
               <tr>
                 <th className="col-sl">SL. NO</th>
                 <th className="col-desc">ITEM DESCRIPTION</th>
+                <th className="col-purch">PURCHASE NO.</th>
                 <th className="col-po">PO & STYLE NO.</th>
                 <th className="col-qty">QTY</th>
                 <th className="col-unit">UNIT</th>
@@ -185,7 +225,37 @@ export default function ProformaInvoicePrintView({
               {items.map((item, idx) => {
                 const slNo = item.sl_no !== undefined ? item.sl_no : (item.slNo !== undefined ? item.slNo : idx + 1);
                 const desc = item.item_description || item.itemDescription || item.item_name || item.name || '';
-                const poStyle = item.po_style_no || item.poStyleNo || item.style_name || item.order_number || item.purchase_no || item.purchaseNo || '-';
+                let itemPurch = item.purchase_no || item.purchaseNo || item.purchase_number || item.purchaseNumber || '';
+                let poStyle = item.po_style_no || item.poStyleNo || '';
+
+                if (!itemPurch && poStyle) {
+                  const match = poStyle.match(/Purchase(?:\s*No)?\s*[:=]\s*([^/\n;]+)/i);
+                  if (match) itemPurch = match[1].trim();
+                }
+                if (!itemPurch && purchaseNo) {
+                  itemPurch = purchaseNo;
+                }
+
+                if (poStyle && poStyle !== '-') {
+                  poStyle = poStyle.replace(/\s*\/\s*Purchase(?:\s*No)?\s*[:=]\s*[^/\n;]+/i, '').trim();
+                }
+
+                const poVal = item.order_number || item.orderNumber || '';
+                const styleVal = item.style_name || item.styleName || '';
+
+                if (poStyle && poStyle !== '-') {
+                  let updated = poStyle;
+                  if (poVal && !updated.toLowerCase().includes('po:') && !updated.includes(poVal)) {
+                    updated = `PO: ${poVal} / ` + updated.replace(/^Style:\s*/i, 'Style: ');
+                  }
+                  poStyle = updated;
+                } else {
+                  const parts = [];
+                  if (poVal) parts.push(`PO: ${poVal}`);
+                  if (styleVal) parts.push(`Style: ${styleVal}`);
+                  poStyle = parts.length > 0 ? parts.join(' / ') : '-';
+                }
+
                 const qty = Number(item.quantity || 0);
                 const unit = (item.unit || 'PCS').toUpperCase();
                 const rate = Number(item.unit_price !== undefined ? item.unit_price : (item.unitPrice !== undefined ? item.unitPrice : 0));
@@ -195,7 +265,8 @@ export default function ProformaInvoicePrintView({
                   <tr key={idx}>
                     <td className="col-sl">{slNo}</td>
                     <td className="col-desc">{desc}</td>
-                    <td className="col-po">{poStyle}</td>
+                    <td className="col-purch">{itemPurch || '-'}</td>
+                    <td className="col-po" style={{ whiteSpace: 'pre-line' }}>{poStyle}</td>
                     <td className="col-qty">{qty.toLocaleString('en-US')}</td>
                     <td className="col-unit">{unit}</td>
                     <td className="col-rate">
@@ -208,7 +279,7 @@ export default function ProformaInvoicePrintView({
                 );
               })}
               <tr className="pi-total-row">
-                <td colSpan={3} style={{ textAlign: 'right', fontWeight: 'bold' }}>TOTAL</td>
+                <td colSpan={4} style={{ textAlign: 'right', fontWeight: 'bold' }}>TOTAL</td>
                 <td className="col-qty" style={{ fontWeight: 'bold' }}>
                   {Number(totalQty).toLocaleString('en-US')}
                 </td>

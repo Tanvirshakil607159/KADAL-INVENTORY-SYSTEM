@@ -36,8 +36,37 @@ const FinanceService = {
       const qty = Number(it.quantity) || 0;
       const rate = Number(it.unitPrice !== undefined ? it.unitPrice : it.unit_price) || 0;
       const lineTotal = Number(it.totalAmount !== undefined ? it.totalAmount : (it.total_amount !== undefined ? it.total_amount : (qty * rate).toFixed(2)));
-      const desc = it.itemDescription || it.item_description || it.name || it.item_name || '';
-      const poStyle = it.poStyleNo || it.po_style_no || it.style_name || it.order_number || it.purchase_no || '-';
+      const desc = it.itemDescription || it.item_description || it.description || it.name || 'Custom Accessory Item';
+      let poStyle = it.poStyleNo || it.po_style_no || '';
+      const poVal = it.order_number || it.orderNumber || '';
+      const styleVal = it.style_name || it.styleName || '';
+      let purchaseVal = it.purchase_no || it.purchaseNo || it.purchase_number || it.purchaseNumber || '';
+
+      if (!purchaseVal && poStyle) {
+        const match = poStyle.match(/Purchase(?:\s*No)?\s*[:=]\s*([^/\n;]+)/i);
+        if (match) purchaseVal = match[1].trim();
+      }
+
+      let poStyleClean = poStyle;
+      if (poStyleClean && poStyleClean !== '-') {
+        poStyleClean = poStyleClean.replace(/\s*\/\s*Purchase(?:\s*No)?\s*[:=]\s*[^/\n;]+/i, '').trim();
+        if (poVal && !poStyleClean.toLowerCase().includes('po:') && !poStyleClean.includes(poVal)) {
+          poStyleClean = `PO: ${poVal} / ` + poStyleClean.replace(/^Style:\s*/i, 'Style: ');
+        }
+      } else {
+        const parts = [];
+        if (poVal) parts.push(`PO: ${poVal}`);
+        if (styleVal) parts.push(`Style: ${styleVal}`);
+        poStyleClean = parts.length > 0 ? parts.join(' / ') : '-';
+      }
+
+      let combinedPoStyle = poStyleClean;
+      if (purchaseVal && !combinedPoStyle.toLowerCase().includes('purchase')) {
+        combinedPoStyle = combinedPoStyle !== '-'
+          ? `${combinedPoStyle} / Purchase No: ${purchaseVal}`
+          : `Purchase No: ${purchaseVal}`;
+      }
+
       totalQty += qty;
       totalAmt += lineTotal;
       return {
@@ -46,8 +75,10 @@ const FinanceService = {
         sl_no: it.slNo || it.sl_no || idx + 1,
         itemDescription: desc,
         item_description: desc,
-        poStyleNo: poStyle,
-        po_style_no: poStyle,
+        purchaseNo: purchaseVal,
+        purchase_no: purchaseVal,
+        poStyleNo: poStyleClean,
+        po_style_no: combinedPoStyle,
         quantity: qty,
         unit: (it.unit || 'PCS').toUpperCase(),
         unitPrice: rate,
@@ -66,13 +97,20 @@ const FinanceService = {
       piNumber = await FinanceRepo.getNextNumber(data.applicantName);
     }
 
+    let notes = data.notes || '';
+    const pNum = (data.purchaseNumber || data.purchaseNo || '').trim();
+    if (pNum && !notes.toLowerCase().includes('purchase no')) {
+      notes = notes ? `${notes} | Purchase No: ${pNum}` : `Purchase No: ${pNum}`;
+    }
+
     const payload = {
       ...data,
       piNumber,
       currency,
-      totalQuantity: totalQty,
+      totalQuantity: Number(data.totalQuantity) || totalQty,
       totalAmount: totalAmt,
       amountInWords,
+      notes: notes || null,
       createdBy: user?.id,
       items: sanitizedItems,
     };

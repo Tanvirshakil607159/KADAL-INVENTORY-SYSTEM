@@ -1118,10 +1118,65 @@ const PdfGenerator = {
     const watermark = getWatermarkBase64();
     const currencySym = pi.currency_symbol || '$';
 
+    const getPiPurchaseNo = (piObj) => {
+      if (!piObj) return '';
+      if (piObj.purchase_no) return piObj.purchase_no;
+      if (piObj.purchase_number) return piObj.purchase_number;
+      if (piObj.purchaseNo) return piObj.purchaseNo;
+      if (piObj.notes) {
+        const match = piObj.notes.match(/Purchase(?:\s*No|\s*Order)?\s*[:=]\s*([^\n;]+)/i);
+        if (match) return match[1].trim();
+      }
+      const piItemsList = piObj.items || [];
+      for (const it of piItemsList) {
+        if (it.purchase_no) return it.purchase_no;
+        if (it.purchaseNo) return it.purchaseNo;
+        const poStyle = it.po_style_no || it.poStyleNo || '';
+        const match = poStyle.match(/Purchase(?:\s*No)?\s*[:=]\s*([^/\n;]+)/i);
+        if (match) return match[1].trim();
+      }
+      return '';
+    };
+    const purchaseNo = getPiPurchaseNo(pi);
+
     const items = (pi.items || []).map((it, idx) => {
       const slNo = it.sl_no !== undefined ? it.sl_no : (it.slNo !== undefined ? it.slNo : idx + 1);
       const desc = it.item_description || it.itemDescription || it.item_name || it.name || '';
-      const poStyle = it.po_style_no || it.poStyleNo || it.style_name || it.order_number || it.purchase_no || it.purchaseNo || '-';
+      let itemPurch = it.purchase_no || it.purchaseNo || it.purchase_number || it.purchaseNumber || '';
+      let poStyle = it.po_style_no || it.poStyleNo || '';
+
+      if (!itemPurch && poStyle) {
+        const match = poStyle.match(/Purchase(?:\s*No)?\s*[:=]\s*([^/\n;]+)/i);
+        if (match) itemPurch = match[1].trim();
+      }
+      if (!itemPurch && purchaseNo) {
+        itemPurch = purchaseNo;
+      }
+
+      if (poStyle && poStyle !== '-') {
+        poStyle = poStyle.replace(/\s*\/\s*Purchase(?:\s*No)?\s*[:=]\s*[^/\n;]+/i, '').trim();
+      }
+
+      const poVal = it.order_number || it.orderNumber || '';
+      const styleVal = it.style_name || it.styleName || '';
+
+      if (poStyle && poStyle !== '-') {
+        let updated = poStyle;
+        if (poVal && !updated.toLowerCase().includes('po:') && !updated.includes(poVal)) {
+          updated = `PO: ${poVal} / ` + updated.replace(/^Style:\s*/i, 'Style: ');
+        }
+        poStyle = updated;
+      } else {
+        const parts = [];
+        if (poVal) parts.push(`PO: ${poVal}`);
+        if (styleVal) parts.push(`Style: ${styleVal}`);
+        poStyle = parts.length > 0 ? parts.join(' / ') : '-';
+      }
+
+      if (poStyle && poStyle.includes(' / ')) {
+        poStyle = poStyle.split(' / ').join('\n');
+      }
+
       const qty = Number(it.quantity || 0);
       const unit = (it.unit || 'PCS').toUpperCase();
       const rate = Number(it.unit_price !== undefined ? it.unit_price : (it.unitPrice !== undefined ? it.unitPrice : 0));
@@ -1130,7 +1185,8 @@ const PdfGenerator = {
       return [
         { text: String(slNo), alignment: 'center', style: 'piTableCell' },
         { text: desc, alignment: 'left', style: 'piTableCell' },
-        { text: poStyle, alignment: 'center', style: 'piTableCell' },
+        { text: itemPurch || '-', alignment: 'center', style: 'piTableCell' },
+        { text: poStyle || '-', alignment: 'center', style: 'piTableCell' },
         { text: qty.toLocaleString('en-US'), alignment: 'right', style: 'piTableCell' },
         { text: unit, alignment: 'center', style: 'piTableCell' },
         { text: `${currencySym} ${rate.toFixed(4)}`, alignment: 'right', style: 'piTableCell' },
@@ -1140,7 +1196,8 @@ const PdfGenerator = {
 
     // Total row
     const totalRow = [
-      { text: 'TOTAL', colSpan: 3, alignment: 'right', bold: true, style: 'piTableTotal' },
+      { text: 'TOTAL', colSpan: 4, alignment: 'right', bold: true, style: 'piTableTotal' },
+      {},
       {},
       {},
       { text: Number(pi.total_quantity || 0).toLocaleString('en-US'), alignment: 'right', bold: true, style: 'piTableTotal' },
@@ -1198,7 +1255,10 @@ const PdfGenerator = {
                 { text: 'BANK DETAIL:', bold: true, fontSize: 8.5, color: '#000' },
                 { text: pi.bank_details || 'UNITED COMMERCIAL BANK PLC.\nTONGI BRANCH\n18, S.K. MANNAN TOWER, CHERAG ALI\nGAZIPUR-1712, BANGLADESH\nSWIFT CODE: UCBLBDDHTNG', fontSize: 8.5, color: '#1e293b', margin: [0, 2, 0, 6] },
 
-                { text: [{ text: 'BUYER : ', bold: true, fontSize: 8.5 }, { text: pi.buyer || '', fontSize: 8.5 }], margin: [0, 2, 0, 6] }
+                { text: [{ text: 'BUYER : ', bold: true, fontSize: 8.5 }, { text: pi.buyer || '', fontSize: 8.5 }], margin: [0, 2, 0, 4] },
+                ...(purchaseNo ? [
+                  { text: [{ text: 'PURCHASE NO : ', bold: true, fontSize: 8.5 }, { text: purchaseNo, fontSize: 8.5, bold: true }], margin: [0, 0, 0, 4] }
+                ] : [])
               ]
             },
             {
@@ -1209,10 +1269,19 @@ const PdfGenerator = {
                 ...(pi.bill_number ? [
                   { text: [{ text: 'BILL : ', bold: true }, { text: pi.bill_number || '-' }], fontSize: 9, alignment: 'right', margin: [0, 0, 0, 4] },
                   { text: `Date : ${formatDate(pi.bill_date || pi.pi_date)}`, fontSize: 9, alignment: 'right', margin: [0, 0, 0, 6] },
-                  { text: [{ text: 'PROFORMA INVOICE NO. : ', bold: true }, { text: pi.pi_number || '-' }], fontSize: 9, bold: true, alignment: 'right', margin: [0, 0, 0, 4] }
+                  { text: [{ text: 'PROFORMA INVOICE NO. : ', bold: true }, { text: pi.pi_number || '-' }], fontSize: 9, bold: true, alignment: 'right', margin: [0, 0, 0, 4] },
+                  ...(purchaseNo ? [
+                    { text: [{ text: 'PURCHASE NO. : ', bold: true }, { text: purchaseNo }], fontSize: 9, bold: true, alignment: 'right', margin: [0, 0, 0, 4] }
+                  ] : []),
+                  ...(pi.challan_numbers ? [
+                    { text: [{ text: 'CHALLAN NO(S) : ', bold: true }, { text: pi.challan_numbers }], fontSize: 8.5, alignment: 'right', margin: [0, 0, 0, 4] }
+                  ] : [])
                 ] : [
                   { text: `Date : ${formatDate(pi.pi_date)}`, fontSize: 9, alignment: 'right', margin: [0, 0, 0, 4] },
-                  { text: [{ text: 'PROFORMA INVOICE NO. : ', bold: true }, { text: pi.pi_number || '-' }], fontSize: 9, bold: true, alignment: 'right', margin: [0, 0, 0, 4] }
+                  { text: [{ text: 'PROFORMA INVOICE NO. : ', bold: true }, { text: pi.pi_number || '-' }], fontSize: 9, bold: true, alignment: 'right', margin: [0, 0, 0, 4] },
+                  ...(purchaseNo ? [
+                    { text: [{ text: 'PURCHASE NO. : ', bold: true }, { text: purchaseNo }], fontSize: 9, bold: true, alignment: 'right', margin: [0, 0, 0, 4] }
+                  ] : [])
                 ])
               ]
             }
@@ -1225,11 +1294,12 @@ const PdfGenerator = {
         {
           table: {
             headerRows: 1,
-            widths: [25, '*', 110, 45, 30, 48, 55],
+            widths: [22, '*', 80, 85, 45, 28, 48, 55],
             body: [
               [
                 { text: 'SL. NO', alignment: 'center', bold: true, style: 'piTableHeader' },
                 { text: 'ITEM DESCRIPTION', alignment: 'center', bold: true, style: 'piTableHeader' },
+                { text: 'PURCHASE NO.', alignment: 'center', bold: true, style: 'piTableHeader' },
                 { text: 'PO & STYLE NO.', alignment: 'center', bold: true, style: 'piTableHeader' },
                 { text: 'QTY', alignment: 'center', bold: true, style: 'piTableHeader' },
                 { text: 'UNIT', alignment: 'center', bold: true, style: 'piTableHeader' },
@@ -1339,7 +1409,8 @@ const PdfGenerator = {
     return new Promise((resolve, reject) => {
       try {
         const pdfDoc = pdfmake.createPdf(docDefinition);
-        const outputDir = path.join(app.getPath('userData'), 'exports');
+        const userDataPath = (app && typeof app.getPath === 'function') ? app.getPath('userData') : require('os').tmpdir();
+        const outputDir = path.join(userDataPath, 'exports');
         if (!fs.existsSync(outputDir)) {
           fs.mkdirSync(outputDir, { recursive: true });
         }
@@ -1348,7 +1419,9 @@ const PdfGenerator = {
 
         pdfDoc.getBuffer((buffer) => {
           fs.writeFileSync(outputPath, buffer);
-          shell.openPath(outputPath);
+          if (shell && typeof shell.openPath === 'function') {
+            shell.openPath(outputPath);
+          }
           resolve({ success: true, path: outputPath });
         });
       } catch (err) {

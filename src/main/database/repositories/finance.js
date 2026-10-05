@@ -70,9 +70,41 @@ function ensureProformaInvoicesSchema() {
 
 function normalizePiItem(it, idx) {
   const slNo = it.sl_no !== undefined ? it.sl_no : (it.slNo !== undefined ? it.slNo : idx + 1);
-  const desc = it.item_description || it.itemDescription || it.item_name || it.name || '';
-  const poStyle = it.po_style_no || it.poStyleNo || it.style_name || it.order_number || it.purchase_no || '-';
-  const qty = Number(it.quantity || 0);
+  const qty = Number(it.quantity !== undefined ? it.quantity : (it.order_quantity || 0));
+  const desc = it.item_description || it.itemDescription || it.description || it.name || 'Custom Accessory Item';
+  let poStyle = it.po_style_no || it.poStyleNo || '';
+  const poVal = it.order_number || it.orderNumber || '';
+  const styleVal = it.style_name || it.styleName || '';
+  let purchaseVal = it.purchase_no || it.purchaseNo || it.purchase_number || it.purchaseNumber || '';
+
+  // If purchaseVal not explicitly provided, extract from poStyle string
+  if (!purchaseVal && poStyle) {
+    const match = poStyle.match(/Purchase(?:\s*No)?\s*[:=]\s*([^/\n;]+)/i);
+    if (match) purchaseVal = match[1].trim();
+  }
+
+  // Build clean poStyleClean for dedicated PO & Style column
+  let poStyleClean = poStyle;
+  if (poStyleClean && poStyleClean !== '-') {
+    poStyleClean = poStyleClean.replace(/\s*\/\s*Purchase(?:\s*No)?\s*[:=]\s*[^/\n;]+/i, '').trim();
+    if (poVal && !poStyleClean.toLowerCase().includes('po:') && !poStyleClean.includes(poVal)) {
+      poStyleClean = `PO: ${poVal} / ` + poStyleClean.replace(/^Style:\s*/i, 'Style: ');
+    }
+  } else {
+    const parts = [];
+    if (poVal) parts.push(`PO: ${poVal}`);
+    if (styleVal) parts.push(`Style: ${styleVal}`);
+    poStyleClean = parts.length > 0 ? parts.join(' / ') : '-';
+  }
+
+  // Combined po_style_no for storage
+  let combinedPoStyle = poStyleClean;
+  if (purchaseVal && !combinedPoStyle.toLowerCase().includes('purchase')) {
+    combinedPoStyle = combinedPoStyle !== '-'
+      ? `${combinedPoStyle} / Purchase No: ${purchaseVal}`
+      : `Purchase No: ${purchaseVal}`;
+  }
+
   const unit = (it.unit || 'PCS').toUpperCase();
   const unitPrice = Number(it.unit_price !== undefined ? it.unit_price : (it.unitPrice !== undefined ? it.unitPrice : 0));
   const totalAmount = Number(it.total_amount !== undefined ? it.total_amount : (it.totalAmount !== undefined ? it.totalAmount : (qty * unitPrice).toFixed(2)));
@@ -88,8 +120,10 @@ function normalizePiItem(it, idx) {
     item_id: it.item_id || it.itemId || null,
     itemDescription: desc,
     item_description: desc,
-    poStyleNo: poStyle,
-    po_style_no: poStyle,
+    purchaseNo: purchaseVal,
+    purchase_no: purchaseVal,
+    poStyleNo: poStyleClean,
+    po_style_no: combinedPoStyle,
     quantity: qty,
     unit,
     unitPrice,
@@ -104,8 +138,19 @@ function normalizePi(pi) {
   if (!pi) return null;
   const rawItems = pi.items || pi.proforma_invoice_items || [];
   const items = rawItems.map((it, idx) => normalizePiItem(it, idx));
+  let piPurchase = pi.purchase_no || pi.purchaseNo || '';
+  if (!piPurchase && pi.notes) {
+    const match = pi.notes.match(/Purchase(?:\s*No)?\s*[:=]\s*([^/\n;]+)/i);
+    if (match) piPurchase = match[1].trim();
+  }
+  if (!piPurchase && items.length > 0) {
+    const itPurch = items.find(it => it.purchaseNo || it.purchase_no);
+    if (itPurch) piPurchase = itPurch.purchaseNo || itPurch.purchase_no;
+  }
   return {
     ...pi,
+    purchase_no: piPurchase,
+    purchaseNo: piPurchase,
     items,
     item_count: items.length,
     total_quantity: Number(pi.total_quantity !== undefined ? pi.total_quantity : items.reduce((s, i) => s + i.quantity, 0)),
@@ -279,7 +324,8 @@ const FinanceRepo = {
             dispatched_quantity: totalDispatched,
             received_quantity: totalReceived,
             fulfillment_pct: pct,
-            is_100_percent_received: (allItemsFull || totalReceived >= totalOrdered) && totalOrdered > 0
+            is_100_percent_received: (allItemsFull || totalReceived >= totalOrdered) && totalOrdered > 0,
+            can_transfer_to_bill: (allItemsFull || totalReceived >= totalOrdered) && totalOrdered > 0 && pi.status !== 'BILLED'
           });
         });
 
@@ -500,6 +546,12 @@ const FinanceRepo = {
     const safeStatus = status || 'ACTIVE';
     const normalizedItems = (items || []).map((it, idx) => normalizePiItem(it, idx));
 
+    let finalNotes = notes || '';
+    const pNum = (data.purchaseNumber || data.purchaseNo || '').trim();
+    if (pNum && !finalNotes.toLowerCase().includes('purchase no')) {
+      finalNotes = finalNotes ? `${finalNotes} | Purchase No: ${pNum}` : `Purchase No: ${pNum}`;
+    }
+
     if (isCloudEnabled()) {
       try {
         const supabase = getSupabase();
@@ -530,7 +582,7 @@ const FinanceRepo = {
           authorized_by: authorizedBy || 'Maksudha Akter Kumu\nChairman\nK.A. DESIGN ACCESSORIES LTD.',
           accepted_by: acceptedBy || null,
           status: safeStatus,
-          notes: notes || null,
+          notes: finalNotes || null,
           created_by: createdBy || null
         }]).select().single();
 
@@ -545,7 +597,7 @@ const FinanceRepo = {
             challan_id: it.challanId,
             item_id: it.itemId,
             item_description: it.itemDescription,
-            po_style_no: it.poStyleNo || null,
+            po_style_no: it.po_style_no || it.poStyleNo || null,
             quantity: it.quantity,
             unit: it.unit,
             unit_price: it.unitPrice,
@@ -610,7 +662,7 @@ const FinanceRepo = {
         authorizedBy || 'Maksudha Akter Kumu\nChairman\nK.A. DESIGN ACCESSORIES LTD.',
         acceptedBy || null,
         safeStatus,
-        notes || null,
+        finalNotes || null,
         createdBy || null
       );
     } catch (insertErr) {
@@ -657,7 +709,7 @@ const FinanceRepo = {
           authorizedBy || 'Maksudha Akter Kumu\nChairman\nK.A. DESIGN ACCESSORIES LTD.',
           acceptedBy || null,
           'ACTIVE',
-          notes || null,
+          finalNotes || null,
           createdBy || null
         );
       } else {
@@ -680,7 +732,7 @@ const FinanceRepo = {
           it.challanId,
           it.itemId,
           it.itemDescription,
-          it.poStyleNo || null,
+          it.po_style_no || it.poStyleNo || null,
           it.quantity,
           it.unit,
           it.unitPrice,

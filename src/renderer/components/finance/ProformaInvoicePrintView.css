@@ -188,13 +188,14 @@
   color: #000000;
 }
 
-.pi-goods-table .col-sl { width: 35px; text-align: center; }
+.pi-goods-table .col-sl { width: 30px; text-align: center; }
 .pi-goods-table .col-desc { text-align: left; font-weight: 500; }
-.pi-goods-table .col-po { width: 140px; text-align: center; }
-.pi-goods-table .col-qty { width: 60px; text-align: right; font-weight: 600; }
-.pi-goods-table .col-unit { width: 45px; text-align: center; }
-.pi-goods-table .col-rate { width: 70px; text-align: right; }
-.pi-goods-table .col-total { width: 80px; text-align: right; font-weight: 600; }
+.pi-goods-table .col-purch { width: 105px; text-align: center; word-break: break-word; }
+.pi-goods-table .col-po { width: 115px; text-align: center; white-space: pre-line; word-break: break-word; }
+.pi-goods-table .col-qty { width: 55px; text-align: right; font-weight: 600; }
+.pi-goods-table .col-unit { width: 40px; text-align: center; }
+.pi-goods-table .col-rate { width: 65px; text-align: right; }
+.pi-goods-table .col-total { width: 75px; text-align: right; font-weight: 600; }
 
 .pi-total-row td {
   font-weight: bold;

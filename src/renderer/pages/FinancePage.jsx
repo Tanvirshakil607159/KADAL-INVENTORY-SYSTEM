@@ -28,6 +28,7 @@ export default function FinancePage() {
   // Dropdown reference data
   const [recipients, setRecipients] = useState([]);
   const [orderNumbers, setOrderNumbers] = useState([]);
+  const [purchaseNumbers, setPurchaseNumbers] = useState([]);
 
   // ==================== CREATE PI FORM STATE ====================
   const [selectedRecipientId, setSelectedRecipientId] = useState('');
@@ -43,6 +44,7 @@ export default function FinancePage() {
   const [buyersList, setBuyersList] = useState([]);
   const [customBuyerMode, setCustomBuyerMode] = useState(false);
   const [piNumber, setPiNumber] = useState('');
+  const [purchaseNumber, setPurchaseNumber] = useState('');
   const [piDate, setPiDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [currency, setCurrency] = useState('USD');
   const [currencySymbol, setCurrencySymbol] = useState('$');
@@ -62,9 +64,11 @@ export default function FinancePage() {
   const [previewPi, setPreviewPi] = useState(null);
   const [previewMode, setPreviewMode] = useState('pi'); // 'pi' or 'bill'
 
-  // ==================== ORDER MODAL STATE ====================
+  // ==================== ORDER / PURCHASE ORDER MODAL STATE ====================
   const [orderModalOpen, setOrderModalOpen] = useState(false);
+  const [orderModalMode, setOrderModalMode] = useState('order'); // 'order' or 'purchase'
   const [selectedOrderNo, setSelectedOrderNo] = useState('');
+  const [selectedPurchaseNo, setSelectedPurchaseNo] = useState('');
   const [orderFilterQuery, setOrderFilterQuery] = useState('');
   const [orderItems, setOrderItems] = useState([]);
   const [loadingOrderItems, setLoadingOrderItems] = useState(false);
@@ -76,45 +80,105 @@ export default function FinancePage() {
   const [itemSearchResults, setItemSearchResults] = useState([]);
   const [loadingItemSearch, setLoadingItemSearch] = useState(false);
 
-  const visibleOrders = useMemo(() => {
-    if (!orderFilterQuery.trim()) return orderNumbers;
+  const visibleList = useMemo(() => {
+    const list = orderModalMode === 'order' ? orderNumbers : purchaseNumbers;
+    if (!orderFilterQuery.trim()) return list;
     const q = orderFilterQuery.toLowerCase().trim();
-    return orderNumbers.filter(o => o && o.toLowerCase().includes(q));
-  }, [orderNumbers, orderFilterQuery]);
+    return list.filter(o => o && o.toLowerCase().includes(q));
+  }, [orderModalMode, orderNumbers, purchaseNumbers, orderFilterQuery]);
 
-  // Load items for the selected order on demand (ultra-fast, only loads items in that order)
+  // Helper to format PO and Style (PO == Order Number) for dedicated column
+  const formatPoStyle = (it) => {
+    if (!it) return '';
+    let val = it.po_style_no || it.poStyleNo || '';
+    const po = it.order_number || it.orderNumber || '';
+    const style = it.style_name || it.styleName || '';
+
+    if (val && val !== '-') {
+      // Remove any Purchase No from this value
+      let cleanVal = val.replace(/\s*\/\s*Purchase(?:\s*No)?\s*[:=]\s*[^/\n;]+/i, '').trim();
+      if (po && !cleanVal.toLowerCase().includes('po:') && !cleanVal.includes(po)) {
+        cleanVal = `PO: ${po} / ` + cleanVal.replace(/^Style:\s*/i, 'Style: ');
+      }
+      return cleanVal || '-';
+    }
+
+    const parts = [];
+    if (po) parts.push(`PO: ${po}`);
+    if (style) parts.push(`Style: ${style}`);
+
+    return parts.length > 0 ? parts.join(' / ') : '-';
+  };
+
+  // Safe helper to extract purchase number from PI or its notes/items
+  const getPiPurchaseNo = (pi) => {
+    if (!pi) return '';
+    if (pi.purchase_no) return String(pi.purchase_no).trim();
+    if (pi.purchaseNo) return String(pi.purchaseNo).trim();
+    if (pi.notes) {
+      const match = String(pi.notes).match(/Purchase(?:\s*No)?\s*[:=]\s*([^/\n;]+)/i);
+      if (match && match[1]) return match[1].trim();
+    }
+    if (pi.items && pi.items.length > 0) {
+      const it = pi.items.find(i => i.purchaseNo || i.purchase_no);
+      if (it) return (it.purchaseNo || it.purchase_no || '').trim();
+    }
+    return '';
+  };
+
+  // Load items for the selected order or purchase order on demand
   useEffect(() => {
-    if (!selectedOrderNo) {
+    const activeVal = orderModalMode === 'order' ? selectedOrderNo : selectedPurchaseNo;
+    if (!activeVal) {
       setOrderItems([]);
       return;
     }
     let isCurrent = true;
     setLoadingOrderItems(true);
-    window.kadal.items.getAll({ orderNumber: selectedOrderNo }).then(res => {
+    const filter = orderModalMode === 'order' 
+      ? { orderNumber: activeVal } 
+      : { purchaseNo: activeVal };
+
+    window.kadal.items.getAll(filter).then(res => {
       if (isCurrent) {
         const items = res?.success ? (res.data || []) : (Array.isArray(res) ? res : []);
         setOrderItems(items);
         setLoadingOrderItems(false);
       }
     }).catch(err => {
-      console.error('Failed to load items for order:', err);
+      console.error('Failed to load items:', err);
       if (isCurrent) setLoadingOrderItems(false);
     });
     return () => { isCurrent = false; };
-  }, [selectedOrderNo]);
+  }, [orderModalMode, selectedOrderNo, selectedPurchaseNo]);
+
+  const addedItemIds = useMemo(() => {
+    return new Set(piItems.map(it => it.itemId).filter(Boolean));
+  }, [piItems]);
+
+  const handleCloseOrderModal = () => {
+    setOrderModalOpen(false);
+    setSelectedOrderNo('');
+    setSelectedPurchaseNo('');
+    setOrderFilterQuery('');
+    setSelectedItemsFromOrder(new Set());
+  };
 
   const handleAddSelectedFromOrder = () => {
+    const activeVal = orderModalMode === 'order' ? selectedOrderNo : selectedPurchaseNo;
     const newItems = orderItems
       .filter(it => selectedItemsFromOrder.has(it.id))
       .map(it => {
         const rate = Number(it.unit_price) || 0;
         const qty = Number(it.order_quantity) || Number(it.current_stock) || 1000;
+        const itPurch = it.purchase_no || it.purchaseNo || (orderModalMode === 'purchase' ? selectedPurchaseNo : '') || purchaseNumber || '';
         return {
           uid: 'pi-' + Math.random().toString(36).slice(2) + '-' + Date.now(),
           itemId: it.id,
           itemCode: it.item_code || '',
           itemDescription: it.name || '',
-          poStyleNo: it.style_name || it.order_number || it.purchase_no || '',
+          purchaseNo: itPurch,
+          poStyleNo: formatPoStyle(it),
           quantity: qty,
           unit: (it.unit || 'PCS').toUpperCase(),
           unitPrice: rate,
@@ -128,11 +192,16 @@ export default function FinancePage() {
       return combined.map((item, idx) => ({ ...item, slNo: idx + 1 }));
     });
 
-    setOrderModalOpen(false);
-    setSelectedOrderNo('');
-    setOrderFilterQuery('');
     setSelectedItemsFromOrder(new Set());
-    addToast('success', `Added ${newItems.length} item(s) to Proforma Invoice`);
+    if (!purchaseNumber) {
+      if (orderModalMode === 'purchase' && selectedPurchaseNo) {
+        setPurchaseNumber(selectedPurchaseNo);
+      } else {
+        const firstPurch = orderItems.find(it => selectedItemsFromOrder.has(it.id) && it.purchase_no);
+        if (firstPurch?.purchase_no) setPurchaseNumber(firstPurch.purchase_no);
+      }
+    }
+    addToast('success', `Added ${newItems.length} item(s) from ${orderModalMode === 'order' ? 'Order' : 'Purchase Order'} ${activeVal} to PI`);
   };
 
   // Debounced search for manual item picker
@@ -194,6 +263,7 @@ export default function FinancePage() {
 
       const dv = dvRes?.success ? (dvRes.data || {}) : (dvRes || {});
       setOrderNumbers(dv.orders || []);
+      setPurchaseNumbers(dv.purchases || []);
 
       const bRaw = buyersRes?.success ? (buyersRes.data || []) : (Array.isArray(buyersRes) ? buyersRes : []);
       const bSet = new Set(bRaw.map(b => (b.name || '').trim()).filter(Boolean));
@@ -247,6 +317,7 @@ export default function FinancePage() {
         itemId: null,
         itemCode: '',
         itemDescription: '',
+        purchaseNo: purchaseNumber || '',
         poStyleNo: '',
         quantity: 1000,
         unit: 'PCS',
@@ -259,6 +330,7 @@ export default function FinancePage() {
 
   const handleSelectInventoryItem = (index, it) => {
     if (!it) return;
+    const itPurch = it.purchase_no || it.purchaseNo || it.purchase_number || it.purchaseNumber || purchaseNumber || '';
     setPiItems(prev => prev.map((item, idx) => {
       if (idx !== index) return item;
       const rate = Number(it.unit_price) || 0;
@@ -268,12 +340,16 @@ export default function FinancePage() {
         itemId: it.id,
         itemCode: it.item_code || '',
         itemDescription: it.name || item.itemDescription || '',
-        poStyleNo: it.style_name || it.order_number || it.purchase_no || item.poStyleNo || '',
+        purchaseNo: itPurch || item.purchaseNo || '',
+        poStyleNo: formatPoStyle(it) || item.poStyleNo || '',
         unit: (it.unit || 'PCS').toUpperCase(),
         unitPrice: rate,
         totalAmount: Number((qty * rate).toFixed(2))
       };
     }));
+    if (!purchaseNumber && itPurch) {
+      setPurchaseNumber(itPurch);
+    }
     setItemPickerIndex(null);
     setItemSearchQuery('');
   };
@@ -351,8 +427,11 @@ export default function FinancePage() {
 
     setSavingPi(true);
     try {
+      const pNum = purchaseNumber.trim();
       const payload = {
         piNumber: piNumber.trim(),
+        purchaseNumber: pNum || null,
+        purchaseNo: pNum || null,
         piDate: piDate || new Date().toISOString(),
         recipientId: selectedRecipientId || null,
         applicantName: applicantName.trim(),
@@ -371,15 +450,28 @@ export default function FinancePage() {
         grossWeight,
         termsConditions,
         status: initialStatus,
-        items: piItems.map(it => ({
-          itemId: it.itemId || null,
-          itemDescription: it.itemDescription.trim() || 'Custom Accessory Item',
-          poStyleNo: it.poStyleNo.trim() || '-',
-          quantity: Number(it.quantity) || 0,
-          unit: (it.unit || 'PCS').toUpperCase(),
-          unitPrice: Number(it.unitPrice) || 0,
-          totalAmount: Number(it.totalAmount) || 0
-        }))
+        notes: pNum ? `Purchase No: ${pNum}` : null,
+        items: piItems.map(it => {
+          const itemPurch = (it.purchaseNo || pNum || '').trim();
+          const poStyle = (it.poStyleNo || '').trim() || '-';
+          let combinedPoStyle = poStyle;
+          if (itemPurch && !combinedPoStyle.toLowerCase().includes('purchase')) {
+            combinedPoStyle = combinedPoStyle !== '-'
+              ? `${combinedPoStyle} / Purchase No: ${itemPurch}`
+              : `Purchase No: ${itemPurch}`;
+          }
+          return {
+            itemId: it.itemId || null,
+            itemDescription: it.itemDescription.trim() || 'Custom Accessory Item',
+            purchaseNo: itemPurch,
+            purchase_no: itemPurch,
+            poStyleNo: combinedPoStyle,
+            quantity: Number(it.quantity) || 0,
+            unit: (it.unit || 'PCS').toUpperCase(),
+            unitPrice: Number(it.unitPrice) || 0,
+            totalAmount: Number(it.totalAmount) || 0
+          };
+        })
       };
 
       const res = await window.kadal.finance.create(payload);
@@ -391,7 +483,9 @@ export default function FinancePage() {
         setApplicantName('');
         setApplicantAddress('');
         setBuyer('');
+        setCustomBuyerMode(false);
         setPiNumber('');
+        setPurchaseNumber('');
         setPiSubTab('orders');
         await loadInitialData();
       } else {
@@ -610,7 +704,7 @@ export default function FinancePage() {
                 onClick={() => setPiSubTab('orders')}
                 style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}
               >
-                <Layers size={14} /> PI Orders & Reconciliation
+                <Layers size={14} /> Previous PIs & Orders ({piStats.totalPis})
               </button>
               <button
                 className={`btn btn-sm ${piSubTab === 'create' ? 'btn-primary' : 'btn-ghost'}`}
@@ -629,10 +723,10 @@ export default function FinancePage() {
                   onChange={e => setStatusFilter(e.target.value)}
                   style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 12, background: 'var(--bg-card)' }}
                 >
-                  <option value="all">All Statuses</option>
-                  <option value="100_received">100% Received (Ready to Bill)</option>
-                  <option value="APPROVED">Approved / In Production</option>
-                  <option value="BILLED">Transferred to Bill</option>
+                  <option value="all">All Statuses ({records.filter(r => r.pi_number).length})</option>
+                  <option value="APPROVED">Approved / In Production ({piStats.inProduction})</option>
+                  <option value="100_received">Ready to Bill ({piStats.readyToBill})</option>
+                  <option value="BILLED">Transferred to Bill ({piStats.billed})</option>
                 </select>
               </div>
             )}
@@ -732,6 +826,14 @@ export default function FinancePage() {
                             <td style={{ padding: '12px 16px' }}>
                               <div style={{ fontWeight: 600, color: 'var(--text)' }}>{pi.applicant_name}</div>
                               {pi.buyer && <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Buyer: {pi.buyer}</div>}
+                              {(() => {
+                                const pNo = getPiPurchaseNo(pi);
+                                return pNo ? (
+                                  <div style={{ fontSize: 11, color: 'var(--primary)', fontWeight: 500 }}>
+                                    PO/Purch: {pNo}
+                                  </div>
+                                ) : null;
+                              })()}
                             </td>
                             <td style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 600 }}>
                               {Number(pi.total_quantity || 0).toLocaleString()}
@@ -778,6 +880,14 @@ export default function FinancePage() {
                             </td>
                             <td style={{ padding: '12px 16px', textAlign: 'right' }}>
                               <div style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                                <button
+                                  className="btn btn-outline btn-sm"
+                                  onClick={() => handlePreview(pi, 'pi')}
+                                  title="View Proforma Invoice Details"
+                                  style={{ display: 'flex', alignItems: 'center', gap: 4 }}
+                                >
+                                  <Eye size={13} /> View
+                                </button>
                                 <button
                                   className="btn btn-outline btn-sm"
                                   onClick={() => handleOpenReconciliation(pi)}
@@ -829,8 +939,12 @@ export default function FinancePage() {
                     Enter ordered accessories, agreed unit prices, and client terms before issuing production.
                   </p>
                 </div>
-                <button className="btn btn-ghost btn-sm" onClick={() => setPiSubTab('orders')}>
-                  ← Back to Orders
+                <button 
+                  className="btn btn-outline btn-sm" 
+                  onClick={() => setPiSubTab('orders')}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                >
+                  ← View Previous PIs ({piStats.totalPis})
                 </button>
               </div>
 
@@ -934,6 +1048,19 @@ export default function FinancePage() {
 
                 <div>
                   <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 4 }}>
+                    Purchase Order No. / Purchase No.
+                  </label>
+                  <input
+                    type="text"
+                    value={purchaseNumber}
+                    onChange={e => setPurchaseNumber(e.target.value)}
+                    placeholder="e.g. KAD#01849/2026 (Optional)"
+                    style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 13, background: 'var(--bg-base)' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 4 }}>
                     Currency
                   </label>
                   <select
@@ -966,10 +1093,28 @@ export default function FinancePage() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                   <h4 style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>Ordered Items & Unit Pricing</h4>
                   <div style={{ display: 'flex', gap: 10 }}>
-                    <button className="btn btn-outline btn-sm" onClick={() => setOrderModalOpen(true)} style={{ display: 'flex', alignItems: 'center', gap: 6, borderColor: 'var(--primary)', color: 'var(--primary)' }}>
+                    <button 
+                      type="button" 
+                      className="btn btn-outline btn-sm" 
+                      onClick={() => { setOrderModalMode('order'); setOrderModalOpen(true); }} 
+                      style={{ display: 'flex', alignItems: 'center', gap: 6, borderColor: 'var(--primary)', color: 'var(--primary)' }}
+                    >
                       <PackageCheck size={14} /> Load from Order
                     </button>
-                    <button className="btn btn-outline btn-sm" onClick={handleAddLineItem} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <button 
+                      type="button" 
+                      className="btn btn-outline btn-sm" 
+                      onClick={() => { setOrderModalMode('purchase'); setOrderModalOpen(true); }} 
+                      style={{ display: 'flex', alignItems: 'center', gap: 6, borderColor: 'var(--primary)', color: 'var(--primary)' }}
+                    >
+                      <FileText size={14} /> Load from Purchase Order
+                    </button>
+                    <button 
+                      type="button" 
+                      className="btn btn-outline btn-sm" 
+                      onClick={handleAddLineItem} 
+                      style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                    >
                       <Plus size={14} /> Add Line Item
                     </button>
                   </div>
@@ -979,21 +1124,22 @@ export default function FinancePage() {
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                     <thead>
                       <tr style={{ background: 'var(--bg-base)', borderBottom: '1px solid var(--border)', color: 'var(--text-muted)' }}>
-                        <th style={{ padding: '8px 10px', width: 40 }}>#</th>
-                        <th style={{ padding: '8px 10px', width: 200 }}>INVENTORY LINK</th>
+                        <th style={{ padding: '8px 10px', width: 35 }}>#</th>
+                        <th style={{ padding: '8px 10px', width: 140 }}>INVENTORY LINK</th>
                         <th style={{ padding: '8px 10px' }}>ITEM DESCRIPTION *</th>
-                        <th style={{ padding: '8px 10px', width: 140 }}>PO / STYLE NO.</th>
-                        <th style={{ padding: '8px 10px', width: 110, textAlign: 'right' }}>ORDER QTY *</th>
-                        <th style={{ padding: '8px 10px', width: 70, textAlign: 'center' }}>UNIT</th>
-                        <th style={{ padding: '8px 10px', width: 100, textAlign: 'right' }}>UNIT PRICE *</th>
-                        <th style={{ padding: '8px 10px', width: 110, textAlign: 'right' }}>TOTAL ({currencySymbol})</th>
-                        <th style={{ padding: '8px 10px', width: 40 }}></th>
+                        <th style={{ padding: '8px 10px', width: 145 }}>PURCHASE NO.</th>
+                        <th style={{ padding: '8px 10px', width: 170 }}>PO & STYLE NO.</th>
+                        <th style={{ padding: '8px 10px', width: 95, textAlign: 'right' }}>ORDER QTY *</th>
+                        <th style={{ padding: '8px 10px', width: 65, textAlign: 'center' }}>UNIT</th>
+                        <th style={{ padding: '8px 10px', width: 90, textAlign: 'right' }}>UNIT PRICE *</th>
+                        <th style={{ padding: '8px 10px', width: 105, textAlign: 'right' }}>TOTAL ({currencySymbol})</th>
+                        <th style={{ padding: '8px 10px', width: 35 }}></th>
                       </tr>
                     </thead>
                     <tbody>
                       {piItems.length === 0 ? (
                         <tr>
-                          <td colSpan={9} style={{ padding: 30, textAlign: 'center', color: 'var(--text-muted)' }}>
+                          <td colSpan={10} style={{ padding: 30, textAlign: 'center', color: 'var(--text-muted)' }}>
                             No items added yet. Click "Load from Order" or "+ Add Line Item" above to add items to this Proforma Invoice.
                           </td>
                         </tr>
@@ -1092,10 +1238,20 @@ export default function FinancePage() {
                             <td style={{ padding: '8px 10px' }}>
                               <input
                                 type="text"
+                                value={item.purchaseNo || ''}
+                                onChange={e => handleUpdateItemField(idx, 'purchaseNo', e.target.value)}
+                                disabled={item.isReadOnly}
+                                placeholder="e.g. KAD#01849/2026"
+                                style={{ width: '100%', padding: '5px 8px', borderRadius: 4, border: '1px solid var(--border)', fontSize: 12, background: item.isReadOnly ? 'var(--bg-card)' : 'var(--bg-base)', color: 'inherit' }}
+                              />
+                            </td>
+                            <td style={{ padding: '8px 10px' }}>
+                              <input
+                                type="text"
                                 value={item.poStyleNo || ''}
                                 onChange={e => handleUpdateItemField(idx, 'poStyleNo', e.target.value)}
                                 disabled={item.isReadOnly}
-                                placeholder="Style / PO"
+                                placeholder="PO: ... / Style: ..."
                                 style={{ width: '100%', padding: '5px 8px', borderRadius: 4, border: '1px solid var(--border)', fontSize: 12, background: item.isReadOnly ? 'var(--bg-card)' : 'var(--bg-base)', color: 'inherit' }}
                               />
                             </td>
@@ -1150,7 +1306,7 @@ export default function FinancePage() {
                     {piItems.length > 0 && (
                       <tfoot>
                         <tr style={{ background: 'var(--bg-base)', borderTop: '2px solid var(--border)', fontWeight: 700 }}>
-                          <td colSpan={4} style={{ padding: '10px 12px', textAlign: 'right' }}>TOTAL ORDER:</td>
+                          <td colSpan={5} style={{ padding: '10px 12px', textAlign: 'right' }}>TOTAL ORDER:</td>
                           <td style={{ padding: '10px 8px', textAlign: 'right', fontSize: 13 }}>
                             {totalQuantity.toLocaleString()}
                           </td>
@@ -1214,6 +1370,79 @@ export default function FinancePage() {
                   <CheckCircle size={16} /> {savingPi ? 'Creating PI...' : 'Create & Approve Proforma Invoice'}
                 </button>
               </div>
+
+              {/* Recent Previous Proforma Invoices Section */}
+              {records.filter(r => r.pi_number).length > 0 && (
+                <div style={{ marginTop: 28, borderTop: '1px solid var(--border)', paddingTop: 18 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <FileText size={16} color="var(--primary)" />
+                      Previous Proforma Invoices ({records.filter(r => r.pi_number).length})
+                    </div>
+                    <button 
+                      className="btn btn-ghost btn-sm" 
+                      onClick={() => setPiSubTab('orders')}
+                      style={{ fontSize: 12, color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: 4 }}
+                    >
+                      View all in Previous PIs tab <ArrowRight size={13} />
+                    </button>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
+                    {records.filter(r => r.pi_number).slice(0, 4).map(p => {
+                      const pNo = getPiPurchaseNo(p);
+                      return (
+                        <div 
+                          key={p.id}
+                          style={{
+                            background: 'var(--bg-base)',
+                            border: '1px solid var(--border)',
+                            borderRadius: 8,
+                            padding: '12px 14px',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            gap: 12
+                          }}
+                        >
+                          <div style={{ minWidth: 0, flex: 1 }}>
+                            <div style={{ fontWeight: 700, color: 'var(--primary)', fontSize: 13, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                              {p.pi_number}
+                            </div>
+                            <div style={{ color: 'var(--text-muted)', fontSize: 11, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', marginTop: 2 }}>
+                              {p.applicant_name}
+                            </div>
+                            {pNo && (
+                              <div style={{ color: 'var(--primary)', fontSize: 11, fontWeight: 500, marginTop: 1 }}>
+                                PO/Purch: {pNo}
+                              </div>
+                            )}
+                          </div>
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, flexShrink: 0 }}>
+                            <span style={{
+                              padding: '2px 8px',
+                              borderRadius: 10,
+                              fontSize: 10,
+                              fontWeight: 600,
+                              background: p.status === 'BILLED' ? 'rgba(100,116,139,0.12)' : 'rgba(99,102,241,0.1)',
+                              color: p.status === 'BILLED' ? '#475569' : 'var(--primary)'
+                            }}>
+                              {p.status === 'BILLED' ? 'Billed' : (p.is_100_percent_received ? 'Ready to Bill' : 'In Production')}
+                            </span>
+                            <button
+                              className="btn btn-outline btn-sm"
+                              onClick={() => handlePreview(p, 'pi')}
+                              title="View Proforma Invoice"
+                              style={{ padding: '3px 8px', fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}
+                            >
+                              <Eye size={12} /> View
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -1563,71 +1792,139 @@ export default function FinancePage() {
       )}
 
       {/* ========================================================================= */}
-      {/* ORDER ITEMS MODAL */}
-      {/* ========================================================================= */}
-      {/* ========================================================================= */}
-      {/* ORDER ITEMS MODAL */}
+      {/* ORDER ITEMS MODAL (SOLID BG & MULTI-ORDER ADD) */}
       {/* ========================================================================= */}
       {orderModalOpen && (
         <div className="modal-backdrop" style={{ 
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 1000, 
-          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 
+          position: 'fixed', 
+          inset: 0, 
+          background: 'rgba(0, 0, 0, 0.75)', 
+          backdropFilter: 'blur(4px)',
+          WebkitBackdropFilter: 'blur(4px)',
+          zIndex: 1000, 
+          display: 'flex', 
+          alignItems: 'center', 
+          justifyContent: 'center', 
+          padding: 20 
         }}>
           <div style={{ 
-            background: 'var(--bg-card, #ffffff)', borderRadius: 12, width: '100%', maxWidth: 720, 
-            maxHeight: '90vh', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.25)' 
+            background: 'var(--bg-surface-solid, #181d28)', 
+            border: '1px solid var(--border)',
+            borderRadius: 12, 
+            width: '100%', 
+            maxWidth: 760, 
+            maxHeight: '90vh', 
+            display: 'flex', 
+            flexDirection: 'column', 
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.06)',
+            opacity: 1
           }}>
-            <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
-                <PackageCheck color="var(--primary)" size={20} />
-                Load Items from Order
-              </h3>
+            <div style={{ 
+              padding: '16px 20px', 
+              borderBottom: '1px solid var(--border)', 
+              display: 'flex', 
+              justifyContent: 'space-between', 
+              alignItems: 'center',
+              background: 'var(--bg-surface-solid, #181d28)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <PackageCheck color="var(--primary)" size={20} />
+                  Load Items from Order
+                </h3>
+                {piItems.length > 0 && (
+                  <span style={{ 
+                    fontSize: 12, 
+                    fontWeight: 600, 
+                    padding: '2px 8px', 
+                    borderRadius: 12, 
+                    background: 'rgba(59, 130, 246, 0.15)', 
+                    color: '#3b82f6',
+                    border: '1px solid rgba(59, 130, 246, 0.3)'
+                  }}>
+                    {piItems.length} item(s) in PI
+                  </span>
+                )}
+              </div>
               <button 
+                type="button"
                 className="btn btn-ghost btn-icon btn-sm" 
-                onClick={() => { 
-                  setOrderModalOpen(false); 
-                  setSelectedOrderNo(''); 
-                  setOrderFilterQuery('');
-                  setSelectedItemsFromOrder(new Set()); 
-                }}
+                onClick={handleCloseOrderModal}
+                title="Close"
               >
                 <X size={18} />
               </button>
             </div>
             
-            <div style={{ padding: 20, overflowY: 'auto', flex: 1 }}>
+            <div style={{ padding: 20, overflowY: 'auto', flex: 1, background: 'var(--bg-surface-solid, #181d28)' }}>
+              {/* Mode Switcher */}
+              <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${orderModalMode === 'order' ? 'btn-primary' : 'btn-outline'}`}
+                  onClick={() => {
+                    setOrderModalMode('order');
+                    setOrderFilterQuery('');
+                    setSelectedItemsFromOrder(new Set());
+                  }}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                >
+                  <PackageCheck size={14} /> By Order Number ({orderNumbers.length})
+                </button>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${orderModalMode === 'purchase' ? 'btn-primary' : 'btn-outline'}`}
+                  onClick={() => {
+                    setOrderModalMode('purchase');
+                    setOrderFilterQuery('');
+                    setSelectedItemsFromOrder(new Set());
+                  }}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                >
+                  <FileText size={14} /> By Purchase Order ({purchaseNumbers.length})
+                </button>
+              </div>
+
               <div style={{ marginBottom: 16 }}>
                 <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
-                  Select Order Number
+                  {orderModalMode === 'order' ? 'Select Order Number (PO)' : 'Select Purchase Order (PO Number)'}
                 </label>
                 <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
                   <div style={{ position: 'relative', flex: 1 }}>
                     <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
                     <input
                       type="text"
-                      placeholder="Type to filter or enter order number..."
+                      placeholder={orderModalMode === 'order' ? 'Type to filter or enter order number (e.g. 00034689)...' : 'Type to filter or enter purchase order (e.g. KAD#01849/2026)...'}
                       value={orderFilterQuery}
                       onChange={e => setOrderFilterQuery(e.target.value)}
                       onKeyDown={e => {
                         if (e.key === 'Enter' && orderFilterQuery.trim()) {
                           e.preventDefault();
-                          setSelectedOrderNo(orderFilterQuery.trim());
+                          if (orderModalMode === 'order') {
+                            setSelectedOrderNo(orderFilterQuery.trim());
+                          } else {
+                            setSelectedPurchaseNo(orderFilterQuery.trim());
+                          }
                           setSelectedItemsFromOrder(new Set());
                         }
                       }}
                       style={{ width: '100%', padding: '7px 10px 7px 32px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 12, background: 'var(--bg-base)', color: 'inherit' }}
                     />
                   </div>
-                  {orderFilterQuery.trim() && orderFilterQuery.trim() !== selectedOrderNo && (
+                  {orderFilterQuery.trim() && orderFilterQuery.trim() !== (orderModalMode === 'order' ? selectedOrderNo : selectedPurchaseNo) && (
                     <button 
                       type="button"
                       className="btn btn-outline btn-sm" 
                       onClick={() => {
-                        setSelectedOrderNo(orderFilterQuery.trim());
+                        if (orderModalMode === 'order') {
+                          setSelectedOrderNo(orderFilterQuery.trim());
+                        } else {
+                          setSelectedPurchaseNo(orderFilterQuery.trim());
+                        }
                         setSelectedItemsFromOrder(new Set());
                       }}
                       style={{ fontSize: 12, padding: '4px 10px', whiteSpace: 'nowrap' }}
-                      title="Select this order directly"
+                      title="Select this directly"
                     >
                       Select "{orderFilterQuery.trim()}"
                     </button>
@@ -1645,18 +1942,24 @@ export default function FinancePage() {
                 </div>
 
                 <select
-                  value={selectedOrderNo}
+                  value={orderModalMode === 'order' ? selectedOrderNo : selectedPurchaseNo}
                   onChange={e => {
-                    setSelectedOrderNo(e.target.value);
+                    if (orderModalMode === 'order') {
+                      setSelectedOrderNo(e.target.value);
+                    } else {
+                      setSelectedPurchaseNo(e.target.value);
+                    }
                     setSelectedItemsFromOrder(new Set());
                   }}
                   style={{ width: '100%', padding: '9px 12px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 13, background: 'var(--bg-base)', color: 'inherit' }}
                 >
-                  <option value="">-- Choose an Order Number ({visibleOrders.length} available) --</option>
-                  {selectedOrderNo && !visibleOrders.includes(selectedOrderNo) && (
-                    <option value={selectedOrderNo}>{selectedOrderNo}</option>
+                  <option value="">-- Choose {orderModalMode === 'order' ? 'an Order Number' : 'a Purchase Order'} ({visibleList.length} available) --</option>
+                  {(orderModalMode === 'order' ? selectedOrderNo : selectedPurchaseNo) && !visibleList.includes(orderModalMode === 'order' ? selectedOrderNo : selectedPurchaseNo) && (
+                    <option value={orderModalMode === 'order' ? selectedOrderNo : selectedPurchaseNo}>
+                      {orderModalMode === 'order' ? selectedOrderNo : selectedPurchaseNo}
+                    </option>
                   )}
-                  {visibleOrders.map(o => (
+                  {visibleList.map(o => (
                     <option key={o} value={o}>{o}</option>
                   ))}
                 </select>
@@ -1665,16 +1968,19 @@ export default function FinancePage() {
               {loadingOrderItems ? (
                 <div style={{ padding: 36, textAlign: 'center', color: 'var(--text-muted)' }}>
                   <RefreshCw size={22} className="spin" style={{ marginBottom: 8 }} />
-                  <div style={{ fontSize: 13 }}>Loading accessories for Order {selectedOrderNo}...</div>
+                  <div style={{ fontSize: 13 }}>
+                    Loading accessories for {orderModalMode === 'order' ? 'Order' : 'Purchase Order'} {orderModalMode === 'order' ? selectedOrderNo : selectedPurchaseNo}...
+                  </div>
                 </div>
-              ) : selectedOrderNo ? (
+              ) : (orderModalMode === 'order' ? selectedOrderNo : selectedPurchaseNo) ? (
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                     <div style={{ fontSize: 13, fontWeight: 600 }}>
-                      Items in Order: <span style={{ color: 'var(--primary)' }}>{selectedOrderNo}</span> ({orderItems.length})
+                      Items in {orderModalMode === 'order' ? 'Order' : 'Purchase Order'}: <span style={{ color: 'var(--primary)' }}>{orderModalMode === 'order' ? selectedOrderNo : selectedPurchaseNo}</span> ({orderItems.length})
                     </div>
                     {orderItems.length > 0 && (
-                      <button
+                      <button 
+                        type="button"
                         className="btn btn-ghost btn-sm"
                         onClick={() => {
                           if (selectedItemsFromOrder.size === orderItems.length) {
@@ -1690,61 +1996,86 @@ export default function FinancePage() {
                     )}
                   </div>
                   
-                  <div style={{ border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
+                  <div style={{ border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden', background: 'var(--bg-surface-solid, #181d28)' }}>
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                       <thead>
-                        <tr style={{ background: 'var(--bg-base)', borderBottom: '1px solid var(--border)', color: 'var(--text-muted)' }}>
+                        <tr style={{ background: 'var(--bg-base, rgba(0,0,0,0.15))', borderBottom: '1px solid var(--border)', color: 'var(--text-muted)' }}>
                           <th style={{ padding: '8px 10px', width: 40, textAlign: 'center' }}>
                             <CheckSquare size={14} />
                           </th>
                           <th style={{ padding: '8px 10px', textAlign: 'left' }}>ITEM DESCRIPTION</th>
-                          <th style={{ padding: '8px 10px', textAlign: 'left', width: 140 }}>STYLE / PO</th>
-                          <th style={{ padding: '8px 10px', textAlign: 'right', width: 100 }}>ORDER QTY</th>
-                          <th style={{ padding: '8px 10px', textAlign: 'right', width: 90 }}>UNIT PRICE</th>
+                          <th style={{ padding: '8px 10px', textAlign: 'left', width: 110 }}>PO (ORDER NO)</th>
+                          <th style={{ padding: '8px 10px', textAlign: 'left', width: 110 }}>STYLE NAME</th>
+                          <th style={{ padding: '8px 10px', textAlign: 'left', width: 120 }}>PURCHASE NO</th>
+                          <th style={{ padding: '8px 10px', textAlign: 'right', width: 85 }}>ORDER QTY</th>
+                          <th style={{ padding: '8px 10px', textAlign: 'right', width: 85 }}>UNIT PRICE</th>
                         </tr>
                       </thead>
                       <tbody>
                         {orderItems.length === 0 ? (
                           <tr>
-                            <td colSpan={5} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>
-                              No items found for order "{selectedOrderNo}".
+                            <td colSpan={7} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>
+                              No items found for {orderModalMode === 'order' ? 'order' : 'purchase order'} "{orderModalMode === 'order' ? selectedOrderNo : selectedPurchaseNo}".
                             </td>
                           </tr>
                         ) : (
-                          orderItems.map(it => (
-                            <tr key={it.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                              <td style={{ padding: '8px 10px', textAlign: 'center' }}>
-                                <input
-                                  type="checkbox"
-                                  checked={selectedItemsFromOrder.has(it.id)}
-                                  onChange={e => {
-                                    const next = new Set(selectedItemsFromOrder);
-                                    if (e.target.checked) next.add(it.id);
-                                    else next.delete(it.id);
-                                    setSelectedItemsFromOrder(next);
-                                  }}
-                                  style={{ cursor: 'pointer', width: 16, height: 16 }}
-                                />
-                              </td>
-                              <td style={{ padding: '8px 10px', fontWeight: 600 }}>
-                                {it.name}
-                                {it.item_code && (
-                                  <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 6, fontWeight: 400 }}>
-                                    ({it.item_code})
-                                  </span>
-                                )}
-                              </td>
-                              <td style={{ padding: '8px 10px', color: 'var(--text-muted)' }}>
-                                {it.style_name || it.order_number || '-'}
-                              </td>
-                              <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600 }}>
-                                {Number(it.order_quantity || it.current_stock || 0).toLocaleString()} {it.unit || 'PCS'}
-                              </td>
-                              <td style={{ padding: '8px 10px', textAlign: 'right', color: 'var(--primary)', fontWeight: 600 }}>
-                                ${Number(it.unit_price || 0).toFixed(4)}
-                              </td>
-                            </tr>
-                          ))
+                          orderItems.map(it => {
+                            const isAlreadyAdded = addedItemIds.has(it.id);
+                            return (
+                              <tr key={it.id} style={{ borderBottom: '1px solid var(--border)', background: isAlreadyAdded ? 'rgba(16, 185, 129, 0.05)' : 'var(--bg-surface-solid, #181d28)' }}>
+                                <td style={{ padding: '8px 10px', textAlign: 'center' }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedItemsFromOrder.has(it.id)}
+                                    onChange={e => {
+                                      const next = new Set(selectedItemsFromOrder);
+                                      if (e.target.checked) next.add(it.id);
+                                      else next.delete(it.id);
+                                      setSelectedItemsFromOrder(next);
+                                    }}
+                                    style={{ cursor: 'pointer', width: 16, height: 16 }}
+                                  />
+                                </td>
+                                <td style={{ padding: '8px 10px', fontWeight: 600 }}>
+                                  {it.name}
+                                  {it.item_code && (
+                                    <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 6, fontWeight: 400 }}>
+                                      ({it.item_code})
+                                    </span>
+                                  )}
+                                  {isAlreadyAdded && (
+                                    <span style={{ 
+                                      fontSize: 10, 
+                                      fontWeight: 700, 
+                                      padding: '1px 6px', 
+                                      borderRadius: 4, 
+                                      background: 'rgba(16, 185, 129, 0.15)', 
+                                      color: '#10b981',
+                                      border: '1px solid rgba(16, 185, 129, 0.3)',
+                                      marginLeft: 8 
+                                    }}>
+                                      Added
+                                    </span>
+                                  )}
+                                </td>
+                                <td style={{ padding: '8px 10px', color: 'var(--text-primary)', fontWeight: 600 }}>
+                                  {it.order_number || '-'}
+                                </td>
+                                <td style={{ padding: '8px 10px', color: 'var(--text-muted)' }}>
+                                  {it.style_name || '-'}
+                                </td>
+                                <td style={{ padding: '8px 10px', color: 'var(--text-muted)', fontSize: 11 }}>
+                                  {it.purchase_no || '-'}
+                                </td>
+                                <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600 }}>
+                                  {Number(it.order_quantity || it.current_stock || 0).toLocaleString()} {it.unit || 'PCS'}
+                                </td>
+                                <td style={{ padding: '8px 10px', textAlign: 'right', color: 'var(--primary)', fontWeight: 600 }}>
+                                  ${Number(it.unit_price || 0).toFixed(4)}
+                                </td>
+                              </tr>
+                            );
+                          })
                         )}
                       </tbody>
                     </table>
@@ -1757,26 +2088,42 @@ export default function FinancePage() {
               )}
             </div>
 
-            <div style={{ padding: '14px 20px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-              <button 
-                className="btn btn-outline" 
-                onClick={() => { 
-                  setOrderModalOpen(false); 
-                  setSelectedOrderNo(''); 
-                  setOrderFilterQuery('');
-                  setSelectedItemsFromOrder(new Set()); 
-                }}
-              >
-                Cancel
-              </button>
-              <button 
-                className="btn btn-primary" 
-                onClick={handleAddSelectedFromOrder}
-                disabled={selectedItemsFromOrder.size === 0}
-                style={{ display: 'flex', alignItems: 'center', gap: 6 }}
-              >
-                <Plus size={16} /> Add Selected Items ({selectedItemsFromOrder.size})
-              </button>
+            <div style={{ 
+              padding: '14px 20px', 
+              borderTop: '1px solid var(--border)', 
+              display: 'flex', 
+              justifyContent: 'space-between', 
+              alignItems: 'center',
+              background: 'var(--bg-surface-solid, #181d28)' 
+            }}>
+              <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+                {piItems.length > 0 ? (
+                  <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
+                    {piItems.length} item(s) in PI list
+                  </span>
+                ) : (
+                  <span>Select items from an order and click "Add to PI"</span>
+                )}
+              </div>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                <button 
+                  type="button"
+                  className="btn btn-primary" 
+                  onClick={handleAddSelectedFromOrder}
+                  disabled={selectedItemsFromOrder.size === 0}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                >
+                  <Plus size={16} /> Add to PI ({selectedItemsFromOrder.size})
+                </button>
+                <button 
+                  type="button"
+                  className="btn btn-outline" 
+                  onClick={handleCloseOrderModal}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                >
+                  <X size={16} /> Close Modal
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1860,7 +2207,8 @@ export default function FinancePage() {
                         </div>
                         <div style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', gap: 12, flexWrap: 'wrap' }}>
                           <span><strong>Code:</strong> {it.item_code || '-'}</span>
-                          {it.order_number && <span><strong>Order:</strong> {it.order_number}</span>}
+                          {it.order_number && <span><strong>PO (Order):</strong> {it.order_number}</span>}
+                          {it.purchase_no && <span><strong>Purchase No:</strong> {it.purchase_no}</span>}
                           {it.style_name && <span><strong>Style:</strong> {it.style_name}</span>}
                           <span><strong>Stock:</strong> {it.current_stock || 0} {it.unit || 'PCS'}</span>
                         </div>
