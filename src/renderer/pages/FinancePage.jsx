@@ -32,8 +32,8 @@ export default function FinancePage() {
 
   // ==================== CREATE PI FORM STATE ====================
   const [selectedRecipientId, setSelectedRecipientId] = useState('');
-  const [applicantName, setApplicantName] = useState('');
-  const [applicantAddress, setApplicantAddress] = useState('');
+  const [applicantName, setApplicantName] = useState('K.A. DESIGN WEAR LTD.');
+  const [applicantAddress, setApplicantAddress] = useState('308/1 Tilargati, Tongi, Gazipur-1712, Bangladesh.');
   const [beneficiaryName, setBeneficiaryName] = useState('K.A. DESIGN ACCESSORIES LTD.');
   const [beneficiaryAddress, setBeneficiaryAddress] = useState('356/1, BLOCK-B, TEK KATHORA, SALNA, GAZIPUR-1703, BANGLADESH');
   const [beneficiaryBin, setBeneficiaryBin] = useState('009212306-1201');
@@ -311,9 +311,9 @@ export default function FinancePage() {
       setApplicantAddress(rec.receiver_address || '');
       await generateNextPiNumber(rec.name);
     } else {
-      setApplicantName('');
-      setApplicantAddress('');
-      await generateNextPiNumber('');
+      setApplicantName('K.A. DESIGN WEAR LTD.');
+      setApplicantAddress('308/1 Tilargati, Tongi, Gazipur-1712, Bangladesh.');
+      await generateNextPiNumber('K.A. DESIGN WEAR LTD.');
     }
   };
 
@@ -490,8 +490,8 @@ export default function FinancePage() {
         // Reset form
         setPiItems([]);
         setSelectedRecipientId('');
-        setApplicantName('');
-        setApplicantAddress('');
+        setApplicantName('K.A. DESIGN WEAR LTD.');
+        setApplicantAddress('308/1 Tilargati, Tongi, Gazipur-1712, Bangladesh.');
         setBuyer('');
         setCustomBuyerMode(false);
         setPiNumber('');

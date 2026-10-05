@@ -1279,16 +1279,15 @@ const PdfGenerator = {
     if (pi.customColWidths) {
       const cw = pi.customColWidths;
       const totalPx = (cw.sl || 32) + (cw.desc || 195) + (cw.purch || 105) + (cw.po || 115) + (cw.qty || 55) + (cw.unit || 40) + (cw.rate || 65) + (cw.total || 75);
-      const scale = 525 / Math.max(400, totalPx);
       pdfWidths = [
-        (cw.sl || 32) * scale,
-        (cw.desc || 195) * scale,
-        (cw.purch || 105) * scale,
-        (cw.po || 115) * scale,
-        (cw.qty || 55) * scale,
-        (cw.unit || 40) * scale,
-        (cw.rate || 65) * scale,
-        (cw.total || 75) * scale
+        `${((cw.sl || 32) / totalPx * 100).toFixed(2)}%`,
+        `${((cw.desc || 195) / totalPx * 100).toFixed(2)}%`,
+        `${((cw.purch || 105) / totalPx * 100).toFixed(2)}%`,
+        `${((cw.po || 115) / totalPx * 100).toFixed(2)}%`,
+        `${((cw.qty || 55) / totalPx * 100).toFixed(2)}%`,
+        `${((cw.unit || 40) / totalPx * 100).toFixed(2)}%`,
+        `${((cw.rate || 65) / totalPx * 100).toFixed(2)}%`,
+        `${((cw.total || 75) / totalPx * 100).toFixed(2)}%`
       ];
     }
     const pdfPadding = pi.customRowPadding ? Math.max(1.5, Math.min(10, pi.customRowPadding * 0.8)) : 3;
@@ -1471,7 +1470,7 @@ const PdfGenerator = {
               stack: [
                 { text: '', margin: [0, 27, 0, 3] },
                 { canvas: [{ type: 'line', x1: 10, y1: 0, x2: 140, y2: 0, lineWidth: 0.8, lineColor: '#64748b' }] },
-                { text: `Accepted By\nBuyer Signature & Seal (${pi.applicant_name || 'KADWL'})`, fontSize: 8, bold: true, alignment: 'center', margin: [0, 3, 0, 0] }
+                { text: `Accepted By\nBuyer Signature & Seal`, fontSize: 8, bold: true, alignment: 'center', margin: [0, 3, 0, 0] }
               ]
             }
           ],

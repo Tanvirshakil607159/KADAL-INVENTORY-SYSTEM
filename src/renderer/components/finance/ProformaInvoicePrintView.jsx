@@ -594,7 +594,7 @@ export default function ProformaInvoicePrintView({
             <div className="pi-sign-col">
               <div className="pi-sign-stamp"></div>
               <div className="pi-sign-line">
-                Accepted By<br />Buyer Signature & Seal ({pi.applicant_name || 'KADWL'})
+                Accepted By<br />Buyer Signature & Seal
               </div>
             </div>
           </div>
