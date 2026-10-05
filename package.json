@@ -1,6 +1,6 @@
 {
   "name": "kadal-inventory",
-  "version": "1.1.137",
+  "version": "1.1.138",
   "description": "KADAL - Inventory Management System for KA Design Accessories LTD",
   "main": "src/main/index.js",
   "author": "KA Design Accessories LTD",
@@ -61,7 +61,8 @@
       "src/main/**/*",
       "src/preload/**/*",
       "dist/**/*",
-      "node_modules/**/*"
+      "node_modules/**/*",
+      "assets/**/*"
     ],
     "asar": true,
     "win": {
