@@ -198,10 +198,20 @@ const FinanceService = {
     let pi;
     if (typeof target === 'object' && target !== null) {
       if (target.id) {
-        pi = await FinanceRepo.getById(target.id);
-        if (pi) {
-          pi.customColWidths = target.customColWidths;
-          pi.customRowPadding = target.customRowPadding;
+        const dbPi = await FinanceRepo.getById(target.id);
+        if (dbPi) {
+          pi = {
+            ...dbPi,
+            ...target,
+            items: (target.items && target.items.length > 0) ? target.items : dbPi.items,
+            displayItems: target.displayItems || null,
+            total_quantity: target.total_quantity !== undefined ? target.total_quantity : dbPi.total_quantity,
+            total_amount: target.total_amount !== undefined ? target.total_amount : dbPi.total_amount,
+            amount_in_words: target.amount_in_words || dbPi.amount_in_words,
+            customColWidths: target.customColWidths || target.colWidths,
+            customRowPadding: target.customRowPadding || target.cellPaddingY,
+            customRowHeights: target.customRowHeights || target.rowHeights
+          };
         } else {
           pi = target;
         }
@@ -212,7 +222,12 @@ const FinanceService = {
       pi = await FinanceRepo.getById(target);
     }
     if (!pi) throw new Error('Proforma Invoice not found');
-    const settings = await SettingsRepo.getAll();
+    let settings = {};
+    try {
+      settings = (await SettingsRepo.getAll()) || {};
+    } catch (e) {
+      settings = {};
+    }
     return await PdfGenerator.generateProformaInvoicePdf(pi, settings);
   }
 };

@@ -277,7 +277,20 @@ export default function ProformaInvoicePrintView({
             <Printer size={15} style={{ marginRight: 6 }} /> {isBill ? 'Print Bill' : 'Print PI'}
           </button>
           {onExportPdf && (
-            <button className="btn btn-outline btn-sm" onClick={() => onExportPdf({ colWidths, cellPaddingY, rowHeights })}>
+            <button 
+              className="btn btn-outline btn-sm" 
+              onClick={() => onExportPdf({
+                ...pi,
+                displayItems,
+                items: displayItems,
+                total_quantity: totalQty,
+                total_amount: totalAmt,
+                amount_in_words: pi.amount_in_words || (totalAmt > 0 ? `IN WORDS: ${numberToCurrencyWords(totalAmt, pi.currency || 'USD')}` : ''),
+                customColWidths: colWidths,
+                customRowPadding: cellPaddingY,
+                customRowHeights: rowHeights
+              })}
+            >
               <Download size={15} style={{ marginRight: 6 }} /> Export PDF
             </button>
           )}
@@ -502,7 +515,7 @@ export default function ProformaInvoicePrintView({
                     <div className="pi-row-resizer no-print" onMouseDown={(e) => handleRowMouseDown(item.slNo, e)} title="Drag row height (↕)" />
                   </td>
                   <td className="col-po" style={{ padding: `${cellPaddingY}px 4px`, whiteSpace: 'pre-line', position: 'relative' }}>
-                    {item.poStyle}
+                    {item.poStyle && item.poStyle.includes(' / ') ? item.poStyle.split(' / ').join('\n') : item.poStyle}
                     <div className="pi-row-resizer no-print" onMouseDown={(e) => handleRowMouseDown(item.slNo, e)} title="Drag row height (↕)" />
                   </td>
                   <td className="col-qty" style={{ padding: `${cellPaddingY}px 4px`, position: 'relative' }}>

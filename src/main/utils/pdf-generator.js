@@ -4,6 +4,7 @@ const path = require('path');
 const { app, shell } = require('electron');
 const JsBarcode = require('jsbarcode');
 const { DOMImplementation, XMLSerializer } = require('@xmldom/xmldom');
+const { numberToCurrencyWords } = require('./number-to-words');
 
 async function generateBarcodeSvg(value, format = 'CODE128') {
   if (format === 'QR') {
@@ -1140,92 +1141,125 @@ const PdfGenerator = {
     const purchaseNo = getPiPurchaseNo(pi);
 
     // Group and merge rows with: Same Item Description, Same Purchase Number, Same PO & Style Number
-    const mergedMap = new Map();
-    (pi.items || []).forEach((it) => {
-      const desc = (it.item_description || it.itemDescription || it.item_name || it.name || '').trim();
-      let itemPurch = (it.purchase_no || it.purchaseNo || it.purchase_number || it.purchaseNumber || '').trim();
-      let poStyle = (it.po_style_no || it.poStyleNo || '').trim();
+    let items;
+    let totalQty = 0;
+    let totalAmt = 0;
 
-      if (!itemPurch && poStyle) {
-        const match = poStyle.match(/Purchase(?:\s*No)?\s*[:=]\s*([^/\n;]+)/i);
-        if (match) itemPurch = match[1].trim();
-      }
-      if (!itemPurch && purchaseNo) {
-        itemPurch = purchaseNo;
-      }
-
-      if (poStyle && poStyle !== '-') {
-        poStyle = poStyle.replace(/\s*\/\s*Purchase(?:\s*No)?\s*[:=]\s*[^/\n;]+/i, '').trim();
-      }
-
-      const poVal = (it.order_number || it.orderNumber || '').trim();
-      const styleVal = (it.style_name || it.styleName || '').trim();
-
-      if (poStyle && poStyle !== '-') {
-        let updated = poStyle;
-        if (poVal && !updated.toLowerCase().includes('order:') && !updated.toLowerCase().includes('po:') && !updated.includes(poVal)) {
-          updated = `Order: ${poVal} / ` + updated.replace(/^Style:\s*/i, 'Style: ');
+    if (Array.isArray(pi.displayItems) && pi.displayItems.length > 0) {
+      items = pi.displayItems.map((m, idx) => {
+        let displayPoStyle = m.poStyle || m.po_style_no || m.poStyleNo || '-';
+        if (displayPoStyle && displayPoStyle.includes(' / ')) {
+          displayPoStyle = displayPoStyle.split(' / ').join('\n');
         }
-        updated = updated.replace(/^PO:\s*/i, 'Order: ').replace(/\s*\/\s*PO:\s*/gi, ' / Order: ');
-        poStyle = updated;
-      } else {
-        const parts = [];
-        if (poVal) parts.push(`Order: ${poVal}`);
-        if (styleVal) parts.push(`Style: ${styleVal}`);
-        poStyle = parts.length > 0 ? parts.join(' / ') : '-';
-      }
+        const qty = Number(m.qty !== undefined ? m.qty : (m.quantity || 0)) || 0;
+        const rate = Number(m.rate !== undefined ? m.rate : (m.unit_price !== undefined ? m.unit_price : (m.unitPrice || 0))) || 0;
+        const lineTotal = Number(m.total !== undefined ? m.total : (m.total_amount !== undefined ? m.total_amount : (qty * rate).toFixed(2)));
+        const unit = (m.unit || 'PCS').toUpperCase();
+        const desc = (m.desc || m.item_description || m.itemDescription || m.item_name || m.name || '').trim();
+        const itemPurch = (m.itemPurch || m.purchase_no || m.purchaseNo || '-').trim();
 
-      const qty = Number(it.quantity || 0);
-      const unit = (it.unit || 'PCS').toUpperCase().trim();
-      const rate = Number(it.unit_price !== undefined ? it.unit_price : (it.unitPrice !== undefined ? it.unitPrice : 0));
-      const lineTotal = Number(it.total_amount !== undefined ? it.total_amount : (it.totalAmount !== undefined ? it.totalAmount : (qty * rate).toFixed(2)));
+        return [
+          { text: String(m.slNo || idx + 1), alignment: 'center', style: 'piTableCell' },
+          { text: desc, alignment: 'left', style: 'piTableCell' },
+          { text: itemPurch || '-', alignment: 'center', style: 'piTableCell' },
+          { text: displayPoStyle || '-', alignment: 'center', style: 'piTableCell' },
+          { text: qty.toLocaleString('en-US'), alignment: 'right', style: 'piTableCell' },
+          { text: unit, alignment: 'center', style: 'piTableCell' },
+          { text: `${currencySym} ${rate.toFixed(4)}`, alignment: 'right', style: 'piTableCell' },
+          { text: `${currencySym} ${lineTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, alignment: 'right', style: 'piTableCell' },
+        ];
+      });
 
-      const cleanDesc = desc.toLowerCase().replace(/\s+/g, ' ');
-      const cleanPurch = itemPurch.toLowerCase().replace(/\s+/g, ' ');
-      const cleanPoStyle = poStyle.toLowerCase().replace(/[\s/]+/g, ' ');
-      const cleanUnit = unit.toLowerCase();
-      const rateKey = rate.toFixed(4);
+      totalQty = pi.total_quantity !== undefined ? Number(pi.total_quantity) : pi.displayItems.reduce((sum, it) => sum + (Number(it.qty !== undefined ? it.qty : it.quantity) || 0), 0);
+      totalAmt = pi.total_amount !== undefined ? Number(pi.total_amount) : pi.displayItems.reduce((sum, it) => sum + (Number(it.total !== undefined ? it.total : it.total_amount) || 0), 0);
+    } else {
+      const mergedMap = new Map();
+      (pi.items || []).forEach((it) => {
+        const desc = (it.item_description || it.itemDescription || it.item_name || it.name || '').trim();
+        let itemPurch = (it.purchase_no || it.purchaseNo || it.purchase_number || it.purchaseNumber || '').trim();
+        let poStyle = (it.po_style_no || it.poStyleNo || '').trim();
 
-      const groupKey = `${cleanDesc}:::${cleanPurch}:::${cleanPoStyle}:::${cleanUnit}:::${rateKey}`;
+        if (!itemPurch && poStyle) {
+          const match = poStyle.match(/Purchase(?:\s*No)?\s*[:=]\s*([^/\n;]+)/i);
+          if (match) itemPurch = match[1].trim();
+        }
+        if (!itemPurch && purchaseNo) {
+          itemPurch = purchaseNo;
+        }
 
-      if (mergedMap.has(groupKey)) {
-        const existing = mergedMap.get(groupKey);
-        existing.qty += qty;
-        existing.total = Number((existing.total + lineTotal).toFixed(2));
-      } else {
-        mergedMap.set(groupKey, {
-          desc,
-          itemPurch,
-          poStyle,
-          qty,
-          unit,
-          rate,
-          total: lineTotal
-        });
-      }
-    });
+        if (poStyle && poStyle !== '-') {
+          poStyle = poStyle.replace(/\s*\/\s*Purchase(?:\s*No)?\s*[:=]\s*[^/\n;]+/i, '').trim();
+        }
 
-    const items = Array.from(mergedMap.values()).map((m, idx) => {
-      let displayPoStyle = m.poStyle;
-      if (displayPoStyle && displayPoStyle.includes(' / ')) {
-        displayPoStyle = displayPoStyle.split(' / ').join('\n');
-      }
-      const lineTotal = Number((m.qty * m.rate).toFixed(2));
+        const poVal = (it.order_number || it.orderNumber || '').trim();
+        const styleVal = (it.style_name || it.styleName || '').trim();
 
-      return [
-        { text: String(idx + 1), alignment: 'center', style: 'piTableCell' },
-        { text: m.desc, alignment: 'left', style: 'piTableCell' },
-        { text: m.itemPurch || '-', alignment: 'center', style: 'piTableCell' },
-        { text: displayPoStyle || '-', alignment: 'center', style: 'piTableCell' },
-        { text: m.qty.toLocaleString('en-US'), alignment: 'right', style: 'piTableCell' },
-        { text: m.unit, alignment: 'center', style: 'piTableCell' },
-        { text: `${currencySym} ${m.rate.toFixed(4)}`, alignment: 'right', style: 'piTableCell' },
-        { text: `${currencySym} ${lineTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, alignment: 'right', style: 'piTableCell' },
-      ];
-    });
+        if (poStyle && poStyle !== '-') {
+          let updated = poStyle;
+          if (poVal && !updated.toLowerCase().includes('order:') && !updated.toLowerCase().includes('po:') && !updated.includes(poVal)) {
+            updated = `Order: ${poVal} / ` + updated.replace(/^Style:\s*/i, 'Style: ');
+          }
+          updated = updated.replace(/^PO:\s*/i, 'Order: ').replace(/\s*\/\s*PO:\s*/gi, ' / Order: ');
+          poStyle = updated;
+        } else {
+          const parts = [];
+          if (poVal) parts.push(`Order: ${poVal}`);
+          if (styleVal) parts.push(`Style: ${styleVal}`);
+          poStyle = parts.length > 0 ? parts.join(' / ') : '-';
+        }
 
-    const totalQty = Array.from(mergedMap.values()).reduce((sum, it) => sum + it.qty, 0);
-    const totalAmt = Array.from(mergedMap.values()).reduce((sum, it) => sum + Number((it.qty * it.rate).toFixed(2)), 0);
+        const qty = Number(it.quantity || 0);
+        const unit = (it.unit || 'PCS').toUpperCase().trim();
+        const rate = Number(it.unit_price !== undefined ? it.unit_price : (it.unitPrice !== undefined ? it.unitPrice : 0));
+        const lineTotal = Number(it.total_amount !== undefined ? it.total_amount : (it.totalAmount !== undefined ? it.totalAmount : (qty * rate).toFixed(2)));
+
+        const cleanDesc = desc.toLowerCase().replace(/\s+/g, ' ');
+        const cleanPurch = itemPurch.toLowerCase().replace(/\s+/g, ' ');
+        const cleanPoStyle = poStyle.toLowerCase().replace(/[\s/]+/g, ' ');
+        const cleanUnit = unit.toLowerCase();
+        const rateKey = rate.toFixed(4);
+
+        const groupKey = `${cleanDesc}:::${cleanPurch}:::${cleanPoStyle}:::${cleanUnit}:::${rateKey}`;
+
+        if (mergedMap.has(groupKey)) {
+          const existing = mergedMap.get(groupKey);
+          existing.qty += qty;
+          existing.total = Number((existing.total + lineTotal).toFixed(2));
+        } else {
+          mergedMap.set(groupKey, {
+            desc,
+            itemPurch,
+            poStyle,
+            qty,
+            unit,
+            rate,
+            total: lineTotal
+          });
+        }
+      });
+
+      items = Array.from(mergedMap.values()).map((m, idx) => {
+        let displayPoStyle = m.poStyle;
+        if (displayPoStyle && displayPoStyle.includes(' / ')) {
+          displayPoStyle = displayPoStyle.split(' / ').join('\n');
+        }
+        const lineTotal = Number((m.qty * m.rate).toFixed(2));
+
+        return [
+          { text: String(idx + 1), alignment: 'center', style: 'piTableCell' },
+          { text: m.desc, alignment: 'left', style: 'piTableCell' },
+          { text: m.itemPurch || '-', alignment: 'center', style: 'piTableCell' },
+          { text: displayPoStyle || '-', alignment: 'center', style: 'piTableCell' },
+          { text: m.qty.toLocaleString('en-US'), alignment: 'right', style: 'piTableCell' },
+          { text: m.unit, alignment: 'center', style: 'piTableCell' },
+          { text: `${currencySym} ${m.rate.toFixed(4)}`, alignment: 'right', style: 'piTableCell' },
+          { text: `${currencySym} ${lineTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, alignment: 'right', style: 'piTableCell' },
+        ];
+      });
+
+      totalQty = Array.from(mergedMap.values()).reduce((sum, it) => sum + it.qty, 0);
+      totalAmt = Array.from(mergedMap.values()).reduce((sum, it) => sum + Number((it.qty * it.rate).toFixed(2)), 0);
+    }
 
     // Total row
     const totalRow = [
@@ -1245,16 +1279,16 @@ const PdfGenerator = {
     if (pi.customColWidths) {
       const cw = pi.customColWidths;
       const totalPx = (cw.sl || 32) + (cw.desc || 195) + (cw.purch || 105) + (cw.po || 115) + (cw.qty || 55) + (cw.unit || 40) + (cw.rate || 65) + (cw.total || 75);
-      const scale = 525 / Math.max(300, totalPx);
+      const scale = 525 / Math.max(400, totalPx);
       pdfWidths = [
-        Math.max(18, Math.round((cw.sl || 32) * scale)),
-        Math.max(50, Math.round((cw.desc || 195) * scale)),
-        Math.max(40, Math.round((cw.purch || 105) * scale)),
-        Math.max(40, Math.round((cw.po || 115) * scale)),
-        Math.max(25, Math.round((cw.qty || 55) * scale)),
-        Math.max(20, Math.round((cw.unit || 40) * scale)),
-        Math.max(30, Math.round((cw.rate || 65) * scale)),
-        Math.max(35, Math.round((cw.total || 75) * scale))
+        (cw.sl || 32) * scale,
+        (cw.desc || 195) * scale,
+        (cw.purch || 105) * scale,
+        (cw.po || 115) * scale,
+        (cw.qty || 55) * scale,
+        (cw.unit || 40) * scale,
+        (cw.rate || 65) * scale,
+        (cw.total || 75) * scale
       ];
     }
     const pdfPadding = pi.customRowPadding ? Math.max(1.5, Math.min(10, pi.customRowPadding * 0.8)) : 3;
@@ -1325,7 +1359,7 @@ const PdfGenerator = {
               width: '*',
               stack: [
                 { text: 'APPLICANT:', bold: true, fontSize: 8.5, color: '#000' },
-                { text: `${pi.applicant_name || ''}\n${pi.applicant_address || ''}`, fontSize: 8.5, color: '#1e293b', margin: [0, 2, 0, 6] },
+                { text: `${pi.applicant_name || '-'}${pi.applicant_address ? `\n${pi.applicant_address}` : ''}`, fontSize: 8.5, color: '#1e293b', margin: [0, 2, 0, 6] },
 
                 { text: 'BENIFICARY:', bold: true, fontSize: 8.5, color: '#000' },
                 { text: `${pi.beneficiary_name || 'K.A. DESIGN ACCESSORIES LTD.'}\n${pi.beneficiary_address || '356/1, BLOCK-B, TEK KATHORA, SALNA\nGAZIPUR-1703, BANGLADESH'}\nBIN: ${(pi.beneficiary_bin || pi.beneficiaryBin || '009212306-1201').trim()}`, fontSize: 8.5, color: '#1e293b', margin: [0, 2, 0, 6] },
@@ -1333,7 +1367,7 @@ const PdfGenerator = {
                 { text: 'BANK DETAIL:', bold: true, fontSize: 8.5, color: '#000' },
                 { text: pi.bank_details || 'UNITED COMMERCIAL BANK PLC.\nTONGI BRANCH\n18, S.K. MANNAN TOWER, CHERAG ALI\nGAZIPUR-1712, BANGLADESH\nSWIFT CODE: UCBLBDDHTNG', fontSize: 8.5, color: '#1e293b', margin: [0, 2, 0, 6] },
 
-                { text: [{ text: 'BUYER : ', bold: true, fontSize: 8.5 }, { text: pi.buyer || '', fontSize: 8.5 }], margin: [0, 2, 0, 4] }
+                { text: [{ text: 'BUYER : ', bold: true, fontSize: 8.5 }, { text: pi.buyer || '-', fontSize: 8.5 }], margin: [0, 2, 0, 4] }
               ]
             },
             {
@@ -1342,15 +1376,17 @@ const PdfGenerator = {
               stack: [
                 { text: (pi.bill_number ? 'BILL' : 'PROFORMA INVOICE'), bold: true, fontSize: 13, alignment: 'right', margin: [0, 0, 0, 4] },
                 ...(pi.bill_number ? [
-                  { text: [{ text: 'BILL : ', bold: true }, { text: pi.bill_number || '-' }], fontSize: 9, alignment: 'right', margin: [0, 0, 0, 4] },
+                  { text: [{ text: 'BILL NO. : ', bold: true }, { text: pi.bill_number || '-' }], fontSize: 9, alignment: 'right', margin: [0, 0, 0, 4] },
                   { text: `Date : ${formatDate(pi.bill_date || pi.pi_date)}`, fontSize: 9, alignment: 'right', margin: [0, 0, 0, 6] },
-                  { text: [{ text: 'PROFORMA INVOICE NO. : ', bold: true }, { text: pi.pi_number || '-' }], fontSize: 9, bold: true, alignment: 'right', margin: [0, 0, 0, 4] },
+                  ...(pi.pi_number ? [
+                    { text: [{ text: 'PI REF NO. : ', bold: true }, { text: pi.pi_number || '-' }], fontSize: 9, bold: true, alignment: 'right', margin: [0, 0, 0, 4] }
+                  ] : []),
                   ...(pi.challan_numbers ? [
                     { text: [{ text: 'CHALLAN NO(S) : ', bold: true }, { text: pi.challan_numbers }], fontSize: 8.5, alignment: 'right', margin: [0, 0, 0, 4] }
                   ] : [])
                 ] : [
-                  { text: `Date : ${formatDate(pi.pi_date)}`, fontSize: 9, alignment: 'right', margin: [0, 0, 0, 4] },
-                  { text: [{ text: 'PROFORMA INVOICE NO. : ', bold: true }, { text: pi.pi_number || '-' }], fontSize: 9, bold: true, alignment: 'right', margin: [0, 0, 0, 4] }
+                  { text: [{ text: 'PROFORMA INVOICE NO. : ', bold: true }, { text: pi.pi_number || '-' }], fontSize: 9, bold: true, alignment: 'right', margin: [0, 0, 0, 4] },
+                  { text: `Date : ${formatDate(pi.pi_date)}`, fontSize: 9, alignment: 'right', margin: [0, 0, 0, 4] }
                 ])
               ]
             }
@@ -1364,6 +1400,18 @@ const PdfGenerator = {
           table: {
             headerRows: 1,
             widths: pdfWidths,
+            heights: (rowIndex) => {
+              if (pi.customRowHeights) {
+                if (rowIndex === 0 && pi.customRowHeights.header) return pi.customRowHeights.header * 0.75;
+                if (rowIndex > 0 && rowIndex <= items.length) {
+                  const slText = items[rowIndex - 1][0].text;
+                  const slNo = parseInt(slText, 10) || slText;
+                  if (slNo && pi.customRowHeights[slNo]) return pi.customRowHeights[slNo] * 0.75;
+                }
+                if (rowIndex === items.length + 1 && pi.customRowHeights.total) return pi.customRowHeights.total * 0.75;
+              }
+              return undefined;
+            },
             body: [
               [
                 { text: 'SL. NO', alignment: 'center', bold: true, style: 'piTableHeader' },
@@ -1393,7 +1441,7 @@ const PdfGenerator = {
         },
 
         // Summary Details
-        { text: (pi.amount_in_words || '').toUpperCase(), bold: true, fontSize: 8.5, margin: [0, 3, 0, 3] },
+        { text: (pi.amount_in_words || (totalAmt > 0 ? `IN WORDS: ${numberToCurrencyWords(totalAmt, pi.currency || 'USD')}` : '')).toUpperCase(), bold: true, fontSize: 8.5, margin: [0, 3, 0, 3] },
         { text: `NET WEIGHT: ${pi.net_weight || '250 KGS'}`, fontSize: 8.5, margin: [0, 1, 0, 1] },
         { text: `GROSS WEIGHT: ${pi.gross_weight || '260 KGS'}`, fontSize: 8.5, margin: [0, 1, 0, 1] },
         { text: `TERMS AND CONDITIONS : ${pi.terms_conditions || 'CASH ON DELIVERY.'}`, fontSize: 8.5, margin: [0, 1, 0, 6] },

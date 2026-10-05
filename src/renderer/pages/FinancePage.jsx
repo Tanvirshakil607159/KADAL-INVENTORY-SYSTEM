@@ -179,6 +179,8 @@ export default function FinancePage() {
           itemCode: it.item_code || '',
           itemDescription: it.name || '',
           purchaseNo: itPurch,
+          orderNumber: it.order_number || it.orderNumber || (orderModalMode === 'order' ? selectedOrderNo : ''),
+          styleName: it.style_name || it.styleName || '',
           poStyleNo: formatPoStyle(it),
           quantity: qty,
           unit: (it.unit || 'PCS').toUpperCase(),
@@ -629,10 +631,18 @@ export default function FinancePage() {
         const poStyle = (it.poStyleNo || '').trim() || '-';
         return {
           sl_no: it.slNo || idx + 1,
+          itemId: it.itemId || it.item_id || null,
+          item_id: it.itemId || it.item_id || null,
+          itemCode: it.itemCode || it.item_code || '',
+          item_code: it.itemCode || it.item_code || '',
           item_description: (it.itemDescription || '').trim() || 'Custom Accessory Item',
           itemDescription: (it.itemDescription || '').trim() || 'Custom Accessory Item',
           purchase_no: itemPurch,
           purchaseNo: itemPurch,
+          order_number: it.orderNumber || it.order_number || '',
+          orderNumber: it.orderNumber || it.order_number || '',
+          style_name: it.styleName || it.style_name || '',
+          styleName: it.styleName || it.style_name || '',
           po_style_no: poStyle,
           poStyleNo: poStyle,
           quantity: Number(it.quantity) || 0,
@@ -1929,12 +1939,15 @@ export default function FinancePage() {
                 await handleSavePi('APPROVED');
               } : null}
               confirmLabel="Confirm & Approve PI"
-              onExportPdf={async (customDimensions) => {
+              onExportPdf={async (exportData) => {
                 try {
+                  const base = typeof previewPi === 'object' ? previewPi : { id: previewPi };
                   const payload = {
-                    ...(typeof previewPi === 'object' ? previewPi : { id: previewPi }),
-                    customColWidths: customDimensions?.colWidths,
-                    customRowPadding: customDimensions?.cellPaddingY
+                    ...base,
+                    ...(exportData || {}),
+                    customColWidths: exportData?.customColWidths || exportData?.colWidths || base.customColWidths,
+                    customRowPadding: exportData?.customRowPadding || exportData?.cellPaddingY || base.customRowPadding,
+                    customRowHeights: exportData?.customRowHeights || exportData?.rowHeights || base.customRowHeights
                   };
                   const res = await window.kadal.finance.exportPdf(payload);
                   if (res?.success) addToast('success', 'PDF exported successfully');
