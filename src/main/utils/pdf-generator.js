@@ -47,10 +47,10 @@ async function generateBarcodeSvg(value, format = 'CODE128') {
 // Font descriptors for pdfmake
 const fonts = {
   Roboto: {
-    normal: path.join(__dirname, '../../assets/fonts/Roboto-Regular.ttf'),
-    bold: path.join(__dirname, '../../assets/fonts/Roboto-Bold.ttf'),
-    italics: path.join(__dirname, '../../assets/fonts/Roboto-Italic.ttf'),
-    bolditalics: path.join(__dirname, '../../assets/fonts/Roboto-BoldItalic.ttf'),
+    normal: path.join(__dirname, '../../../assets/fonts/Roboto-Regular.ttf'),
+    bold: path.join(__dirname, '../../../assets/fonts/Roboto-Bold.ttf'),
+    italics: path.join(__dirname, '../../../assets/fonts/Roboto-Italic.ttf'),
+    bolditalics: path.join(__dirname, '../../../assets/fonts/Roboto-BoldItalic.ttf'),
   },
 };
 
@@ -69,7 +69,7 @@ function getPrinter() {
   return pdfmake;
 }
 
-const logoPath = path.join(__dirname, '../../assets/logo.png');
+const logoPath = path.join(__dirname, '../../../assets/logo.png');
 let logoBase64Cache = null;
 
 function getLogoBase64() {
@@ -86,7 +86,7 @@ function getLogoBase64() {
   return null;
 }
 
-const letterheadPath = path.join(__dirname, '../../assets/letterhead.png');
+const letterheadPath = path.join(__dirname, '../../../assets/letterhead.png');
 let letterheadBase64Cache = null;
 
 function getLetterheadBase64() {
@@ -103,7 +103,7 @@ function getLetterheadBase64() {
   return null;
 }
 
-const watermarkPath = path.join(__dirname, '../../assets/watermark.png');
+const watermarkPath = path.join(__dirname, '../../../assets/watermark.png');
 let watermarkBase64Cache = null;
 
 function getWatermarkBase64() {
@@ -1329,24 +1329,12 @@ const PdfGenerator = {
       }),
       content: [
         // Top Letterhead
-        letterhead ? {
+        (letterhead ? {
           image: letterhead,
           width: 525,
           alignment: 'center',
           margin: [0, 0, 0, 6]
-        } : {
-          columns: [
-            logo ? { image: logo, width: 55, height: 55, margin: [0, 0, 10, 0] } : { text: '', width: 0 },
-            {
-              width: '*',
-              stack: [
-                { text: companyName, fontSize: 18, bold: true, color: '#1e293b' },
-                { text: settings.company_slogan || 'A House of Quality Twill Tape, Herringbone Tape & Garments Accessories Manufacturer.', italics: true, fontSize: 9, color: '#475569', margin: [0, 2, 0, 0] }
-              ]
-            }
-          ],
-          margin: [0, 0, 0, 8]
-        },
+        } : { text: companyName, fontSize: 18, bold: true, color: '#1e293b', alignment: 'center', margin: [0, 0, 0, 8] }),
         { canvas: [{ type: 'line', x1: 0, y1: 0, x2: 525, y2: 0, lineWidth: 1, lineColor: '#94a3b8' }], margin: [0, 0, 0, 8] },
 
         // Invoice Meta & Dates
