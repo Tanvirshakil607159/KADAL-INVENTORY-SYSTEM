@@ -902,6 +902,35 @@ function registerIpcHandlers() {
     return FinanceService.delete(id);
   }));
 
+  ipcMain.handle('finance:resetAll', wrapHandler(async () => {
+    const { getSupabase, isCloudEnabled, dbPrepare, saveDatabase } = require('./database/connection');
+    
+    // Cloud Reset
+    if (isCloudEnabled()) {
+      const supabase = getSupabase();
+      if (supabase) {
+        await supabase.from('proforma_invoice_items').delete().neq('id', 0);
+        await supabase.from('challan_items').update({ pi_item_id: null }).neq('id', 0);
+        await supabase.from('challans').update({ pi_id: null }).neq('id', 0);
+        await supabase.from('proforma_invoices').delete().neq('id', 0);
+        await supabase.from('settings').delete().or('key.ilike.seq:pi:%,key.ilike.seq:bill:%');
+      }
+    }
+    
+    // Local Reset
+    try {
+      dbPrepare('DELETE FROM proforma_invoice_items').run();
+      dbPrepare('UPDATE challan_items SET pi_item_id = NULL').run();
+      dbPrepare('UPDATE challans SET pi_id = NULL').run();
+      dbPrepare('DELETE FROM proforma_invoices').run();
+      dbPrepare('DELETE FROM settings WHERE key LIKE "seq:pi:%" OR key LIKE "seq:bill:%"').run();
+      if (typeof saveDatabase === 'function') saveDatabase();
+    } catch (err) {
+      console.error('[FinanceReset] Failed to reset local database:', err);
+    }
+    return true;
+  }));
+
   ipcMain.handle('finance:getNextNumber', wrapHandler((applicantName) => {
     return FinanceService.getNextNumber(applicantName);
   }));

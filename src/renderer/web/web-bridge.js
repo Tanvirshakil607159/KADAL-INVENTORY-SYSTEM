@@ -1693,6 +1693,26 @@ export const webBridge = {
       return true;
     }),
 
+    resetAll: () => wrap(async () => {
+      const supabase = getSupabase();
+      if (!supabase) return true; // Only cloud needs this manual web-bridge reset, local DB not supported via web-bridge
+      
+      // Delete all PI items
+      await supabase.from('proforma_invoice_items').delete().neq('id', 0);
+      
+      // Unlink challans
+      await supabase.from('challans').update({ pi_id: null }).neq('id', 0);
+      await supabase.from('challan_items').update({ pi_item_id: null }).neq('id', 0);
+      
+      // Delete all PIs
+      await supabase.from('proforma_invoices').delete().neq('id', 0);
+      
+      // Reset sequences
+      await supabase.from('settings').delete().or('key.ilike.seq:pi:%,key.ilike.seq:bill:%');
+      
+      return true;
+    }),
+
     getNextNumber: (applicantName) => wrap(async () => {
       const supabase = getSupabase();
       if (!supabase) return 'PI-001';

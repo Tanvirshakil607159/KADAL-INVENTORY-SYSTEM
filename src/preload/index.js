@@ -291,6 +291,7 @@ contextBridge.exposeInMainWorld('kadal', {
     create: (data) => ipcRenderer.invoke('finance:create', data),
     update: (id, data) => ipcRenderer.invoke('finance:update', id, data),
     delete: (id) => ipcRenderer.invoke('finance:delete', id),
+    resetAll: () => ipcRenderer.invoke('finance:resetAll'),
     getNextNumber: (applicantName) => ipcRenderer.invoke('finance:getNextNumber', applicantName),
     getNextBillNumber: (applicantName) => ipcRenderer.invoke('finance:getNextBillNumber', applicantName),
     getUsedChallanIds: () => ipcRenderer.invoke('finance:getUsedChallanIds'),
