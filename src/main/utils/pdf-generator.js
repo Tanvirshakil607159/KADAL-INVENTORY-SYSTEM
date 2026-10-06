@@ -1114,9 +1114,10 @@ const PdfGenerator = {
       return `${day}.${month}.${year}`;
     };
 
-    const logo = getLogoBase64();
+    const logo = settings.company_logo || getLogoBase64();
     const letterhead = getLetterheadBase64();
     const watermark = getWatermarkBase64();
+    const companyName = settings.company_name || 'K.A. DESIGN ACCESSORIES LTD.';
     const currencySym = pi.currency_symbol || '$';
 
     const getPiPurchaseNo = (piObj) => {
@@ -1339,8 +1340,8 @@ const PdfGenerator = {
             {
               width: '*',
               stack: [
-                { text: 'K.A. DESIGN ACCESSORIES LTD.', fontSize: 18, bold: true, color: '#1e293b' },
-                { text: 'A House of Quality Twill Tape, Herringbone Tape & Garments Accessories Manufacturer.', italics: true, fontSize: 9, color: '#475569', margin: [0, 2, 0, 0] }
+                { text: companyName, fontSize: 18, bold: true, color: '#1e293b' },
+                { text: settings.company_slogan || 'A House of Quality Twill Tape, Herringbone Tape & Garments Accessories Manufacturer.', italics: true, fontSize: 9, color: '#475569', margin: [0, 2, 0, 0] }
               ]
             }
           ],
