@@ -12,6 +12,7 @@ import SettingsPage from './pages/SettingsPage';
 import BackupPage from './pages/BackupPage';
 import Sidebar from './components/layout/Sidebar';
 import TopBar from './components/layout/TopBar';
+import DesktopBar from './components/layout/DesktopBar';
 import ToastContainer from './components/common/ToastContainer';
 import ConfirmDialog from './components/common/ConfirmDialog';
 import LoginPage from './pages/LoginPage';
@@ -199,17 +200,20 @@ export default function App() {
   };
 
   return (
-    <div className="app-layout">
-      <Sidebar />
-      <div className="main-content">
-        <TopBar />
-        <NotificationManager />
-        <UpdateProgress />
-        <div className="page-content">{renderPage()}</div>
+    <div className="monterey-desktop">
+      <DesktopBar />
+      <div className="app-layout">
+        <Sidebar />
+        <div className="main-content">
+          <TopBar />
+          <NotificationManager />
+          <UpdateProgress />
+          <div className="page-content">{renderPage()}</div>
+        </div>
+        <ToastContainer />
+        <GlobalModalManager />
+        <ConfirmDialog />
       </div>
-      <ToastContainer />
-      <GlobalModalManager />
-      <ConfirmDialog />
     </div>
   );
 }

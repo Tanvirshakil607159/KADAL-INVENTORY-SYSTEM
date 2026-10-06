@@ -4,7 +4,7 @@ import App from './App';
 import ErrorBoundary from './components/common/ErrorBoundary';
 import './styles/index.css';
 import './styles/themes.css';
-import './styles/playful.css';
+import './styles/monterey.css';
 import { webBridge } from './web/web-bridge';
 import useStore from './store/useStore';
 import { THEME_STORAGE_KEY, readTheme } from './theme';

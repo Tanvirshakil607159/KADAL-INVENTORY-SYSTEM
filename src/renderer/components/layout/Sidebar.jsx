@@ -118,7 +118,7 @@ export default function Sidebar() {
           <span style={{ flex: 1 }}>Home / Showcase</span>
           <ChevronRight size={12} style={{ opacity: 0.6 }} />
         </button>
-        <div className="nav-section-label">LET’S GET THINGS MOVING</div>
+        <div className="nav-section-label">Workspace</div>
         {navItems.map((item, index) => {
           const Icon = item.icon;
           const permsObj = typeof user?.permissions === 'string' ? JSON.parse(user.permissions) : (user?.permissions || {});
@@ -185,7 +185,7 @@ export default function Sidebar() {
         <button className="sidebar-nav-item" onClick={handleLogout} style={{ color: 'var(--logout-color)' }}>
           <span className="nav-icon"><LogOut size={17} /></span> <span>Logout</span>
         </button>
-        <div className="app-version">Made for your everyday <span>v{version}</span></div>
+        <div className="app-version">KADAL Inventory <span>v{version}</span></div>
       </div>
     </aside>
     </>

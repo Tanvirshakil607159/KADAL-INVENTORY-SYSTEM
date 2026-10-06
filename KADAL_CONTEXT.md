@@ -64,9 +64,9 @@ Authentication uses custom bcrypt password checks and an in-memory desktop sessi
 
 ## Working and validation context
 
-### Playful interface (added 2026-10-01)
+### Monterey interface (updated 2026-10-06)
 
-`src/renderer/styles/playful.css`, loaded after the base and theme styles, adds colored icon tiles, rounded controls, tactile primary actions, and shared styling for forms, tables, tabs, dialogs, and searchable menus. It keeps the dark foundation and dim off-white light surfaces. The dashboard groups its existing ten metrics into four stock cards and six activity counters, with a decorative CSS parcel character and a read-only refresh action. Failed refreshes retain the last loaded figures and display an error; initial failures do not display invented zero values.
+`src/renderer/styles/monterey.css` replaces the earlier playful stylesheet and loads after the base and theme styles. The macOS Monterey-inspired interface uses a frosted sidebar, floating window frame, graphite dark surfaces, dim off-white light surfaces, blue actions, segmented appearance controls, and shared styling for forms, tables, dialogs, and searchable menus. `assets/monterey-waves.svg` is an original vector backdrop, not a downloaded Apple asset. `DesktopBar` provides an app label and local clock; native operating-system window controls are unchanged. The dashboard retains its ten metrics and read-only refresh action, replacing the parcel mascot with a compact calendar. Failed refreshes retain the last loaded figures and display an error; initial failures do not display invented zero values.
 
 Lucide icons have gentle idle and hover/focus animations; barcode SVGs are excluded. Animation preferences are device-local (`localStorage.kadal_motion`), restored before paint, synchronized across tabs, and controlled from the top bar or Settings > Appearance. System reduced-motion preferences and print rendering disable animations. Mobile navigation uses Zustand `sidebarOpen`, an inert closed sidebar, backdrop dismissal, Escape, focus restoration, and keyboard focus containment while open. Existing navigation permission checks are retained.
 

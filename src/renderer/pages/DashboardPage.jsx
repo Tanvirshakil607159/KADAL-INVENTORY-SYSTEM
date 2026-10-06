@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Package, Boxes, AlertTriangle, FileText, TrendingDown, CircleDollarSign, RotateCcw, Clock, ShieldAlert, Sparkles, ArrowUpRight, Check, RefreshCw } from 'lucide-react';
+import { Package, Boxes, AlertTriangle, FileText, TrendingDown, CircleDollarSign, RotateCcw, Clock, ShieldAlert, Activity, CalendarDays, RefreshCw } from 'lucide-react';
 import useStore from '../store/useStore';
 
 const number = (value) => Number(value || 0).toLocaleString();
@@ -8,9 +8,8 @@ const money = (value) => Number(value || 0).toLocaleString(undefined, { minimumF
 function MetricCard({ icon: Icon, label, value, tone, index }) {
   return (
     <div className="overview-metric" data-tone={tone} style={{ '--icon-delay': `${index * -1.3}s` }}>
-      <div className="metric-top"><span className="metric-icon"><Icon size={22} /></span><span className="metric-decoration" aria-hidden="true">•••</span></div>
+      <div className="metric-top"><span className="metric-icon"><Icon size={22} /></span><span className="metric-label">{label}</span></div>
       <div className="metric-value">{value}</div>
-      <div className="metric-label">{label}</div>
     </div>
   );
 }
@@ -52,30 +51,25 @@ export default function DashboardPage() {
     <div className="dashboard-page" aria-busy={loading}>
       <section className="welcome-card">
         <div className="welcome-copy">
-          <span className="welcome-kicker"><Sparkles size={14} /> A LITTLE CLARITY. A LOT OF POSSIBILITIES.</span>
+          <span className="welcome-kicker">WORKSPACE OVERVIEW</span>
           <h1>Good to see you{user?.fullName ? `, ${user.fullName.trim().split(/\s+/)[0]}` : ''}<span className="welcome-period">.</span></h1>
-          <p>Big picture. Small details. Everything in its place.</p>
-          <div className="welcome-bottom"><span className="welcome-tag"><Boxes size={15} /> Your inventory, at a glance</span><span className="welcome-date">{new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric', weekday: 'short' })}</span></div>
+          <p>Your inventory, deliveries, and daily activity. All in one place.</p>
         </div>
-        <div className="package-scene" aria-hidden="true">
-          <div className="scene-orbit" />
-          <span className="scene-spark spark-one"><Sparkles size={26} /></span>
-          <span className="scene-spark spark-two"><Sparkles size={16} /></span>
-          <div className="parcel parcel-small"><span className="parcel-tape" /></div>
-          <div className="parcel parcel-main"><span className="parcel-tape" /><span className="parcel-eyes"><i /><i /></span><span className="parcel-smile" /><span className="parcel-cheek" /></div>
-          <div className="scene-stamp"><Check size={20} /></div>
-          <div className="scene-label"><ArrowUpRight size={14} /> Keep good things moving</div>
+        <div className="overview-calendar">
+          <span><CalendarDays size={15} />{new Date().toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</span>
+          <strong>{new Date().getDate()}</strong>
+          <small>{new Date().toLocaleDateString(undefined, { weekday: 'long' })}</small>
         </div>
       </section>
 
       <div className="dashboard-section-heading">
-        <div><h2>Your stock story</h2><p>The numbers behind your day.</p></div>
+        <div><h2>Inventory overview</h2><p>A snapshot of your current stock.</p></div>
         <button className="btn btn-secondary overview-refresh" onClick={loadStats} disabled={loading}>
           <RefreshCw size={14} className={loading ? 'is-refreshing' : ''} /> {loading ? 'Refreshing…' : 'Refresh overview'}
         </button>
       </div>
       {error && <div className="overview-error" role="alert"><AlertTriangle size={18} /><span>{error}{stats && ' Showing the last loaded figures.'}</span></div>}
-      {loading && !stats && <div className="overview-loading" role="status"><Package size={26} /><span>Gathering your inventory story…</span></div>}
+      {loading && !stats && <div className="overview-loading" role="status"><Package size={26} /><span>Loading your inventory overview…</span></div>}
       {stats && <>
         <div className="overview-grid">
           <MetricCard icon={Package} label="Total items" value={number(stats.totalItems)} tone="violet" index={0} />
@@ -84,7 +78,7 @@ export default function DashboardPage() {
           <MetricCard icon={CircleDollarSign} label="Stock value · USD" value={`$ ${money(stats.totalValue?.USD)}`} tone="rose" index={3} />
         </div>
         <section className="activity-panel">
-          <div className="activity-heading"><span className="section-icon" data-tone="mint"><Sparkles size={18} /></span><div><h2>Keep things moving</h2><p>Your daily activity and things to watch.</p></div></div>
+          <div className="activity-heading"><span className="section-icon" data-tone="mint"><Activity size={18} /></span><div><h2>Today’s activity</h2><p>Deliveries, returns, and items that need attention.</p></div></div>
           <div className="activity-grid">
             {activity.map(({ label, value, icon: Icon, tone }, index) => <div className="activity-item" key={label} data-tone={tone} style={{ '--icon-delay': `${index * -1.1}s` }}>
               <span className="activity-icon"><Icon size={18} /></span><div><strong>{number(value)}</strong><span>{label}</span></div>
@@ -93,7 +87,7 @@ export default function DashboardPage() {
         </section>
         <div className="dashboard-tables">
           <section className="card dashboard-table-card">
-            <div className="card-header"><div className="table-heading"><span className="section-icon" data-tone="violet"><FileText size={19} /></span><div><h3 className="card-title">On the move</h3><p>Recent challans</p></div></div><span className="section-tag">Latest activity</span></div>
+            <div className="card-header"><div className="table-heading"><span className="section-icon" data-tone="violet"><FileText size={19} /></span><div><h3 className="card-title">Recent challans</h3><p>Your latest delivery documents</p></div></div><span className="section-tag">Latest activity</span></div>
             {stats.recentChallans?.length > 0 ? (
               <div className="table-wrapper"><table className="data-table">
                 <thead><tr><th>Challan No</th><th>Receiver</th><th>Items</th><th>Status</th></tr></thead>
@@ -105,7 +99,7 @@ export default function DashboardPage() {
             ) : <div className="dashboard-empty"><FileText size={28} /><strong>A fresh page</strong><p>Your recent challans will appear here.</p></div>}
           </section>
           <section className="card dashboard-table-card">
-            <div className="card-header"><div className="table-heading"><span className="section-icon" data-tone="peach"><TrendingDown size={19} /></span><div><h3 className="card-title">A little attention</h3><p>Low stock alerts</p></div></div><span className="section-tag">Stock watch</span></div>
+            <div className="card-header"><div className="table-heading"><span className="section-icon" data-tone="peach"><TrendingDown size={19} /></span><div><h3 className="card-title">Low stock alerts</h3><p>Items below their minimum level</p></div></div><span className="section-tag">Stock watch</span></div>
             {stats.lowStockItems?.length > 0 ? (
               <div className="table-wrapper"><table className="data-table">
                 <thead><tr><th>Item</th><th>Current</th><th>Min Level</th></tr></thead>

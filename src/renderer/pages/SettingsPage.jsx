@@ -68,8 +68,8 @@ function AppearanceSettings() {
       <h3 id="appearance-title">Appearance</h3>
       <p className="text-secondary">Choose how KADAL looks. Your choice is saved automatically on this device.</p>
       <div className="theme-options" role="group" aria-label="Color mode">
-        {[{ value: 'dark', label: 'Dark Mode', description: 'The original KADAL appearance.', Icon: Moon },
-          { value: 'light', label: 'Light Mode', description: 'Soft off-white surfaces with reduced glare.', Icon: Sun }].map(({ value, label, description, Icon }) => (
+        {[{ value: 'dark', label: 'Dark Mode', description: 'Graphite panels with soft violet reflections.', Icon: Moon },
+          { value: 'light', label: 'Light Mode', description: 'Dim off-white surfaces and frosted silver panels.', Icon: Sun }].map(({ value, label, description, Icon }) => (
           <button key={value} type="button" className={`theme-option ${theme === value ? 'selected' : ''}`}
             aria-pressed={theme === value} onClick={() => setTheme(value)}>
             <span className={`theme-preview theme-preview-${value}`} aria-hidden="true">
@@ -83,7 +83,7 @@ function AppearanceSettings() {
       </div>
       <label className="motion-setting">
         <span className="section-icon" data-tone="violet"><Sparkles size={20} /></span>
-        <span className="motion-setting-copy"><strong>A little motion</strong><span>Playful icons and gentle animations. Your device’s reduced-motion preference is always respected.</span></span>
+        <span className="motion-setting-copy"><strong>Interface animations</strong><span>Subtle icon motion and smooth transitions. Your device’s reduced-motion preference is always respected.</span></span>
         <input type="checkbox" role="switch" aria-label="Playful animations" checked={motionEnabled} onChange={event => setMotionEnabled(event.target.checked)} />
       </label>
     </section>
