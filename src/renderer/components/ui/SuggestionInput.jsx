@@ -14,10 +14,11 @@ export default function SuggestionInput({ label, value, onChange, suggestions, f
   };
 
   useEffect(() => {
-    if (!value || (isFocused && suggestions.includes(value))) {
-      setFiltered(suggestions);
+    const safeSuggestions = suggestions || [];
+    if (!value || (isFocused && safeSuggestions.includes(value))) {
+      setFiltered(safeSuggestions);
     } else {
-      setFiltered(suggestions.filter(s => s?.toLowerCase().includes(value?.toLowerCase() || '')));
+      setFiltered(safeSuggestions.filter(s => s?.toLowerCase().includes(value?.toLowerCase() || '')));
     }
   }, [value, suggestions, isFocused]);
 

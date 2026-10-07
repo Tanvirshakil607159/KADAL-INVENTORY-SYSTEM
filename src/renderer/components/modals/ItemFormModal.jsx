@@ -7,8 +7,8 @@ export default function ItemFormModal({ data, onSaved }) {
   const { item, buyers, distinctValues } = data;
   const isMinimized = modal?.isMinimized;
   
-  const [buyersList, setBuyersList] = useState(buyers || []);
-  const [dvList, setDvList] = useState(distinctValues || { names: [], colors: [], sizes: [], styles: [], purchases: [], orders: [], notes: [] });
+  const [buyersList, setBuyersList] = useState(buyers && buyers.length > 0 ? buyers : []);
+  const [dvList, setDvList] = useState(distinctValues && distinctValues.names?.length > 0 ? distinctValues : { names: [], colors: [], sizes: [], styles: [], purchases: [], orders: [], notes: [] });
   const [form, setForm] = useState({
     itemCode: item?.itemCode || item?.item_code || '', 
     name: item?.name || '', 
@@ -39,17 +39,27 @@ export default function ItemFormModal({ data, onSaved }) {
         if (res.success) setForm(f => ({ ...f, itemCode: res.data }));
       });
     }
-    if (!buyers) {
+  }, [item]);
+
+  useEffect(() => {
+    if (buyers && buyers.length > 0) {
+      setBuyersList(buyers);
+    } else {
       window.kadal.buyers.getAll().then(res => {
         if (res.success) setBuyersList(res.data);
       });
     }
-    if (!distinctValues) {
+  }, [buyers]);
+
+  useEffect(() => {
+    if (distinctValues && distinctValues.names && distinctValues.names.length > 0) {
+      setDvList(distinctValues);
+    } else {
       window.kadal.items.getDistinctValues().then(res => {
         if (res.success) setDvList(res.data);
       });
     }
-  }, [item, buyers, distinctValues]);
+  }, [distinctValues]);
 
   const isFilled = (val) => {
     if (val === null || val === undefined) return false;
