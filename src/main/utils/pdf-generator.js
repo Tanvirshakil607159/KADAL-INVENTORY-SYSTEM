@@ -1134,7 +1134,7 @@ const PdfGenerator = {
         if (it.purchase_no) return it.purchase_no;
         if (it.purchaseNo) return it.purchaseNo;
         const poStyle = it.po_style_no || it.poStyleNo || '';
-        const match = poStyle.match(/Purchase(?:\s*No)?\s*[:=]\s*([^/\n;]+)/i);
+        const match = poStyle.match(/Purchase(?:\s*No)?\s*[:=]\s*([^\n;]+)/i);
         if (match) return match[1].trim();
       }
       return '';
@@ -1181,7 +1181,7 @@ const PdfGenerator = {
         let poStyle = (it.po_style_no || it.poStyleNo || '').trim();
 
         if (!itemPurch && poStyle) {
-          const match = poStyle.match(/Purchase(?:\s*No)?\s*[:=]\s*([^/\n;]+)/i);
+          const match = poStyle.match(/Purchase(?:\s*No)?\s*[:=]\s*([^\n;]+)/i);
           if (match) itemPurch = match[1].trim();
         }
         if (!itemPurch && purchaseNo) {
@@ -1189,7 +1189,21 @@ const PdfGenerator = {
         }
 
         if (poStyle && poStyle !== '-') {
-          poStyle = poStyle.replace(/\s*\/\s*Purchase(?:\s*No)?\s*[:=]\s*[^/\n;]+/i, '').trim();
+          poStyle = poStyle.replace(/\s*\/\s*Purchase(?:\s*No)?\s*[:=]\s*[^\n;]+/i, '').trim();
+        }
+
+        // Cleanup corrupted repeating purchase numbers inside the style string
+        const hiddenPurchMatch = poStyle.match(/#\d{3,6}\/\d{4}/);
+        if (hiddenPurchMatch) {
+          const hiddenPurch = hiddenPurchMatch[0];
+          if (!itemPurch || itemPurch === '-' || itemPurch.trim() === 'KAD') {
+            itemPurch = itemPurch.trim() === 'KAD' ? `KAD${hiddenPurch}` : hiddenPurch;
+          }
+          // Remove the hidden purchase number and any of its repeats
+          const escapedHidden = hiddenPurch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const regex = new RegExp(`(?:\\/\\s*)?${escapedHidden}(?:\\s*\\/\\s*${escapedHidden})*`, 'gi');
+          poStyle = poStyle.replace(regex, '').trim();
+          if (poStyle.endsWith('/')) poStyle = poStyle.slice(0, -1).trim();
         }
 
         const poVal = (it.order_number || it.orderNumber || '').trim();

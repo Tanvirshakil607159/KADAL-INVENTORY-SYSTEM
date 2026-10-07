@@ -46,13 +46,13 @@ function formatBridgePoStyle(it) {
   let purchase = it.purchase_no || it.purchaseNo || it.purchase_number || it.purchaseNumber || '';
 
   if (!purchase && val) {
-    const match = val.match(/Purchase(?:\s*No)?\s*[:=]\s*([^/\n;]+)/i);
+    const match = val.match(/Purchase(?:\s*No)?\s*[:=]\s*([^\n;]+)/i);
     if (match) purchase = match[1].trim();
   }
 
   let cleanVal = val;
   if (cleanVal && cleanVal !== '-') {
-    cleanVal = cleanVal.replace(/\s*\/\s*Purchase(?:\s*No)?\s*[:=]\s*[^/\n;]+/i, '').trim();
+    cleanVal = cleanVal.replace(/\s*\/\s*Purchase(?:\s*No)?\s*[:=]\s*[^\n;]+/i, '').trim();
     if (po && !cleanVal.toLowerCase().includes('order:') && !cleanVal.toLowerCase().includes('po:') && !cleanVal.includes(po)) {
       cleanVal = `Order: ${po} / ` + cleanVal.replace(/^Style:\s*/i, 'Style: ');
     }
@@ -1433,7 +1433,7 @@ export const webBridge = {
         const items = (pi.proforma_invoice_items || []).map((it, idx) => normalizePiItem(it, idx));
         let piPurchase = pi.purchase_no || pi.purchaseNo || '';
         if (!piPurchase && pi.notes) {
-          const match = pi.notes.match(/Purchase(?:\s*No)?\s*[:=]\s*([^/\n;]+)/i);
+          const match = pi.notes.match(/Purchase(?:\s*No)?\s*[:=]\s*([^\n;]+)/i);
           if (match) piPurchase = match[1].trim();
         }
         if (!piPurchase && items.length > 0) {

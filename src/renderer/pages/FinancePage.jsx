@@ -96,7 +96,7 @@ export default function FinancePage() {
 
     if (val && val !== '-') {
       // Remove any Purchase No from this value
-      let cleanVal = val.replace(/\s*\/\s*Purchase(?:\s*No)?\s*[:=]\s*[^/\n;]+/i, '').trim();
+      let cleanVal = val.replace(/\s*\/\s*Purchase(?:\s*No)?\s*[:=]\s*[^\n;]+/i, '').trim();
       if (po && !cleanVal.toLowerCase().includes('order:') && !cleanVal.toLowerCase().includes('po:') && !cleanVal.includes(po)) {
         cleanVal = `Order: ${po} / ` + cleanVal.replace(/^Style:\s*/i, 'Style: ');
       }
@@ -117,7 +117,7 @@ export default function FinancePage() {
     if (pi.purchase_no) return String(pi.purchase_no).trim();
     if (pi.purchaseNo) return String(pi.purchaseNo).trim();
     if (pi.notes) {
-      const match = String(pi.notes).match(/Purchase(?:\s*No)?\s*[:=]\s*([^/\n;]+)/i);
+      const match = String(pi.notes).match(/Purchase(?:\s*No)?\s*[:=]\s*([^\n;]+)/i);
       if (match && match[1]) return match[1].trim();
     }
     if (pi.items && pi.items.length > 0) {
@@ -1166,18 +1166,7 @@ export default function FinancePage() {
                   )}
                 </div>
 
-                <div>
-                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 4 }}>
-                    Purchase Order No. / Purchase No.
-                  </label>
-                  <input
-                    type="text"
-                    value={purchaseNumber}
-                    onChange={e => setPurchaseNumber(e.target.value)}
-                    placeholder="e.g. KAD#01849/2026 (Optional)"
-                    style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 13, background: 'var(--bg-base)' }}
-                  />
-                </div>
+
 
                 <div>
                   <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 4 }}>

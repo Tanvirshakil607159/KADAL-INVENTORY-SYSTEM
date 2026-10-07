@@ -26,12 +26,24 @@ const useStore = create((set, get) => ({
   },
 
   // Navigation & Landing
-  showLanding: true,
-  setShowLanding: (showLanding) => set({ showLanding, sidebarOpen: false }),
-  goHome: () => set({ showLanding: true, sidebarOpen: false }),
-  openApp: () => set({ showLanding: false, sidebarOpen: false }),
-  currentPage: 'dashboard',
-  setPage: (page) => set({ currentPage: page, sidebarOpen: false }),
+  showLanding: sessionStorage.getItem('kadal_showLanding') !== null ? JSON.parse(sessionStorage.getItem('kadal_showLanding')) : true,
+  setShowLanding: (showLanding) => {
+    sessionStorage.setItem('kadal_showLanding', JSON.stringify(showLanding));
+    set({ showLanding, sidebarOpen: false });
+  },
+  goHome: () => {
+    sessionStorage.setItem('kadal_showLanding', 'true');
+    set({ showLanding: true, sidebarOpen: false });
+  },
+  openApp: () => {
+    sessionStorage.setItem('kadal_showLanding', 'false');
+    set({ showLanding: false, sidebarOpen: false });
+  },
+  currentPage: sessionStorage.getItem('kadal_currentPage') || 'dashboard',
+  setPage: (page) => {
+    sessionStorage.setItem('kadal_currentPage', page);
+    set({ currentPage: page, sidebarOpen: false });
+  },
   sidebarOpen: false,
   setSidebarOpen: (sidebarOpen) => set({ sidebarOpen }),
 

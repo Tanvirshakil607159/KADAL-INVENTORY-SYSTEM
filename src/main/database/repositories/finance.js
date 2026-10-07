@@ -79,14 +79,14 @@ function normalizePiItem(it, idx) {
 
   // If purchaseVal not explicitly provided, extract from poStyle string
   if (!purchaseVal && poStyle) {
-    const match = poStyle.match(/Purchase(?:\s*No)?\s*[:=]\s*([^/\n;]+)/i);
+    const match = poStyle.match(/Purchase(?:\s*No)?\s*[:=]\s*([^\n;]+)/i);
     if (match) purchaseVal = match[1].trim();
   }
 
   // Build clean poStyleClean for dedicated Order & Style column
   let poStyleClean = poStyle;
   if (poStyleClean && poStyleClean !== '-') {
-    poStyleClean = poStyleClean.replace(/\s*\/\s*Purchase(?:\s*No)?\s*[:=]\s*[^/\n;]+/i, '').trim();
+    poStyleClean = poStyleClean.replace(/\s*\/\s*Purchase(?:\s*No)?\s*[:=]\s*[^\n;]+/i, '').trim();
     if (poVal && !poStyleClean.toLowerCase().includes('order:') && !poStyleClean.toLowerCase().includes('po:') && !poStyleClean.includes(poVal)) {
       poStyleClean = `Order: ${poVal} / ` + poStyleClean.replace(/^Style:\s*/i, 'Style: ');
     }
@@ -141,7 +141,7 @@ function normalizePi(pi) {
   const items = rawItems.map((it, idx) => normalizePiItem(it, idx));
   let piPurchase = pi.purchase_no || pi.purchaseNo || '';
   if (!piPurchase && pi.notes) {
-    const match = pi.notes.match(/Purchase(?:\s*No)?\s*[:=]\s*([^/\n;]+)/i);
+    const match = pi.notes.match(/Purchase(?:\s*No)?\s*[:=]\s*([^\n;]+)/i);
     if (match) piPurchase = match[1].trim();
   }
   if (!piPurchase && items.length > 0) {

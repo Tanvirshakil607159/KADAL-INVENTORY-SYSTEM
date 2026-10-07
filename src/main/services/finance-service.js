@@ -43,13 +43,13 @@ const FinanceService = {
       let purchaseVal = it.purchase_no || it.purchaseNo || it.purchase_number || it.purchaseNumber || '';
 
       if (!purchaseVal && poStyle) {
-        const match = poStyle.match(/Purchase(?:\s*No)?\s*[:=]\s*([^/\n;]+)/i);
+        const match = poStyle.match(/Purchase(?:\s*No)?\s*[:=]\s*([^\n;]+)/i);
         if (match) purchaseVal = match[1].trim();
       }
 
       let poStyleClean = poStyle;
       if (poStyleClean && poStyleClean !== '-') {
-        poStyleClean = poStyleClean.replace(/\s*\/\s*Purchase(?:\s*No)?\s*[:=]\s*[^/\n;]+/i, '').trim();
+        poStyleClean = poStyleClean.replace(/\s*\/\s*Purchase(?:\s*No)?\s*[:=]\s*[^\n;]+/i, '').trim();
         if (poVal && !poStyleClean.toLowerCase().includes('po:') && !poStyleClean.includes(poVal)) {
           poStyleClean = `PO: ${poVal} / ` + poStyleClean.replace(/^Style:\s*/i, 'Style: ');
         }
