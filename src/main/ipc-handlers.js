@@ -951,8 +951,8 @@ function registerIpcHandlers() {
     return FinanceService.getPiReconciliation(id);
   }));
 
-  ipcMain.handle('finance:transferToBill', wrapHandler((id) => {
-    return FinanceService.transferPiToBill(id);
+  ipcMain.handle('finance:transferToBill', wrapHandler((id, customBillNumber, customBillDate) => {
+    return FinanceService.transferPiToBill(id, customBillNumber, customBillDate);
   }));
 
   console.log('[IPC] All handlers registered');

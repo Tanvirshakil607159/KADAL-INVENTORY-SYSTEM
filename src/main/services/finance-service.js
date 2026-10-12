@@ -181,9 +181,9 @@ const FinanceService = {
     return await FinanceRepo.getPiReconciliation(id);
   },
 
-  async transferPiToBill(id) {
+  async transferPiToBill(id, customBillNumber = null, customBillDate = null) {
     const user = await AuthService.getCurrentUser();
-    const res = await FinanceRepo.transferPiToBill(id);
+    const res = await FinanceRepo.transferPiToBill(id, customBillNumber, customBillDate);
     await AuditLogsRepo.create({
       userId: user?.id,
       action: 'UPDATE',

@@ -13,9 +13,24 @@ import ProformaInvoicePrintView from '../components/finance/ProformaInvoicePrint
 export default function FinancePage() {
   const { addToast, user, showConfirm } = useStore();
 
+  const userPerms = useMemo(() => {
+    return typeof user?.permissions === 'string' ? JSON.parse(user.permissions) : (user?.permissions || {});
+  }, [user]);
+
+  const canAccessPi = user?.roleName === 'Super Admin' || user?.roleName === 'Admin' || (userPerms.finance_pi !== 'none' && userPerms.finance_pi !== false);
+  const canAccessBills = user?.roleName === 'Super Admin' || user?.roleName === 'Admin' || (userPerms.finance_bill !== 'none' && userPerms.finance_bill !== false);
+
   // Primary section: 'pi' (Proforma Invoices) or 'bills' (Commercial Bills)
-  const [activeSection, setActiveSection] = useState('pi');
+  const [activeSection, setActiveSection] = useState(() => (!canAccessPi && canAccessBills) ? 'bills' : 'pi');
   
+  useEffect(() => {
+    if (!canAccessPi && canAccessBills && activeSection !== 'bills') {
+      setActiveSection('bills');
+    } else if (canAccessPi && !canAccessBills && activeSection !== 'pi') {
+      setActiveSection('pi');
+    }
+  }, [canAccessPi, canAccessBills, activeSection]);
+
   // Under 'pi': 'orders' (PI list & reconciliation) or 'create' (create PI pre-production)
   const [piSubTab, setPiSubTab] = useState('orders');
 
@@ -44,6 +59,7 @@ export default function FinancePage() {
   const [buyersList, setBuyersList] = useState([]);
   const [customBuyerMode, setCustomBuyerMode] = useState(false);
   const [piNumber, setPiNumber] = useState('');
+  const [isPiNumberCustom, setIsPiNumberCustom] = useState(false);
   const [purchaseNumber, setPurchaseNumber] = useState('');
   const [piDate, setPiDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [currency, setCurrency] = useState('USD');
@@ -59,6 +75,21 @@ export default function FinancePage() {
   const [reconciliationData, setReconciliationData] = useState(null);
   const [loadingRecon, setLoadingRecon] = useState(false);
   const [transferring, setTransferring] = useState(false);
+
+  // ==================== USER DEFINED BILL & PI MODALS ====================
+  const [transferModalOpen, setTransferModalOpen] = useState(false);
+  const [transferPiTarget, setTransferPiTarget] = useState(null);
+  const [customBillNumber, setCustomBillNumber] = useState('');
+  const [customBillDate, setCustomBillDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [generatingBillNo, setGeneratingBillNo] = useState(false);
+
+  const [editPiModal, setEditPiModal] = useState(null);
+  const [editPiNumberValue, setEditPiNumberValue] = useState('');
+  const [savingEditPi, setSavingEditPi] = useState(false);
+
+  const [editBillModal, setEditBillModal] = useState(null);
+  const [editBillNumberValue, setEditBillNumberValue] = useState('');
+  const [savingEditBill, setSavingEditBill] = useState(false);
 
   // ==================== PREVIEW PRINT STATE ====================
   const [previewPi, setPreviewPi] = useState(null);
@@ -244,11 +275,14 @@ export default function FinancePage() {
   }, [itemPickerIndex, itemSearchQuery]);
 
   // Auto-generate next PI number
-  const generateNextPiNumber = useCallback(async (applicant = '') => {
+  const generateNextPiNumber = useCallback(async (applicant = '', force = false) => {
     try {
       const nextPi = await window.kadal.finance.getNextNumber(applicant);
       const pNum = nextPi?.success ? nextPi.data : (typeof nextPi === 'string' ? nextPi : '');
-      if (pNum) setPiNumber(pNum);
+      if (pNum) {
+        setPiNumber(pNum);
+        setIsPiNumberCustom(false);
+      }
     } catch (e) {
       console.error('Failed to generate PI number:', e);
     }
@@ -293,12 +327,12 @@ export default function FinancePage() {
     loadInitialData();
   }, [loadInitialData]);
 
-  // Auto-generate PI number when opening Create tab
+  // Auto-generate PI number when opening Create tab if not already defined
   useEffect(() => {
-    if (piSubTab === 'create' && !piNumber) {
+    if (piSubTab === 'create' && !piNumber && !isPiNumberCustom) {
       generateNextPiNumber(applicantName);
     }
-  }, [piSubTab, piNumber, applicantName, generateNextPiNumber]);
+  }, [piSubTab, piNumber, isPiNumberCustom, applicantName, generateNextPiNumber]);
 
   // Handle Recipient selection in Create PI
   const handleRecipientChange = async (recId) => {
@@ -309,11 +343,16 @@ export default function FinancePage() {
     if (rec) {
       setApplicantName(rec.name);
       setApplicantAddress(rec.receiver_address || '');
-      await generateNextPiNumber(rec.name);
+      // Only auto-generate if user hasn't explicitly entered a custom PI number
+      if (!isPiNumberCustom && !piNumber) {
+        await generateNextPiNumber(rec.name);
+      }
     } else {
       setApplicantName('K.A. DESIGN WEAR LTD.');
       setApplicantAddress('308/1 Tilargati, Tongi, Gazipur-1712, Bangladesh.');
-      await generateNextPiNumber('K.A. DESIGN WEAR LTD.');
+      if (!isPiNumberCustom && !piNumber) {
+        await generateNextPiNumber('K.A. DESIGN WEAR LTD.');
+      }
     }
   };
 
@@ -524,25 +563,46 @@ export default function FinancePage() {
     }
   };
 
-  // Transfer PI to Bill
-  const handleTransferToBill = async (piId) => {
-    const confirmed = await showConfirm({
-      title: 'Transfer PI to Commercial Bill',
-      message: 'All order quantities have been 100% received from recipient side. Do you want to convert this Proforma Invoice into a finalized Commercial Bill?',
-      confirmText: 'Transfer to Bill',
-      cancelText: 'Cancel',
-      type: 'info'
-    });
-    if (!confirmed) return;
+  // Open User-Defined Transfer Modal
+  const handleOpenTransferModal = async (pi) => {
+    if (!pi) return;
+    setTransferPiTarget(pi);
+    setCustomBillDate(new Date().toISOString().split('T')[0]);
+    setTransferModalOpen(true);
+    setGeneratingBillNo(true);
+    try {
+      const nextBill = await window.kadal.finance.getNextBillNumber(pi.applicant_name);
+      const bNum = nextBill?.success ? nextBill.data : (typeof nextBill === 'string' ? nextBill : '');
+      setCustomBillNumber(bNum || '');
+    } catch (e) {
+      setCustomBillNumber('');
+    } finally {
+      setGeneratingBillNo(false);
+    }
+  };
+
+  // Confirm Transfer PI to Commercial Bill with User Defined Number
+  const handleConfirmTransferToBill = async () => {
+    if (!transferPiTarget) return;
+    if (!customBillNumber.trim()) {
+      addToast('error', 'Please enter a Commercial Bill Number');
+      return;
+    }
 
     setTransferring(true);
     try {
-      const res = await window.kadal.finance.transferToBill(piId);
-      if (res?.success) {
-        addToast('success', `Transferred to Bill #${res.data?.billNumber || res.billNumber}!`);
+      const res = await window.kadal.finance.transferToBill(
+        transferPiTarget.id,
+        customBillNumber.trim(),
+        customBillDate
+      );
+      if (res?.success || res?.billNumber || res?.data?.billNumber) {
+        const finalNum = res?.billNumber || res?.data?.billNumber || customBillNumber.trim();
+        addToast('success', `Transferred to Commercial Bill #${finalNum}!`);
+        setTransferModalOpen(false);
+        setTransferPiTarget(null);
         setReconciliationModalPi(null);
         await loadInitialData();
-        // Switch to Bills view so user can see and print the new Bill
         setActiveSection('bills');
       } else {
         addToast('error', res?.error || 'Failed to transfer to bill');
@@ -551,6 +611,64 @@ export default function FinancePage() {
       addToast('error', e.message || 'Error transferring to bill');
     } finally {
       setTransferring(false);
+    }
+  };
+
+  // Backwards compatible wrapper for Transfer
+  const handleTransferToBill = async (piId) => {
+    const targetPi = reconciliationModalPi || records.find(r => r.id === piId);
+    if (targetPi) {
+      await handleOpenTransferModal(targetPi);
+    }
+  };
+
+  // Save User Defined PI Number
+  const handleSaveEditPiNumber = async () => {
+    if (!editPiModal || !editPiNumberValue.trim()) {
+      addToast('error', 'Proforma Invoice Number cannot be empty');
+      return;
+    }
+    setSavingEditPi(true);
+    try {
+      const res = await window.kadal.finance.update(editPiModal.id, {
+        piNumber: editPiNumberValue.trim()
+      });
+      if (res?.success) {
+        addToast('success', `PI Number updated to "${editPiNumberValue.trim()}"`);
+        setEditPiModal(null);
+        await loadInitialData();
+      } else {
+        addToast('error', res?.error || 'Failed to update PI number');
+      }
+    } catch (e) {
+      addToast('error', e.message || 'Error updating PI number');
+    } finally {
+      setSavingEditPi(false);
+    }
+  };
+
+  // Save User Defined Commercial Bill Number
+  const handleSaveEditBillNumber = async () => {
+    if (!editBillModal || !editBillNumberValue.trim()) {
+      addToast('error', 'Commercial Bill Number cannot be empty');
+      return;
+    }
+    setSavingEditBill(true);
+    try {
+      const res = await window.kadal.finance.update(editBillModal.id, {
+        billNumber: editBillNumberValue.trim()
+      });
+      if (res?.success) {
+        addToast('success', `Commercial Bill Number updated to "${editBillNumberValue.trim()}"`);
+        setEditBillModal(null);
+        await loadInitialData();
+      } else {
+        addToast('error', res?.error || 'Failed to update Commercial Bill number');
+      }
+    } catch (e) {
+      addToast('error', e.message || 'Error updating Commercial Bill number');
+    } finally {
+      setSavingEditBill(false);
     }
   };
 
@@ -744,67 +862,71 @@ export default function FinancePage() {
 
       {/* Main Navigation: PI vs Commercial Bills */}
       <div style={{ display: 'flex', gap: 10, borderBottom: '2px solid var(--border)', marginBottom: 24 }}>
-        <button
-          onClick={() => setActiveSection('pi')}
-          style={{
-            padding: '12px 20px',
-            background: 'none',
-            border: 'none',
-            borderBottom: activeSection === 'pi' ? '3px solid var(--primary)' : '3px solid transparent',
-            color: activeSection === 'pi' ? 'var(--primary)' : 'var(--text-muted)',
-            fontWeight: 700,
-            fontSize: 15,
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            transition: 'all 0.15s ease'
-          }}
-        >
-          <FileText size={18} />
-          Proforma Invoices (PI)
-          <span style={{ 
-            fontSize: 11, padding: '2px 8px', borderRadius: 10, 
-            background: activeSection === 'pi' ? 'rgba(99,102,241,0.15)' : 'var(--border)', 
-            color: activeSection === 'pi' ? 'var(--primary)' : 'var(--text-muted)' 
-          }}>
-            {piStats.totalPis}
-          </span>
-        </button>
+        {canAccessPi && (
+          <button
+            onClick={() => setActiveSection('pi')}
+            style={{
+              padding: '12px 20px',
+              background: 'none',
+              border: 'none',
+              borderBottom: activeSection === 'pi' ? '3px solid var(--primary)' : '3px solid transparent',
+              color: activeSection === 'pi' ? 'var(--primary)' : 'var(--text-muted)',
+              fontWeight: 700,
+              fontSize: 15,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              transition: 'all 0.15s ease'
+            }}
+          >
+            <FileText size={18} />
+            Proforma Invoices (PI)
+            <span style={{ 
+              fontSize: 11, padding: '2px 8px', borderRadius: 10, 
+              background: activeSection === 'pi' ? 'rgba(99,102,241,0.15)' : 'var(--border)', 
+              color: activeSection === 'pi' ? 'var(--primary)' : 'var(--text-muted)' 
+            }}>
+              {piStats.totalPis}
+            </span>
+          </button>
+        )}
 
-        <button
-          onClick={() => setActiveSection('bills')}
-          style={{
-            padding: '12px 20px',
-            background: 'none',
-            border: 'none',
-            borderBottom: activeSection === 'bills' ? '3px solid var(--primary)' : '3px solid transparent',
-            color: activeSection === 'bills' ? 'var(--primary)' : 'var(--text-muted)',
-            fontWeight: 700,
-            fontSize: 15,
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            transition: 'all 0.15s ease'
-          }}
-        >
-          <Landmark size={18} />
-          Commercial Bills & Invoices
-          <span style={{ 
-            fontSize: 11, padding: '2px 8px', borderRadius: 10, 
-            background: activeSection === 'bills' ? 'rgba(99,102,241,0.15)' : 'var(--border)', 
-            color: activeSection === 'bills' ? 'var(--primary)' : 'var(--text-muted)' 
-          }}>
-            {billsList.length}
-          </span>
-        </button>
+        {canAccessBills && (
+          <button
+            onClick={() => setActiveSection('bills')}
+            style={{
+              padding: '12px 20px',
+              background: 'none',
+              border: 'none',
+              borderBottom: activeSection === 'bills' ? '3px solid var(--primary)' : '3px solid transparent',
+              color: activeSection === 'bills' ? 'var(--primary)' : 'var(--text-muted)',
+              fontWeight: 700,
+              fontSize: 15,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              transition: 'all 0.15s ease'
+            }}
+          >
+            <Landmark size={18} />
+            Commercial Bills & Invoices
+            <span style={{ 
+              fontSize: 11, padding: '2px 8px', borderRadius: 10, 
+              background: activeSection === 'bills' ? 'rgba(99,102,241,0.15)' : 'var(--border)', 
+              color: activeSection === 'bills' ? 'var(--primary)' : 'var(--text-muted)' 
+            }}>
+              {billsList.length}
+            </span>
+          </button>
+        )}
       </div>
 
       {/* ========================================================================= */}
       {/* SECTION 1: PROFORMA INVOICES (PI) */}
       {/* ========================================================================= */}
-      {activeSection === 'pi' && (
+      {activeSection === 'pi' && canAccessPi && (
         <div>
           {/* Subtabs for PI */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
@@ -1015,6 +1137,16 @@ export default function FinancePage() {
                                 </button>
                                 <button
                                   className="btn btn-ghost btn-sm btn-icon"
+                                  onClick={() => {
+                                    setEditPiModal(pi);
+                                    setEditPiNumberValue(pi.pi_number || '');
+                                  }}
+                                  title="Edit PI Number (User Defined)"
+                                >
+                                  <Edit3 size={15} />
+                                </button>
+                                <button
+                                  className="btn btn-ghost btn-sm btn-icon"
                                   onClick={async () => {
                                     try {
                                       const res = await window.kadal.finance.exportPdf(pi.id || pi);
@@ -1088,15 +1220,28 @@ export default function FinancePage() {
 
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                    <label style={{ fontSize: 12, fontWeight: 600, margin: 0 }}>
-                      Proforma Invoice No. *
-                    </label>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <label style={{ fontSize: 12, fontWeight: 600, margin: 0 }}>
+                        Proforma Invoice No. *
+                      </label>
+                      <span style={{ 
+                        fontSize: 10, padding: '1px 6px', borderRadius: 4, 
+                        background: isPiNumberCustom ? 'rgba(16,185,129,0.12)' : 'rgba(99,102,241,0.12)', 
+                        color: isPiNumberCustom ? '#059669' : '#6366f1', 
+                        fontWeight: 600 
+                      }}>
+                        {isPiNumberCustom ? 'User Defined' : 'Auto Generated'}
+                      </span>
+                    </div>
                     <button
                       type="button"
                       className="btn btn-ghost btn-sm"
                       style={{ fontSize: 11, padding: '0 4px', height: 'auto', color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: 4 }}
-                      onClick={() => generateNextPiNumber(applicantName)}
-                      title="Auto-generate next number"
+                      onClick={() => {
+                        setIsPiNumberCustom(false);
+                        generateNextPiNumber(applicantName, true);
+                      }}
+                      title="Auto-generate next suggested number"
                     >
                       <RefreshCw size={11} /> Auto-Generate
                     </button>
@@ -1104,8 +1249,11 @@ export default function FinancePage() {
                   <input
                     type="text"
                     value={piNumber}
-                    onChange={e => setPiNumber(e.target.value)}
-                    placeholder="Auto-generating..."
+                    onChange={e => {
+                      setPiNumber(e.target.value);
+                      setIsPiNumberCustom(true);
+                    }}
+                    placeholder="Enter user-defined PI Number or click Auto-Generate..."
                     style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 13, fontWeight: 600, fontFamily: 'monospace', background: 'var(--bg-base)' }}
                   />
                 </div>
@@ -1596,7 +1744,7 @@ export default function FinancePage() {
       {/* ========================================================================= */}
       {/* SECTION 2: COMMERCIAL BILLS & INVOICES */}
       {/* ========================================================================= */}
-      {activeSection === 'bills' && (
+      {activeSection === 'bills' && canAccessBills && (
         <div>
           {/* Bills Header Bar */}
           <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, padding: 14, marginBottom: 20 }}>
@@ -1687,6 +1835,17 @@ export default function FinancePage() {
                       </td>
                       <td style={{ padding: '12px 16px', textAlign: 'right' }}>
                         <div style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                          <button
+                            className="btn btn-outline btn-sm"
+                            onClick={() => {
+                              setEditBillModal(b);
+                              setEditBillNumberValue(b.bill_number || '');
+                            }}
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                            title="Edit Commercial Bill Number (User Defined)"
+                          >
+                            <Edit3 size={13} /> Edit Bill #
+                          </button>
                           <button
                             className="btn btn-primary btn-sm"
                             onClick={() => handlePreview(b, 'bill')}
@@ -2389,6 +2548,203 @@ export default function FinancePage() {
               <button className="btn btn-outline btn-sm" onClick={() => { setItemPickerIndex(null); setItemSearchQuery(''); }}>
                 Cancel
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* TRANSFER TO COMMERCIAL BILL MODAL (USER DEFINED BILL NUMBER) */}
+      {/* ========================================================================= */}
+      {transferModalOpen && transferPiTarget && (
+        <div className="modal-backdrop" style={{ 
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 1200, 
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 
+        }}>
+          <div style={{ 
+            background: 'var(--bg-card, #ffffff)', borderRadius: 12, width: '100%', maxWidth: 540, 
+            boxShadow: '0 25px 50px -12px rgba(0,0,0,0.3)', overflow: 'hidden' 
+          }}>
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Landmark size={20} color="var(--primary)" />
+                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Transfer to Commercial Bill</h3>
+              </div>
+              <button className="btn btn-ghost btn-sm btn-icon" onClick={() => setTransferModalOpen(false)}>
+                <X size={16} />
+              </button>
+            </div>
+
+            <div style={{ padding: 20 }}>
+              <div style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: 8, padding: 12, marginBottom: 16, fontSize: 12 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  <div><span style={{ color: 'var(--text-muted)' }}>Proforma Invoice:</span> <strong>{transferPiTarget.pi_number}</strong></div>
+                  <div><span style={{ color: 'var(--text-muted)' }}>Applicant:</span> <strong>{transferPiTarget.applicant_name}</strong></div>
+                  <div><span style={{ color: 'var(--text-muted)' }}>Buyer:</span> <strong>{transferPiTarget.buyer || '-'}</strong></div>
+                  <div><span style={{ color: 'var(--text-muted)' }}>Amount:</span> <strong style={{ color: 'var(--success, #10b981)' }}>{transferPiTarget.currency_symbol || '$'} {Number(transferPiTarget.total_amount || 0).toFixed(2)}</strong></div>
+                </div>
+              </div>
+
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                  <label style={{ fontSize: 13, fontWeight: 600, margin: 0 }}>
+                    Commercial Bill Number (User Defined) *
+                  </label>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    disabled={generatingBillNo}
+                    onClick={async () => {
+                      setGeneratingBillNo(true);
+                      try {
+                        const nextBill = await window.kadal.finance.getNextBillNumber(transferPiTarget.applicant_name);
+                        const bNum = nextBill?.success ? nextBill.data : (typeof nextBill === 'string' ? nextBill : '');
+                        if (bNum) setCustomBillNumber(bNum);
+                      } catch (e) {}
+                      finally { setGeneratingBillNo(false); }
+                    }}
+                    style={{ fontSize: 11, padding: '2px 6px', height: 'auto', color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: 4 }}
+                  >
+                    <RefreshCw size={11} className={generatingBillNo ? 'spin' : ''} /> Auto-Generate
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  value={customBillNumber}
+                  onChange={e => setCustomBillNumber(e.target.value)}
+                  placeholder="e.g. KA/KADWL/KADAL/2026/1 or custom sequence..."
+                  style={{ width: '100%', padding: '10px 12px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 14, fontWeight: 600, fontFamily: 'monospace', background: 'var(--bg-base)' }}
+                />
+                <small style={{ display: 'block', color: 'var(--text-muted)', marginTop: 4, fontSize: 11 }}>
+                  You can enter your custom accounting bill number or use the auto-generated format.
+                </small>
+              </div>
+
+              <div style={{ marginBottom: 20 }}>
+                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
+                  Commercial Bill Date *
+                </label>
+                <input
+                  type="date"
+                  value={customBillDate}
+                  onChange={e => setCustomBillDate(e.target.value)}
+                  style={{ width: '100%', padding: '8px 12px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 13 }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+                <button className="btn btn-outline" onClick={() => setTransferModalOpen(false)} disabled={transferring}>
+                  Cancel
+                </button>
+                <button 
+                  className="btn btn-primary" 
+                  onClick={handleConfirmTransferToBill}
+                  disabled={transferring || !customBillNumber.trim()}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700 }}
+                >
+                  <CheckCircle size={16} /> {transferring ? 'Transferring...' : 'Confirm & Transfer to Bill'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* EDIT PI NUMBER MODAL (USER DEFINED) */}
+      {/* ========================================================================= */}
+      {editPiModal && (
+        <div className="modal-backdrop" style={{ 
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 1200, 
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 
+        }}>
+          <div style={{ 
+            background: 'var(--bg-card, #ffffff)', borderRadius: 12, width: '100%', maxWidth: 460, 
+            boxShadow: '0 25px 50px -12px rgba(0,0,0,0.3)', overflow: 'hidden' 
+          }}>
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Edit3 size={18} color="var(--primary)" />
+                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Edit PI Number (User Defined)</h3>
+              </div>
+              <button className="btn btn-ghost btn-sm btn-icon" onClick={() => setEditPiModal(null)}>
+                <X size={16} />
+              </button>
+            </div>
+            <div style={{ padding: 20 }}>
+              <p style={{ margin: '0 0 12px 0', fontSize: 12, color: 'var(--text-muted)' }}>
+                Applicant: <strong>{editPiModal.applicant_name}</strong>
+              </p>
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
+                  Proforma Invoice Number *
+                </label>
+                <input
+                  type="text"
+                  value={editPiNumberValue}
+                  onChange={e => setEditPiNumberValue(e.target.value)}
+                  placeholder="Enter user-defined PI Number..."
+                  style={{ width: '100%', padding: '10px 12px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 14, fontWeight: 600, fontFamily: 'monospace', background: 'var(--bg-base)' }}
+                />
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+                <button className="btn btn-outline btn-sm" onClick={() => setEditPiModal(null)} disabled={savingEditPi}>
+                  Cancel
+                </button>
+                <button className="btn btn-primary btn-sm" onClick={handleSaveEditPiNumber} disabled={savingEditPi || !editPiNumberValue.trim()}>
+                  {savingEditPi ? 'Saving...' : 'Update PI Number'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* EDIT COMMERCIAL BILL NUMBER MODAL (USER DEFINED) */}
+      {/* ========================================================================= */}
+      {editBillModal && (
+        <div className="modal-backdrop" style={{ 
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 1200, 
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 
+        }}>
+          <div style={{ 
+            background: 'var(--bg-card, #ffffff)', borderRadius: 12, width: '100%', maxWidth: 460, 
+            boxShadow: '0 25px 50px -12px rgba(0,0,0,0.3)', overflow: 'hidden' 
+          }}>
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Edit3 size={18} color="var(--primary)" />
+                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Edit Commercial Bill Number</h3>
+              </div>
+              <button className="btn btn-ghost btn-sm btn-icon" onClick={() => setEditBillModal(null)}>
+                <X size={16} />
+              </button>
+            </div>
+            <div style={{ padding: 20 }}>
+              <p style={{ margin: '0 0 12px 0', fontSize: 12, color: 'var(--text-muted)' }}>
+                Applicant: <strong>{editBillModal.applicant_name}</strong>
+              </p>
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
+                  Commercial Bill Number *
+                </label>
+                <input
+                  type="text"
+                  value={editBillNumberValue}
+                  onChange={e => setEditBillNumberValue(e.target.value)}
+                  placeholder="e.g. KA/KADWL/KADAL/2026/1 or custom..."
+                  style={{ width: '100%', padding: '10px 12px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 14, fontWeight: 600, fontFamily: 'monospace', background: 'var(--bg-base)' }}
+                />
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+                <button className="btn btn-outline btn-sm" onClick={() => setEditBillModal(null)} disabled={savingEditBill}>
+                  Cancel
+                </button>
+                <button className="btn btn-primary btn-sm" onClick={handleSaveEditBillNumber} disabled={savingEditBill || !editBillNumberValue.trim()}>
+                  {savingEditBill ? 'Saving...' : 'Update Bill Number'}
+                </button>
+              </div>
             </div>
           </div>
         </div>

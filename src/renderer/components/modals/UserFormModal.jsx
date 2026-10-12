@@ -21,7 +21,9 @@ export default function UserFormModal({ data, onSaved }) {
         warehouses: form.perms.warehouses ? 'rw' : 'none',
         challan: form.perms.challan ? 'rw' : 'none',
         challan_receipt: form.perms.challan_receipt ? 'rw' : 'none',
-        finance: form.perms.finance ? 'rw' : 'none',
+        finance: (form.perms.finance || form.perms.finance_pi || form.perms.finance_bill) ? 'rw' : 'none',
+        finance_pi: form.perms.finance_pi ? 'rw' : 'none',
+        finance_bill: form.perms.finance_bill ? 'rw' : 'none',
         approvals: form.perms.approvals ? 'rw' : 'none',
         gate_pass: form.perms.gate_pass ? 'rw' : 'none',
         requisition: form.perms.requisition ? 'rw' : 'none',
@@ -39,6 +41,7 @@ export default function UserFormModal({ data, onSaved }) {
         settings_sync: form.perms.settings_sync ? 'rw' : 'none',
         settings_recipients: form.perms.settings_recipients ? 'rw' : 'none',
         settings_system: form.perms.settings_system ? 'rw' : 'none',
+        settings_appearance: form.perms.settings_appearance ? 'rw' : 'none',
         backup: form.perms.backup ? 'rw' : 'none',
         maintenance: form.perms.backup ? 'rw' : 'none' // keep for backward compatibility
       });
@@ -86,18 +89,21 @@ export default function UserFormModal({ data, onSaved }) {
             <select className="form-select" value={form.roleId} onChange={e => {
               const rid = parseInt(e.target.value);
               const role = roles.find(r => r.id === rid);
-              let newPerms = { dashboard: false, inventory: false, pending_items: false, warehouses: false, challan: false, approvals: false, gate_pass: false, requisition: false, issue: false, production: false, reports: false, settings: false, settings_company: false, settings_users: false, settings_categories: false, settings_units: false, settings_suppliers: false, settings_buyers: false, settings_import: false, settings_sync: false, settings_recipients: false, settings_system: false, backup: false };
+              let newPerms = { dashboard: false, inventory: false, pending_items: false, warehouses: false, challan: false, approvals: false, gate_pass: false, requisition: false, issue: false, production: false, reports: false, settings: false, settings_company: false, settings_users: false, settings_categories: false, settings_units: false, settings_suppliers: false, settings_buyers: false, settings_import: false, settings_sync: false, settings_recipients: false, settings_system: false, settings_appearance: true, backup: false, finance: false, finance_pi: false, finance_bill: false };
               if (role) {
                 try {
                   const p = JSON.parse(role.permissions);
                   const s = p.settings === 'rw' || p.settings === true;
+                  const fin = p.finance === 'rw' || p.finance === true;
                   newPerms = {
                     dashboard: p.dashboard === 'rw' || p.dashboard === true,
                     inventory: p.inventory === 'rw' || p.inventory === true,
                     pending_items: p.pending_items === 'rw' || p.pending_items === true,
                     warehouses: p.warehouses === 'rw' || p.warehouses === true,
                     challan: p.challan === 'rw' || p.challan === true,
-                    finance: p.finance === 'rw' || p.finance === true,
+                    finance: fin,
+                    finance_pi: Object.hasOwn(p, 'finance_pi') ? (p.finance_pi === 'rw' || p.finance_pi === true) : fin,
+                    finance_bill: Object.hasOwn(p, 'finance_bill') ? (p.finance_bill === 'rw' || p.finance_bill === true) : fin,
                     approvals: p.approvals === 'rw' || p.approvals === true,
                     gate_pass: p.gate_pass === 'rw' || p.gate_pass === true,
                     requisition: p.requisition === 'rw' || p.requisition === true,
@@ -106,6 +112,7 @@ export default function UserFormModal({ data, onSaved }) {
                     reports: p.reports === 'r' || p.reports === 'rw' || p.reports === true,
                     settings: s,
                     settings_company: Object.hasOwn(p, 'settings_company') ? (p.settings_company === 'rw' || p.settings_company === true) : s,
+                    settings_appearance: Object.hasOwn(p, 'settings_appearance') ? (p.settings_appearance === 'rw' || p.settings_appearance === true) : true,
                     settings_users: Object.hasOwn(p, 'settings_users') ? (p.settings_users === 'rw' || p.settings_users === true) : s,
                     settings_categories: Object.hasOwn(p, 'settings_categories') ? (p.settings_categories === 'rw' || p.settings_categories === true) : s,
                     settings_units: Object.hasOwn(p, 'settings_units') ? (p.settings_units === 'rw' || p.settings_units === true) : s,
@@ -151,7 +158,22 @@ export default function UserFormModal({ data, onSaved }) {
                 <input type="checkbox" checked={form.perms.challan_receipt} onChange={e=>setForm(f=>({...f, perms: {...f.perms, challan_receipt: e.target.checked}}))} /> Challan Receipt (Receiver)
               </label>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
-                <input type="checkbox" checked={form.perms.finance} onChange={e=>setForm(f=>({...f, perms: {...f.perms, finance: e.target.checked}}))} /> Finance (PI & Bill)
+                <input type="checkbox" checked={form.perms.finance} onChange={e=>{
+                  const val = e.target.checked;
+                  setForm(f=>({...f, perms: {...f.perms, finance: val, finance_pi: val, finance_bill: val}}));
+                }} /> Finance (All)
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+                <input type="checkbox" checked={form.perms.finance_pi} onChange={e=>{
+                  const val = e.target.checked;
+                  setForm(f=>({...f, perms: {...f.perms, finance_pi: val, finance: val || f.perms.finance_bill}}));
+                }} /> ↳ PI (Proforma)
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+                <input type="checkbox" checked={form.perms.finance_bill} onChange={e=>{
+                  const val = e.target.checked;
+                  setForm(f=>({...f, perms: {...f.perms, finance_bill: val, finance: val || f.perms.finance_pi}}));
+                }} /> ↳ Commercial Bill
               </label>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
                 <input type="checkbox" checked={form.perms.approvals} onChange={e=>setForm(f=>({...f, perms: {...f.perms, approvals: e.target.checked}}))} /> Approvals
@@ -215,6 +237,9 @@ export default function UserFormModal({ data, onSaved }) {
               </label>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
                 <input type="checkbox" checked={form.perms.settings_system} onChange={e=>setForm(f=>({...f, perms: {...f.perms, settings_system: e.target.checked}}))} /> System Update
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+                <input type="checkbox" checked={form.perms.settings_appearance !== false} onChange={e=>setForm(f=>({...f, perms: {...f.perms, settings_appearance: e.target.checked}}))} /> Appearance
               </label>
             </div>
           </div>

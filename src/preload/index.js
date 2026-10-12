@@ -297,7 +297,7 @@ contextBridge.exposeInMainWorld('kadal', {
     getUsedChallanIds: () => ipcRenderer.invoke('finance:getUsedChallanIds'),
     exportPdf: (id) => ipcRenderer.invoke('finance:exportPdf', id),
     getPiReconciliation: (id) => ipcRenderer.invoke('finance:getPiReconciliation', id),
-    transferToBill: (id) => ipcRenderer.invoke('finance:transferToBill', id),
+    transferToBill: (id, customBillNumber, customBillDate) => ipcRenderer.invoke('finance:transferToBill', id, customBillNumber, customBillDate),
   },
 
 });

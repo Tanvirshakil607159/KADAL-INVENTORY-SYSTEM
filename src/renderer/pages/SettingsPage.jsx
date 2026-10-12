@@ -21,12 +21,12 @@ export default function SettingsPage() {
   const { user } = useStore();
 
   const availableTabs = TABS.filter(t => {
-    if (t.id === 'appearance') return true;
     if (user?.roleName === 'Super Admin') return true;
-    const p = user?.permissions || {};
+    const p = typeof user?.permissions === 'string' ? JSON.parse(user.permissions) : (user?.permissions || {});
     if (Object.hasOwn(p, `settings_${t.id}`)) {
       return p[`settings_${t.id}`] === 'rw' || p[`settings_${t.id}`] === true;
     }
+    if (t.id === 'appearance') return true;
     if (p.settings === 'rw' || p.settings === true) return true;
     return t.id === 'system';
   });
@@ -230,6 +230,10 @@ function UserSettings() {
         pending_items: rawPerms.pending_items === 'rw' || rawPerms.pending_items === true,
         warehouses: rawPerms.warehouses === 'rw' || rawPerms.warehouses === true,
         challan: rawPerms.challan === 'rw' || rawPerms.challan === true,
+        challan_receipt: rawPerms.challan_receipt === 'rw' || rawPerms.challan_receipt === true,
+        finance: rawPerms.finance === 'rw' || rawPerms.finance === true,
+        finance_pi: Object.hasOwn(rawPerms, 'finance_pi') ? (rawPerms.finance_pi === 'rw' || rawPerms.finance_pi === true) : (rawPerms.finance === 'rw' || rawPerms.finance === true),
+        finance_bill: Object.hasOwn(rawPerms, 'finance_bill') ? (rawPerms.finance_bill === 'rw' || rawPerms.finance_bill === true) : (rawPerms.finance === 'rw' || rawPerms.finance === true),
         approvals: rawPerms.approvals === 'rw' || rawPerms.approvals === true,
         gate_pass: rawPerms.gate_pass === 'rw' || rawPerms.gate_pass === true,
         requisition: rawPerms.requisition === 'rw' || rawPerms.requisition === true,
@@ -237,6 +241,17 @@ function UserSettings() {
         production: rawPerms.production === 'rw' || rawPerms.production === true,
         reports: rawPerms.reports === 'r' || rawPerms.reports === 'rw' || rawPerms.reports === true,
         settings: rawPerms.settings === 'rw' || rawPerms.settings === true,
+        settings_company: Object.hasOwn(rawPerms, 'settings_company') ? (rawPerms.settings_company === 'rw' || rawPerms.settings_company === true) : (rawPerms.settings === 'rw' || rawPerms.settings === true),
+        settings_appearance: Object.hasOwn(rawPerms, 'settings_appearance') ? (rawPerms.settings_appearance === 'rw' || rawPerms.settings_appearance === true) : true,
+        settings_users: Object.hasOwn(rawPerms, 'settings_users') ? (rawPerms.settings_users === 'rw' || rawPerms.settings_users === true) : (rawPerms.settings === 'rw' || rawPerms.settings === true),
+        settings_categories: Object.hasOwn(rawPerms, 'settings_categories') ? (rawPerms.settings_categories === 'rw' || rawPerms.settings_categories === true) : (rawPerms.settings === 'rw' || rawPerms.settings === true),
+        settings_units: Object.hasOwn(rawPerms, 'settings_units') ? (rawPerms.settings_units === 'rw' || rawPerms.settings_units === true) : (rawPerms.settings === 'rw' || rawPerms.settings === true),
+        settings_suppliers: Object.hasOwn(rawPerms, 'settings_suppliers') ? (rawPerms.settings_suppliers === 'rw' || rawPerms.settings_suppliers === true) : (rawPerms.settings === 'rw' || rawPerms.settings === true),
+        settings_buyers: Object.hasOwn(rawPerms, 'settings_buyers') ? (rawPerms.settings_buyers === 'rw' || rawPerms.settings_buyers === true) : (rawPerms.settings === 'rw' || rawPerms.settings === true),
+        settings_import: Object.hasOwn(rawPerms, 'settings_import') ? (rawPerms.settings_import === 'rw' || rawPerms.settings_import === true) : (rawPerms.settings === 'rw' || rawPerms.settings === true),
+        settings_sync: Object.hasOwn(rawPerms, 'settings_sync') ? (rawPerms.settings_sync === 'rw' || rawPerms.settings_sync === true) : (rawPerms.settings === 'rw' || rawPerms.settings === true),
+        settings_recipients: Object.hasOwn(rawPerms, 'settings_recipients') ? (rawPerms.settings_recipients === 'rw' || rawPerms.settings_recipients === true) : (rawPerms.settings === 'rw' || rawPerms.settings === true),
+        settings_system: Object.hasOwn(rawPerms, 'settings_system') ? (rawPerms.settings_system === 'rw' || rawPerms.settings_system === true) : (rawPerms.settings === 'rw' || rawPerms.settings === true),
         backup: rawPerms.backup === 'rw' || rawPerms.maintenance === 'rw' || rawPerms.backup === true
       };
     } catch (e) { }

@@ -88,7 +88,7 @@ export const webBridge = {
       const { data: user, error } = await supabase
         .from('users')
         .select('*, roles(name, permissions)')
-        .eq('username', username)
+        .ilike('username', username)
         .maybeSingle();
 
       if (error) throw error;
@@ -1607,6 +1607,7 @@ export const webBridge = {
       const supabase = getSupabase();
       if (!supabase) throw new Error('Database not connected');
       const updateData = {};
+      if (data.piNumber !== undefined) updateData.pi_number = data.piNumber;
       if (data.billNumber !== undefined) updateData.bill_number = data.billNumber;
       if (data.piDate !== undefined) updateData.pi_date = data.piDate;
       if (data.billDate !== undefined) updateData.bill_date = data.billDate;
@@ -1776,7 +1777,7 @@ export const webBridge = {
 
     getNextBillNumber: (applicantName) => wrap(async () => {
       const supabase = getSupabase();
-      if (!supabase) return 'BILL-001';
+      if (!supabase) return 'KA/BILL-001';
       const year = new Date().getFullYear();
       let prefix = 'KADAL';
       if (applicantName) {
@@ -1786,14 +1787,18 @@ export const webBridge = {
           if (letters.length >= 2 && letters.length <= 6) prefix = letters;
         }
       }
-      const pattern = `${prefix}/KADAL/${year}/%`;
+      const pattern = `KA/${prefix}/KADAL/${year}/%`;
+      const patternLegacy = `${prefix}/KADAL/${year}/%`;
       const seqKey = `seq:bill:${prefix}:${year}`;
 
       let maxSeq = 0;
-      const { data } = await supabase.from('proforma_invoices').select('bill_number').not('bill_number', 'is', null).ilike('bill_number', pattern);
+      const { data } = await supabase.from('proforma_invoices').select('bill_number').not('bill_number', 'is', null).or(`bill_number.ilike.${pattern},bill_number.ilike.${patternLegacy}`);
       (data || []).forEach(row => {
         const parts = (row.bill_number || '').split('/');
-        if (parts.length >= 4) {
+        if (parts[0] === 'KA' && parts.length >= 5) {
+          const seq = parseInt(parts[4], 10);
+          if (!isNaN(seq) && seq > maxSeq) maxSeq = seq;
+        } else if (parts.length >= 4) {
           const seq = parseInt(parts[3], 10);
           if (!isNaN(seq) && seq > maxSeq) maxSeq = seq;
         }
@@ -1812,7 +1817,7 @@ export const webBridge = {
 
       let isUnique = false;
       while (!isUnique) {
-        const candidate = `${prefix}/KADAL/${year}/${nextSeq}`;
+        const candidate = `KA/${prefix}/KADAL/${year}/${nextSeq}`;
         const { data: exist } = await supabase.from('proforma_invoices').select('id').eq('bill_number', candidate).limit(1);
         if (!exist || exist.length === 0) {
           isUnique = true;
@@ -1829,7 +1834,7 @@ export const webBridge = {
         });
       } catch (e) {}
 
-      return `${prefix}/KADAL/${year}/${nextSeq}`;
+      return `KA/${prefix}/KADAL/${year}/${nextSeq}`;
     }),
 
     getUsedChallanIds: () => wrap(async () => {
@@ -1912,7 +1917,7 @@ export const webBridge = {
       };
     }),
 
-    transferToBill: (id) => wrap(async () => {
+    transferToBill: (id, customBillNumber, customBillDate) => wrap(async () => {
       const recon = await webBridge.finance.getPiReconciliation(id);
       if (!recon?.data) throw new Error('PI not found or reconciliation failed');
       if (!recon.data.is100PercentReceived) {
@@ -1926,13 +1931,17 @@ export const webBridge = {
       const supabase = getSupabase();
       if (!supabase) throw new Error('Supabase not configured');
 
-      const nextBillNumber = await webBridge.finance.getNextBillNumber(pi.applicant_name);
-      const billDate = new Date().toISOString();
+      let billNumber = (customBillNumber && customBillNumber.trim()) ? customBillNumber.trim() : null;
+      if (!billNumber) {
+        const nextBillNumber = await webBridge.finance.getNextBillNumber(pi.applicant_name);
+        billNumber = nextBillNumber.data || nextBillNumber;
+      }
+      const billDate = customBillDate || new Date().toISOString();
       const challanIds = (recon.data.challans || []).map(c => c.id);
       const challanNumbers = (recon.data.challans || []).map(c => c.challan_number).join(', ');
 
       const { error: upErr } = await supabase.from('proforma_invoices').update({
-        bill_number: nextBillNumber.data || nextBillNumber,
+        bill_number: billNumber,
         bill_date: billDate,
         challan_ids: challanIds,
         challan_numbers: challanNumbers,
@@ -1940,7 +1949,7 @@ export const webBridge = {
       }).eq('id', id);
       if (upErr) throw upErr;
 
-      return { id, billNumber: nextBillNumber.data || nextBillNumber, billDate, challanNumbers };
+      return { id, billNumber, billDate, challanNumbers };
     })
   },
 

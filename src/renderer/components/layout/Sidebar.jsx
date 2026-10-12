@@ -122,12 +122,18 @@ export default function Sidebar() {
         {navItems.map((item, index) => {
           const Icon = item.icon;
           const permsObj = typeof user?.permissions === 'string' ? JSON.parse(user.permissions) : (user?.permissions || {});
-          const hasExplicitPerm = permsObj && Object.prototype.hasOwnProperty.call(permsObj, item.id);
+          const permKey = item.id.replace(/-/g, '_');
+          const hasExplicitPerm = permsObj && (
+            Object.prototype.hasOwnProperty.call(permsObj, item.id) ||
+            Object.prototype.hasOwnProperty.call(permsObj, permKey)
+          );
           
           if (hasExplicitPerm) {
-            if (permsObj[item.id] !== 'rw' && permsObj[item.id] !== true) return null;
+            const val = permsObj[item.id] !== undefined ? permsObj[item.id] : permsObj[permKey];
+            if (val !== 'rw' && val !== true && val !== 'r') return null;
           } else {
             // Hide tabs based on roles (fallback logic)
+            if (item.id === 'stock-in-out' && permsObj.inventory !== 'rw' && permsObj.inventory !== true) return null;
             if (user?.roleName === 'Merchandiser') {
               const allowed = ['dashboard', 'inventory', 'stock-in-out', 'warehouses', 'requisition', 'reports', 'settings'];
               if (!allowed.includes(item.id)) return null;

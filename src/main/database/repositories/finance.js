@@ -238,9 +238,14 @@ async function syncSavedSequence(piNumber, billNumber) {
   if (billNumber) {
     const parts = (billNumber || '').split('/');
     if (parts.length >= 4) {
-      const prefix = parts[0];
-      const year = parts[2];
-      const seq = parseInt(parts[3], 10);
+      let prefix = parts[0];
+      let year = parts[2];
+      let seq = parseInt(parts[3], 10);
+      if (parts[0] === 'KA' && parts.length >= 5) {
+        prefix = parts[1];
+        year = parts[3];
+        seq = parseInt(parts[4], 10);
+      }
       if (!isNaN(seq) && prefix && year) {
         const seqKey = `seq:bill:${prefix}:${year}`;
         const current = await getTrackedSequence(seqKey);
@@ -752,6 +757,7 @@ const FinanceRepo = {
       try {
         const supabase = getSupabase();
         const updateData = {};
+        if (data.piNumber !== undefined) updateData.pi_number = data.piNumber;
         if (data.billNumber !== undefined) updateData.bill_number = data.billNumber;
         if (data.piDate !== undefined) updateData.pi_date = data.piDate;
         if (data.billDate !== undefined) updateData.bill_date = data.billDate;
@@ -770,6 +776,7 @@ const FinanceRepo = {
 
         const { error } = await supabase.from('proforma_invoices').update(updateData).eq('id', id);
         if (error) throw error;
+        await syncSavedSequence(data.piNumber, data.billNumber);
         return true;
       } catch (cloudErr) {
         console.warn('[FinanceRepo] Cloud update failed, falling back to SQLite:', cloudErr.message);
@@ -778,6 +785,7 @@ const FinanceRepo = {
 
     const sets = [];
     const params = [];
+    if (data.piNumber !== undefined) { sets.push('pi_number = ?'); params.push(data.piNumber); }
     if (data.billNumber !== undefined) { sets.push('bill_number = ?'); params.push(data.billNumber); }
     if (data.piDate !== undefined) { sets.push('pi_date = ?'); params.push(data.piDate); }
     if (data.billDate !== undefined) { sets.push('bill_date = ?'); params.push(data.billDate); }
@@ -799,6 +807,7 @@ const FinanceRepo = {
 
     params.push(id);
     dbPrepare(`UPDATE proforma_invoices SET ${sets.join(', ')} WHERE id = ?`).run(...params);
+    await syncSavedSequence(data.piNumber, data.billNumber);
     return true;
   },
 
@@ -972,7 +981,8 @@ const FinanceRepo = {
   async getNextBillNumber(applicantName) {
     const year = new Date().getFullYear();
     const prefix = extractPrefix(applicantName);
-    const pattern = `${prefix}/KADAL/${year}/%`;
+    const pattern = `KA/${prefix}/KADAL/${year}/%`;
+    const patternLegacy = `${prefix}/KADAL/${year}/%`;
     const seqKey = `seq:bill:${prefix}:${year}`;
 
     let maxDbSeq = 0;
@@ -982,11 +992,14 @@ const FinanceRepo = {
           .from('proforma_invoices')
           .select('bill_number')
           .not('bill_number', 'is', null)
-          .ilike('bill_number', pattern);
+          .or(`bill_number.ilike.${pattern},bill_number.ilike.${patternLegacy}`);
 
         (data || []).forEach(row => {
           const parts = (row.bill_number || '').split('/');
-          if (parts.length >= 4) {
+          if (parts[0] === 'KA' && parts.length >= 5) {
+            const seq = parseInt(parts[4], 10);
+            if (!isNaN(seq) && seq > maxDbSeq) maxDbSeq = seq;
+          } else if (parts.length >= 4) {
             const seq = parseInt(parts[3], 10);
             if (!isNaN(seq) && seq > maxDbSeq) maxDbSeq = seq;
           }
@@ -997,10 +1010,13 @@ const FinanceRepo = {
     }
 
     try {
-      const rows = dbPrepare(`SELECT bill_number FROM proforma_invoices WHERE bill_number LIKE ?`).all(pattern);
+      const rows = dbPrepare(`SELECT bill_number FROM proforma_invoices WHERE bill_number LIKE ? OR bill_number LIKE ?`).all(pattern, patternLegacy);
       rows.forEach(row => {
         const parts = (row.bill_number || '').split('/');
-        if (parts.length >= 4) {
+        if (parts[0] === 'KA' && parts.length >= 5) {
+          const seq = parseInt(parts[4], 10);
+          if (!isNaN(seq) && seq > maxDbSeq) maxDbSeq = seq;
+        } else if (parts.length >= 4) {
           const seq = parseInt(parts[3], 10);
           if (!isNaN(seq) && seq > maxDbSeq) maxDbSeq = seq;
         }
@@ -1012,7 +1028,7 @@ const FinanceRepo = {
 
     let isUnique = false;
     while (!isUnique) {
-      const candidate = `${prefix}/KADAL/${year}/${nextSeq}`;
+      const candidate = `KA/${prefix}/KADAL/${year}/${nextSeq}`;
       let exists = false;
 
       if (isCloudEnabled()) {
@@ -1043,7 +1059,7 @@ const FinanceRepo = {
     // Persist immediately: once generated, this sequence number is reserved and will not generate again!
     await saveTrackedSequence(seqKey, nextSeq);
 
-    return `${prefix}/KADAL/${year}/${nextSeq}`;
+    return `KA/${prefix}/KADAL/${year}/${nextSeq}`;
   },
 
   async getUsedChallanIds() {
@@ -1210,7 +1226,7 @@ const FinanceRepo = {
     }
   },
 
-  async transferPiToBill(id) {
+  async transferPiToBill(id, customBillNumber = null, customBillDate = null) {
     const recon = await this.getPiReconciliation(id);
     if (!recon) throw new Error('Proforma Invoice not found');
     if (!recon.is100PercentReceived) {
@@ -1220,13 +1236,15 @@ const FinanceRepo = {
       throw new Error(`This PI has already been transferred to Bill (${recon.pi.bill_number}).`);
     }
 
-    const nextBillNumber = await this.getNextBillNumber(recon.pi.applicant_name);
-    const billDate = new Date().toISOString();
+    const billNumber = (customBillNumber && customBillNumber.trim()) 
+      ? customBillNumber.trim() 
+      : await this.getNextBillNumber(recon.pi.applicant_name);
+    const billDate = customBillDate || new Date().toISOString();
     const challanIds = recon.challans.map(c => c.id);
     const challanNumbers = recon.challans.map(c => c.challan_number).join(', ');
 
     await this.update(id, {
-      billNumber: nextBillNumber,
+      billNumber,
       billDate,
       challanIds,
       challanNumbers,
@@ -1235,7 +1253,7 @@ const FinanceRepo = {
 
     return {
       id,
-      billNumber: nextBillNumber,
+      billNumber,
       billDate,
       challanNumbers
     };

@@ -37,7 +37,7 @@ const UsersRepo = {
       let query = getSupabase()
         .from('users')
         .select(`*, roles (name, permissions)`)
-        .eq('username', username);
+        .ilike('username', username);
       
       if (activeOnly) query = query.eq('is_active', true);
       
@@ -50,7 +50,7 @@ const UsersRepo = {
       return user;
     }
     const filter = activeOnly ? 'AND u.is_active = 1' : '';
-    const user = dbPrepare(`SELECT u.*, r.name as role_name, r.permissions FROM users u LEFT JOIN roles r ON u.role_id = r.id WHERE u.username = ? ${filter}`).get(username);
+    const user = dbPrepare(`SELECT u.*, r.name as role_name, r.permissions FROM users u LEFT JOIN roles r ON u.role_id = r.id WHERE LOWER(u.username) = LOWER(?) ${filter}`).get(username);
     if (user && user.custom_permissions) user.permissions = user.custom_permissions;
     return user;
   },
