@@ -101,6 +101,8 @@ export default function ApprovalReviewModal({ data, onSaved }) {
       } else if (selectedRequest.type === 'CREATE_ISSUE' || selectedRequest.type === 'REISSUE_ITEM') {
         if (type === 'pdf') await window.kadal.issues.exportPdf(selectedRequest.entityId);
         else await window.kadal.issues.exportExcel(selectedRequest.entityId);
+      } else if (selectedRequest.type === 'CREATE_PI') {
+        if (type === 'pdf') await window.kadal.finance.exportPdf(selectedRequest.entityId);
       }
       addToast('success', 'Report exported successfully');
     } catch (err) { addToast('error', err.message); }
@@ -112,7 +114,7 @@ export default function ApprovalReviewModal({ data, onSaved }) {
         <div className="modal-header">
           <div className="modal-title flex items-center gap-2">
             <Clock size={18} className="text-warning" />
-            {selectedRequest.status === 'PENDING' ? 'Review Request' : 'Request Details'}: {selectedRequest.type === 'REISSUE_ITEM' ? 'Re-issue Items' : selectedRequest.type.replace(/_/g, ' ')}
+            {selectedRequest.status === 'PENDING' ? 'Review Request' : 'Request Details'}: {selectedRequest.type === 'REISSUE_ITEM' ? 'Re-issue Items' : selectedRequest.type === 'CREATE_PI' ? 'Proforma Invoice' : selectedRequest.type.replace(/_/g, ' ')}
           </div>
           <div className="modal-controls">
             <button className="btn-control btn-minimize" onClick={() => setModalMinimized(!isMinimized)} title={isMinimized ? 'Restore' : 'Minimize'}>{isMinimized ? '+' : '-'}</button>

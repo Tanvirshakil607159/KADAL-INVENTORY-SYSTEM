@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import useStore from '../store/useStore';
 import PaginationBar from '../components/common/PaginationBar';
-import { Clock, CheckCircle, XCircle, ArrowUpDown, ArrowUp, ArrowDown, AlertCircle, Package } from 'lucide-react';
+import { Clock, CheckCircle, XCircle, ArrowUpDown, ArrowUp, ArrowDown, AlertCircle, Package, FileText } from 'lucide-react';
 
 const PAGE_SIZE = 50;
 
@@ -342,6 +342,82 @@ function ReissueApprovalDetails({ safeData, renderProperty }) {
     </div>
   );
 }
+
+function PiApprovalDetails({ safeData, renderProperty }) {
+  const items = safeData?.items || [];
+  const currencySymbol = safeData?.currencySymbol || '$';
+  const currency = safeData?.currency || 'USD';
+
+  return (
+    <div className="approval-details-rich">
+      <div className="approval-data-grid mb-3">
+        {renderProperty('PI Number', safeData.piNumber || 'Draft')}
+        {renderProperty('Date', safeData.piDate ? new Date(safeData.piDate).toLocaleDateString() : 'Today')}
+        {renderProperty('Applicant', safeData.applicantName)}
+        {renderProperty('Buyer', safeData.buyer || '-')}
+        {renderProperty('Purchase No', safeData.purchaseNumber || safeData.purchaseNo || '-')}
+        {renderProperty('Total Qty', Number(safeData.totalQuantity || 0).toLocaleString())}
+        {renderProperty('Total Amount', `${currencySymbol}${Number(safeData.totalAmount || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (${currency})`)}
+        {renderProperty('Beneficiary', safeData.beneficiaryName || 'K.A. DESIGN ACCESSORIES LTD.')}
+      </div>
+
+      {safeData.applicantAddress && (
+        <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 12 }}>
+          <strong>Applicant Address:</strong> {safeData.applicantAddress}
+        </div>
+      )}
+
+      <div className="table-wrapper" style={{ maxHeight: 320, border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)' }}>
+        <table className="data-table table-sm">
+          <thead>
+            <tr>
+              <th style={{ width: 40 }}>#</th>
+              <th>Item Description</th>
+              <th>Order / Style</th>
+              <th>Purchase No</th>
+              <th className="text-right">Qty</th>
+              <th>Unit</th>
+              <th className="text-right">Unit Price</th>
+              <th className="text-right">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((it, i) => {
+              const qty = Number(it.quantity) || 0;
+              const price = Number(it.unitPrice ?? it.unit_price) || 0;
+              const total = Number(it.totalAmount ?? it.total_amount) || (qty * price);
+              return (
+                <tr key={i}>
+                  <td className="text-muted" style={{ fontSize: 11 }}>{it.slNo || it.sl_no || i + 1}</td>
+                  <td style={{ fontWeight: 600 }}>{it.itemDescription || it.item_description || it.name || '-'}</td>
+                  <td style={{ fontSize: 11 }}>{it.poStyleNo || it.po_style_no || '-'}</td>
+                  <td style={{ fontSize: 11 }}>{it.purchaseNo || it.purchase_no || '-'}</td>
+                  <td className="text-right fw-bold" style={{ color: 'var(--primary)' }}>{qty.toLocaleString()}</td>
+                  <td className="text-muted" style={{ fontSize: 11 }}>{it.unit || 'PCS'}</td>
+                  <td className="text-right" style={{ fontSize: 11 }}>{currencySymbol}{price.toFixed(4)}</td>
+                  <td className="text-right fw-bold" style={{ fontSize: 11 }}>{currencySymbol}{total.toFixed(2)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {safeData.amountInWords && (
+        <div style={{ fontSize: 12, marginTop: 10, color: 'var(--text-secondary)', fontStyle: 'italic' }}>
+          <strong>In Words:</strong> {safeData.amountInWords}
+        </div>
+      )}
+
+      {safeData.notes && (
+        <div className="mt-3 p-2 bg-light rounded" style={{ fontSize: 12 }}>
+          <strong>Notes:</strong> {safeData.notes}
+        </div>
+      )}
+    </div>
+  );
+}
+
 
 function GatePassApprovalDetails({ safeData, renderProperty }) {
   const [challans, setChallans] = useState(safeData?.challans || []);
@@ -694,6 +770,9 @@ export default function ApprovalsPage() {
       case 'REISSUE_ITEM':
         return <ReissueApprovalDetails safeData={safeData} renderProperty={renderProperty} />;
 
+      case 'CREATE_PI':
+        return <PiApprovalDetails safeData={safeData} renderProperty={renderProperty} />;
+
       default:
         return <pre style={{ fontSize: 11, background: 'var(--bg-glass)', padding: 10, borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>{JSON.stringify(safeData, null, 2)}</pre>;
     }
@@ -762,7 +841,8 @@ export default function ApprovalsPage() {
                            req.type === 'CREATE_CHALLAN' ? 'Challan' :
                            req.type === 'CREATE_GATE_PASS' ? 'Gate Pass' :
                            req.type === 'CREATE_ISSUE' ? 'Issue' :
-                           req.type === 'REISSUE_ITEM' ? 'Reissue' : req.type}
+                           req.type === 'REISSUE_ITEM' ? 'Reissue' :
+                           req.type === 'CREATE_PI' ? 'Finance (PI)' : req.type}
                         </span>
                       </td>
                       <td style={{ fontSize: 13 }}>
@@ -774,6 +854,7 @@ export default function ApprovalsPage() {
                         {req.type === 'CREATE_GATE_PASS' && `New Gate Pass: ${req.data?.receiverName || req.data?.receiver_name ? `${req.data.receiverName || req.data.receiver_name} ` : ''}(${req.data?.challanIds?.length || 0} Challans)`}
                         {req.type === 'CREATE_ISSUE' && `New Issue: ${req.data?.recipientName || '-'} (${req.data?.items?.length || 0} Items)`}
                         {req.type === 'REISSUE_ITEM' && `Reissue for ${req.data?.issueNumber || req.data?.issueId || '-'}: ${req.data?.recipientName || '-'} (${req.data?.items?.length || 0} Items)`}
+                        {req.type === 'CREATE_PI' && `New PI: ${req.data?.piNumber || 'Draft'} (${req.data?.applicantName || 'Applicant'}) — ${req.data?.currency || 'USD'} ${Number(req.data?.totalAmount || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                       </td>
                       <td>
                         <span className={`badge badge-${req.status === 'PENDING' ? 'warning' : req.status === 'APPROVED' ? 'success' : 'danger'}`}>

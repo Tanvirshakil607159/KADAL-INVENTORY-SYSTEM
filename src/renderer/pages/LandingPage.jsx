@@ -23,6 +23,7 @@ import thermalMain from '../assets/facility/thermal-printer.jpg';
 import thermalDetail from '../assets/facility/thermal-printer-detail.jpg';
 import careLabelMain from '../assets/facility/care-label.jpg';
 import careLabelDetail from '../assets/facility/care-label-detail.jpg';
+import UserGuidePage from './userGuide/UserGuidePage';
 import './LandingPage.css';
 
 const slides = [
@@ -191,6 +192,7 @@ export default function LandingPage({ onEnterApp }) {
   const [currentSlide, setCurrentSlide] = useState(0);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [scrolled, setScrolled] = useState(false);
+  const [showGuide, setShowGuide] = useState(false);
   const containerRef = useRef(null);
 
   const goToSlide = useCallback((index) => {
@@ -273,6 +275,13 @@ export default function LandingPage({ onEnterApp }) {
             <button type="button" onClick={() => scrollToSection('about')} className="nav-link-btn">About</button>
             <button type="button" onClick={() => scrollToSection('mission')} className="nav-link-btn">Mission</button>
             <button type="button" onClick={() => scrollToSection('facility')} className="nav-link-btn">Facility</button>
+            <button type="button" onClick={() => setShowGuide(true)} className="nav-guide-btn" title="User Guideline (ব্যবহারকারী নির্দেশিকা)">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M2 4h6a4 4 0 0 1 4 4v13a3 3 0 0 0-3-3H2z" />
+                <path d="M22 4h-6a4 4 0 0 0-4 4v13a3 3 0 0 1 3-3h7z" />
+              </svg>
+              <span>User Guideline</span>
+            </button>
             <button className={`nav-cta ${isLoggedIn ? 'nav-cta-active' : ''}`} onClick={onEnterApp}>
               <span>{isLoggedIn ? (user?.fullName ? `Dashboard (${user.fullName.split(' ')[0]})` : 'Back to Dashboard') : 'Open App'}</span>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -502,6 +511,9 @@ export default function LandingPage({ onEnterApp }) {
           </div>
         </div>
       </footer>
+
+      {/* ─── User Guideline (in-app Banglish SOP) ─── */}
+      {showGuide && <UserGuidePage onClose={() => setShowGuide(false)} />}
     </div>
   );
 }

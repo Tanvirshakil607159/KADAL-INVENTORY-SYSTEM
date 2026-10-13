@@ -18,9 +18,7 @@ const FinanceService = {
     return await FinanceRepo.getByNumber(piNumber);
   },
 
-  async create(data) {
-    const user = await AuthService.getCurrentUser();
-
+  _sanitizePayload(data, userId) {
     if (!data.applicantName || !data.applicantName.trim()) {
       throw new Error('Applicant name is required');
     }
@@ -92,37 +90,78 @@ const FinanceService = {
     const currency = data.currency || 'USD';
     const amountInWords = data.amountInWords || `IN WORDS: ${numberToCurrencyWords(totalAmt, currency)}`;
 
-    let piNumber = data.piNumber;
-    if (!piNumber || !piNumber.trim()) {
-      piNumber = await FinanceRepo.getNextNumber(data.applicantName);
-    }
-
     let notes = data.notes || '';
     const pNum = (data.purchaseNumber || data.purchaseNo || '').trim();
     if (pNum && !notes.toLowerCase().includes('purchase no')) {
       notes = notes ? `${notes} | Purchase No: ${pNum}` : `Purchase No: ${pNum}`;
     }
 
-    const payload = {
+    return {
       ...data,
-      piNumber,
       currency,
       totalQuantity: Number(data.totalQuantity) || totalQty,
       totalAmount: totalAmt,
       amountInWords,
       notes: notes || null,
-      createdBy: user?.id,
+      createdBy: data.createdBy || data.created_by || userId,
       items: sanitizedItems,
     };
+  },
 
-    const res = await FinanceRepo.create(payload);
+  async create(data) {
+    const user = await AuthService.getCurrentUser();
+    const isAdmin = ['Admin', 'Super Admin'].includes(user?.roleName) || ['Admin', 'Super Admin'].includes(user?.role_name);
+    const requireApproval = (await SettingsRepo.get('require_pi_approval')) !== 'false';
+
+    const sanitized = this._sanitizePayload(data, user?.id);
+
+    if (!isAdmin && requireApproval && !data._bypassApproval) {
+      let piNumber = sanitized.piNumber;
+      if (!piNumber || !piNumber.trim()) {
+        piNumber = await FinanceRepo.getNextNumber(sanitized.applicantName);
+      }
+      sanitized.piNumber = piNumber;
+
+      const ApprovalService = require('./approval-service');
+      const approvalRes = await ApprovalService.createRequest('CREATE_PI', {
+        ...sanitized,
+        requesterName: user?.fullName || user?.full_name || user?.username,
+      });
+
+      return {
+        success: true,
+        pendingApproval: true,
+        requestId: approvalRes.requestId,
+        piNumber,
+      };
+    }
+
+    return await this._executeCreate(sanitized);
+  },
+
+  async _executeCreate(data) {
+    const user = await AuthService.getCurrentUser();
+    const sanitized = this._sanitizePayload(data, user?.id);
+
+    let piNumber = sanitized.piNumber;
+    if (!piNumber || !piNumber.trim()) {
+      piNumber = await FinanceRepo.getNextNumber(sanitized.applicantName);
+    } else {
+      const existing = await FinanceRepo.getByNumber(piNumber);
+      if (existing) {
+        piNumber = await FinanceRepo.getNextNumber(sanitized.applicantName);
+      }
+    }
+    sanitized.piNumber = piNumber;
+
+    const res = await FinanceRepo.create(sanitized);
 
     await AuditLogsRepo.create({
       userId: user?.id,
       action: 'CREATE',
       entityType: 'proforma_invoice',
       entityId: res.id,
-      newValue: { piNumber, applicantName: data.applicantName, totalAmount: totalAmt },
+      newValue: { piNumber, applicantName: sanitized.applicantName, totalAmount: sanitized.totalAmount },
     });
 
     return { success: true, id: res.id, piNumber };

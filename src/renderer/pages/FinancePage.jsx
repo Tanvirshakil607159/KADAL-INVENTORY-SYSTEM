@@ -19,6 +19,8 @@ export default function FinancePage() {
 
   const canAccessPi = user?.roleName === 'Super Admin' || user?.roleName === 'Admin' || (userPerms.finance_pi !== 'none' && userPerms.finance_pi !== false);
   const canAccessBills = user?.roleName === 'Super Admin' || user?.roleName === 'Admin' || (userPerms.finance_bill !== 'none' && userPerms.finance_bill !== false);
+  const isAdmin = user?.roleName === 'Super Admin' || user?.roleName === 'Admin';
+  const [pendingPiApprovalsCount, setPendingPiApprovalsCount] = useState(0);
 
   // Primary section: 'pi' (Proforma Invoices) or 'bills' (Commercial Bills)
   const [activeSection, setActiveSection] = useState(() => (!canAccessPi && canAccessBills) ? 'bills' : 'pi');
@@ -292,11 +294,12 @@ export default function FinancePage() {
   const loadInitialData = useCallback(async () => {
     setLoading(true);
     try {
-      const [recRes, dvRes, finRes, buyersRes] = await Promise.all([
+      const [recRes, dvRes, finRes, buyersRes, approvalsRes] = await Promise.all([
         window.kadal.recipients.getAll().catch(() => ({ success: false, data: [] })),
         window.kadal.items.getDistinctValues().catch(() => ({ success: false, data: {} })),
         window.kadal.finance.getAll().catch(() => ({ success: false, data: [] })),
-        window.kadal.buyers.getAll().catch(() => ({ success: false, data: [] }))
+        window.kadal.buyers.getAll().catch(() => ({ success: false, data: [] })),
+        window.kadal.approvals?.getAll({ status: 'PENDING' }).catch(() => ({ success: false, data: [] }))
       ]);
 
       if (recRes?.success) setRecipients(recRes.data || []);
@@ -304,6 +307,12 @@ export default function FinancePage() {
 
       if (finRes?.success) setRecords(finRes.data || []);
       else if (Array.isArray(finRes)) setRecords(finRes);
+
+      if (approvalsRes?.success && Array.isArray(approvalsRes.data)) {
+        setPendingPiApprovalsCount(approvalsRes.data.filter(a => a.type === 'CREATE_PI').length);
+      } else if (Array.isArray(approvalsRes)) {
+        setPendingPiApprovalsCount(approvalsRes.filter(a => a.type === 'CREATE_PI').length);
+      }
 
       const dv = dvRes?.success ? (dvRes.data || {}) : (dvRes || {});
       setOrderNumbers(dv.orders || []);
@@ -525,7 +534,11 @@ export default function FinancePage() {
 
       const res = await window.kadal.finance.create(payload);
       if (res?.success) {
-        addToast('success', `Proforma Invoice ${res.piNumber || piNumber} created successfully!`);
+        if (res.pendingApproval) {
+          addToast('success', `Proforma Invoice ${res.piNumber || piNumber} submitted for Admin approval!`);
+        } else {
+          addToast('success', `Proforma Invoice ${res.piNumber || piNumber} created successfully!`);
+        }
         // Reset form
         setPiItems([]);
         setSelectedRecipientId('');
@@ -928,6 +941,26 @@ export default function FinancePage() {
       {/* ========================================================================= */}
       {activeSection === 'pi' && canAccessPi && (
         <div>
+          {pendingPiApprovalsCount > 0 && (
+            <div style={{
+              background: 'rgba(234, 179, 8, 0.1)',
+              border: '1px solid rgba(234, 179, 8, 0.3)',
+              borderRadius: 'var(--radius-md)',
+              padding: '12px 16px',
+              marginBottom: 16,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13 }}>
+                <Clock size={18} className="text-warning" />
+                <span>
+                  There {pendingPiApprovalsCount === 1 ? 'is 1 Proforma Invoice request' : `are ${pendingPiApprovalsCount} Proforma Invoice requests`} awaiting Admin approval in the <strong>Approvals</strong> module.
+                </span>
+              </div>
+            </div>
+          )}
+
           {/* Subtabs for PI */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
             <div style={{ display: 'flex', gap: 8, background: 'var(--bg-card)', padding: 4, borderRadius: 8, border: '1px solid var(--border)' }}>
@@ -1199,6 +1232,24 @@ export default function FinancePage() {
                   ← View Previous PIs ({piStats.totalPis})
                 </button>
               </div>
+
+              {!isAdmin && (
+                <div style={{
+                  background: 'rgba(99, 102, 241, 0.08)',
+                  border: '1px solid rgba(99, 102, 241, 0.25)',
+                  borderRadius: 6,
+                  padding: '10px 14px',
+                  marginBottom: 16,
+                  fontSize: 12,
+                  color: 'var(--text-secondary)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8
+                }}>
+                  <Clock size={15} color="var(--primary)" />
+                  <span>As a non-admin, your Proforma Invoice will be submitted for Admin approval before being activated.</span>
+                </div>
+              )}
 
               {/* Order Meta Header Form */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 16, marginBottom: 24 }}>
@@ -1660,7 +1711,7 @@ export default function FinancePage() {
                   disabled={savingPi} 
                   style={{ display: 'flex', alignItems: 'center', gap: 6 }}
                 >
-                  <CheckCircle size={16} /> {savingPi ? 'Creating PI...' : 'Confirm & Approve Proforma Invoice'}
+                  <CheckCircle size={16} /> {savingPi ? 'Submitting...' : (isAdmin ? 'Confirm & Approve Proforma Invoice' : 'Submit for Admin Approval')}
                 </button>
               </div>
 

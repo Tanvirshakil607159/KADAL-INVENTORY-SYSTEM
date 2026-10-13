@@ -48,6 +48,7 @@ export default function NotificationManager() {
           let dotInventory = false;
           let dotGatePass = false;
           let dotIssue = false;
+          let dotFinance = false;
 
           for (const req of processed) {
             const statusKey = `${req.id}_${req.status}`;
@@ -55,7 +56,7 @@ export default function NotificationManager() {
               // This is a new status change
               if (!isFirstRun.current) {
                 const statusLabel = req.status === 'APPROVED' ? 'APPROVED' : 'REJECTED';
-                const typeLabel = req.type === 'REISSUE_ITEM' ? 'Re-issue' : req.type === 'CREATE_ISSUE' ? 'Issue' : req.type.replace(/_/g, ' ');
+                const typeLabel = req.type === 'REISSUE_ITEM' ? 'Re-issue' : req.type === 'CREATE_ISSUE' ? 'Issue' : req.type === 'CREATE_PI' ? 'Proforma Invoice' : req.type.replace(/_/g, ' ');
                 addToast(req.status === 'APPROVED' ? 'success' : 'error', `Your ${typeLabel} request has been ${statusLabel}`);
               }
               seenStatusKeys.current.add(statusKey);
@@ -65,6 +66,7 @@ export default function NotificationManager() {
               if (req.type === 'CREATE_ITEM' || req.type === 'UPDATE_ITEM' || req.type === 'STOCK_MOVEMENT') dotInventory = true;
               if (req.type === 'CREATE_GATE_PASS') dotGatePass = true;
               if (req.type === 'CREATE_ISSUE' || req.type === 'REISSUE_ITEM') dotIssue = true;
+              if (req.type === 'CREATE_PI') dotFinance = true;
             }
           }
 
@@ -75,6 +77,7 @@ export default function NotificationManager() {
           if (dotInventory) unseenDots['inventory'] = true;
           if (dotGatePass) unseenDots['gate-pass'] = true;
           if (dotIssue) unseenDots['issue'] = true;
+          if (dotFinance) unseenDots['finance'] = true;
           localStorage.setItem('unseen_dots', JSON.stringify(unseenDots));
 
           setNotificationDot('challan', !!unseenDots['challan']);
@@ -82,6 +85,7 @@ export default function NotificationManager() {
           setNotificationDot('inventory', !!unseenDots['inventory']);
           setNotificationDot('gate-pass', !!unseenDots['gate-pass']);
           setNotificationDot('issue', !!unseenDots['issue']);
+          setNotificationDot('finance', !!unseenDots['finance']);
 
           // Save seen keys
           localStorage.setItem('seen_status_keys', JSON.stringify([...seenStatusKeys.current]));

@@ -1378,6 +1378,87 @@ export const webBridge = {
     clearData: () => wrap(async () => { throw new Error('Not available in web version'); }),
   },
 
+  // Approvals
+  approvals: {
+    getAll: (filters = {}) => wrap(async () => {
+      const supabase = getSupabase();
+      if (!supabase) return [];
+      let query = supabase.from('approvals').select('*, users!approvals_requested_by_fkey(full_name)').order('created_at', { ascending: false });
+      if (filters?.status) query = query.eq('status', filters.status);
+      if (filters?.requestedBy) query = query.eq('requested_by', filters.requestedBy);
+      const { data, error } = await query;
+      if (error) throw error;
+      return (data || []).map(a => {
+        let parsedData = a.data;
+        try { if (typeof a.data === 'string') parsedData = JSON.parse(a.data); } catch (e) {}
+        return {
+          ...a,
+          requester_name: a.users?.full_name,
+          data: parsedData,
+          entityId: a.entity_id || null,
+          entityNumber: a.entity_number || null
+        };
+      });
+    }),
+    getById: (id) => wrap(async () => {
+      const supabase = getSupabase();
+      if (!supabase) throw new Error('Supabase not configured');
+      const { data, error } = await supabase.from('approvals').select('*, users!approvals_requested_by_fkey(full_name)').eq('id', id).single();
+      if (error) throw error;
+      let parsedData = data.data;
+      try { if (typeof data.data === 'string') parsedData = JSON.parse(data.data); } catch (e) {}
+      return {
+        ...data,
+        requester_name: data.users?.full_name,
+        data: parsedData,
+        entityId: data.entity_id || null,
+        entityNumber: data.entity_number || null
+      };
+    }),
+    approve: (id, notes) => wrap(async () => {
+      const supabase = getSupabase();
+      if (!supabase) throw new Error('Supabase not configured');
+      const { data: req, error: fErr } = await supabase.from('approvals').select('*').eq('id', id).single();
+      if (fErr) throw fErr;
+      if (req.status !== 'PENDING') throw new Error('Request already processed');
+      const payload = typeof req.data === 'string' ? JSON.parse(req.data) : req.data;
+      let result;
+      if (req.type === 'CREATE_PI') {
+        result = await webBridge.finance.create({ ...payload, _bypassApproval: true });
+        result = result.data || result;
+      }
+      await supabase.from('approvals').update({
+        status: 'APPROVED',
+        notes: notes || null,
+        entity_id: result?.id || null,
+        entity_number: result?.piNumber || null,
+        updated_at: new Date().toISOString()
+      }).eq('id', id);
+      return { success: true, result };
+    }),
+    reject: (id, notes) => wrap(async () => {
+      const supabase = getSupabase();
+      if (!supabase) throw new Error('Supabase not configured');
+      const { error } = await supabase.from('approvals').update({
+        status: 'REJECTED',
+        notes: notes || null,
+        updated_at: new Date().toISOString()
+      }).eq('id', id);
+      if (error) throw error;
+      return { success: true };
+    }),
+    updateData: (id, data) => wrap(async () => {
+      const supabase = getSupabase();
+      if (!supabase) throw new Error('Supabase not configured');
+      const { error } = await supabase.from('approvals').update({
+        data: JSON.stringify(data),
+        updated_at: new Date().toISOString()
+      }).eq('id', id);
+      if (error) throw error;
+      return true;
+    })
+  },
+
   // Finance (Proforma Invoices)
   finance: {
     getAll: (filters = {}) => wrap(async () => {
@@ -1541,6 +1622,35 @@ export const webBridge = {
       const pNum = (data.purchaseNumber || data.purchaseNo || '').trim();
       if (pNum && !finalNotes.toLowerCase().includes('purchase no')) {
         finalNotes = finalNotes ? `${finalNotes} | Purchase No: ${pNum}` : `Purchase No: ${pNum}`;
+      }
+
+      const isAdmin = currentUser.roleName === 'Admin' || currentUser.roleName === 'Super Admin';
+      if (!isAdmin && !data._bypassApproval) {
+        const { data: settingRow } = await supabase.from('settings').select('value').eq('key', 'require_pi_approval').maybeSingle();
+        const requireApproval = settingRow ? settingRow.value !== 'false' : true;
+
+        if (requireApproval) {
+          let piNumber = data.piNumber;
+          if (!piNumber || !piNumber.trim()) {
+            const next = await webBridge.finance.getNextNumber(data.applicantName);
+            piNumber = next?.data || next;
+          }
+          const approvalData = {
+            ...data,
+            piNumber,
+            createdBy: currentUser.id || null,
+            requesterName: currentUser.fullName || currentUser.username || 'User'
+          };
+          const { data: insertedApproval, error: appErr } = await supabase.from('approvals').insert([{
+            type: 'CREATE_PI',
+            data: JSON.stringify(approvalData),
+            requested_by: currentUser.id || null,
+            status: 'PENDING'
+          }]).select().single();
+          if (appErr) throw appErr;
+
+          return { success: true, pendingApproval: true, requestId: insertedApproval.id, piNumber };
+        }
       }
 
       const { data: inserted, error: piErr } = await supabase.from('proforma_invoices').insert([{

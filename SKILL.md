@@ -336,6 +336,9 @@ A user row may carry `custom_permissions` that override the role. The Sidebar ap
 | `CREATE_CHALLAN` | `ChallanService._executeCreate` |
 | `CREATE_GATE_PASS` | `GatePassService._executeCreate` |
 | `CREATE_REQUISITION` | `RequisitionService._executeCreate` |
+| `CREATE_ISSUE` | `IssueService._executeCreate` |
+| `REISSUE_ITEM` | `IssueService._executeAddItems` |
+| `CREATE_PI` | `FinanceService._executeCreate` |
 
 Rejections are not silent: a rejected challan is written to challan history as `<next-number>-REJ` and immediately cancelled; a rejected gate pass is stored with a `-REJ` suffix. Approval payloads are editable (`approvals:updateData`) before the final approve.
 

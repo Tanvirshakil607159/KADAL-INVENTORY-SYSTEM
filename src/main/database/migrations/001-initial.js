@@ -323,7 +323,17 @@ function runMigrations(db) {
     db.run("INSERT INTO _migrations (name) VALUES ('036-add-reissue-approval-setting')");
     console.log('[DB] Migration 036-add-reissue-approval-setting applied successfully');
   }
+
+  // NEW MIGRATION: 037-add-pi-approval-setting
+  const applied37 = db.exec("SELECT * FROM _migrations WHERE name = '037-add-pi-approval-setting'");
+  if (applied37.length === 0 || applied37[0].values.length === 0) {
+    console.log('[DB] Running migration: 037-add-pi-approval-setting');
+    applyThirtySeventhMigration(db);
+    db.run("INSERT INTO _migrations (name) VALUES ('037-add-pi-approval-setting')");
+    console.log('[DB] Migration 037-add-pi-approval-setting applied successfully');
+  }
 }
+
 
 function applyThirtyFifthMigration(db) {
   try {
@@ -1177,3 +1187,12 @@ function applyThirtySixthMigration(db) {
     console.error('[DB] Migration 036 error:', e.message);
   }
 }
+
+function applyThirtySeventhMigration(db) {
+  try {
+    db.run("INSERT OR IGNORE INTO settings (key, value, description) VALUES ('require_pi_approval', 'true', 'Require admin approval for all Proforma Invoices (Non-Admins)')");
+  } catch (e) {
+    console.error('[DB] Migration 037 error:', e.message);
+  }
+}
+

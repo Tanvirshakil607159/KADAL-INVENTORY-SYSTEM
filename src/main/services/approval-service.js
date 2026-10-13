@@ -61,6 +61,10 @@ const ApprovalService = {
           const IssueService = require('./issue-service');
           result = await IssueService._executeAddItems(data);
           break;
+        case 'CREATE_PI': {
+          const FinanceService = require('./finance-service');
+          result = await FinanceService._executeCreate(data);
+          break;
         }
         default:
           throw new Error('Unknown approval type: ' + request.type);
@@ -71,7 +75,7 @@ const ApprovalService = {
         'APPROVED', 
         notes, 
         result?.id || null, 
-        result?.challanNumber || result?.gatePassNumber || result?.issueId || null
+        result?.challanNumber || result?.gatePassNumber || result?.issueId || result?.piNumber || null
       );
       return { success: true, result };
     } catch (err) {

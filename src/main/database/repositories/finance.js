@@ -966,6 +966,28 @@ const FinanceRepo = {
       }
 
       if (!exists) {
+        try {
+          if (isCloudEnabled()) {
+            const { data } = await getSupabase()
+              .from('approvals')
+              .select('id, data')
+              .eq('type', 'CREATE_PI')
+              .eq('status', 'PENDING');
+            (data || []).forEach(p => {
+              const d = typeof p.data === 'string' ? JSON.parse(p.data) : p.data;
+              if (d?.piNumber === candidate) exists = true;
+            });
+          } else {
+            const pRows = dbPrepare("SELECT data FROM approvals WHERE type = 'CREATE_PI' AND status = 'PENDING'").all();
+            pRows.forEach(p => {
+              const d = typeof p.data === 'string' ? JSON.parse(p.data) : p.data;
+              if (d?.piNumber === candidate) exists = true;
+            });
+          }
+        } catch (e) {}
+      }
+
+      if (!exists) {
         isUnique = true;
       } else {
         nextSeq++;
