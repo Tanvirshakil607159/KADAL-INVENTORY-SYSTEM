@@ -61,6 +61,7 @@ const ApprovalService = {
           const IssueService = require('./issue-service');
           result = await IssueService._executeAddItems(data);
           break;
+        }
         case 'CREATE_PI': {
           const FinanceService = require('./finance-service');
           result = await FinanceService._executeCreate(data);
