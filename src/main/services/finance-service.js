@@ -217,11 +217,38 @@ const FinanceService = {
   },
 
   async getPiReconciliation(id) {
+    const user = await AuthService.getCurrentUser();
+    if (user) {
+      const isAdmin = ['Admin', 'Super Admin'].includes(user?.roleName) || ['Admin', 'Super Admin'].includes(user?.role_name);
+      if (!isAdmin) {
+        let perms = {};
+        try {
+          perms = typeof user.permissions === 'string' ? JSON.parse(user.permissions) : (user.permissions || {});
+        } catch (e) {}
+        const canReconcile = perms.finance_reconciliation === 'rw' || perms.finance_reconciliation === true || perms.reconciliation === 'rw' || perms.reconciliation === true || perms.pi_reconciliation === 'rw' || perms.pi_reconciliation === true;
+        if (!canReconcile) {
+          throw new Error('Access denied: PI Reconciliation is restricted to Admins and assigned users.');
+        }
+      }
+    }
     return await FinanceRepo.getPiReconciliation(id);
   },
 
   async transferPiToBill(id, customBillNumber = null, customBillDate = null) {
     const user = await AuthService.getCurrentUser();
+    if (user) {
+      const isAdmin = ['Admin', 'Super Admin'].includes(user?.roleName) || ['Admin', 'Super Admin'].includes(user?.role_name);
+      if (!isAdmin) {
+        let perms = {};
+        try {
+          perms = typeof user.permissions === 'string' ? JSON.parse(user.permissions) : (user.permissions || {});
+        } catch (e) {}
+        const canReconcile = perms.finance_reconciliation === 'rw' || perms.finance_reconciliation === true || perms.reconciliation === 'rw' || perms.reconciliation === true || perms.pi_reconciliation === 'rw' || perms.pi_reconciliation === true;
+        if (!canReconcile) {
+          throw new Error('Access denied: Bill transfer requires PI Reconciliation permission.');
+        }
+      }
+    }
     const res = await FinanceRepo.transferPiToBill(id, customBillNumber, customBillDate);
     await AuditLogsRepo.create({
       userId: user?.id,

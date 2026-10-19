@@ -21,8 +21,9 @@ export default function UserFormModal({ data, onSaved }) {
         warehouses: form.perms.warehouses ? 'rw' : 'none',
         challan: form.perms.challan ? 'rw' : 'none',
         challan_receipt: form.perms.challan_receipt ? 'rw' : 'none',
-        finance: (form.perms.finance || form.perms.finance_pi || form.perms.finance_bill) ? 'rw' : 'none',
-        finance_pi: form.perms.finance_pi ? 'rw' : 'none',
+        finance: (form.perms.finance || form.perms.finance_pi || form.perms.finance_bill || form.perms.finance_reconciliation) ? 'rw' : 'none',
+        finance_pi: (form.perms.finance_pi || form.perms.finance_reconciliation) ? 'rw' : 'none',
+        finance_reconciliation: form.perms.finance_reconciliation ? 'rw' : 'none',
         finance_bill: form.perms.finance_bill ? 'rw' : 'none',
         approvals: form.perms.approvals ? 'rw' : 'none',
         gate_pass: form.perms.gate_pass ? 'rw' : 'none',
@@ -89,7 +90,7 @@ export default function UserFormModal({ data, onSaved }) {
             <select className="form-select" value={form.roleId} onChange={e => {
               const rid = parseInt(e.target.value);
               const role = roles.find(r => r.id === rid);
-              let newPerms = { dashboard: false, inventory: false, pending_items: false, warehouses: false, challan: false, approvals: false, gate_pass: false, requisition: false, issue: false, production: false, reports: false, settings: false, settings_company: false, settings_users: false, settings_categories: false, settings_units: false, settings_suppliers: false, settings_buyers: false, settings_import: false, settings_sync: false, settings_recipients: false, settings_system: false, settings_appearance: true, backup: false, finance: false, finance_pi: false, finance_bill: false };
+              let newPerms = { dashboard: false, inventory: false, pending_items: false, warehouses: false, challan: false, approvals: false, gate_pass: false, requisition: false, issue: false, production: false, reports: false, settings: false, settings_company: false, settings_users: false, settings_categories: false, settings_units: false, settings_suppliers: false, settings_buyers: false, settings_import: false, settings_sync: false, settings_recipients: false, settings_system: false, settings_appearance: true, backup: false, finance: false, finance_pi: false, finance_reconciliation: false, finance_bill: false };
               if (role) {
                 try {
                   const p = JSON.parse(role.permissions);
@@ -101,8 +102,12 @@ export default function UserFormModal({ data, onSaved }) {
                     pending_items: p.pending_items === 'rw' || p.pending_items === true,
                     warehouses: p.warehouses === 'rw' || p.warehouses === true,
                     challan: p.challan === 'rw' || p.challan === true,
+                    challan_receipt: p.challan_receipt === 'rw' || p.challan_receipt === true || p['challan-receipt'] === 'rw' || p['challan-receipt'] === true,
                     finance: fin,
                     finance_pi: Object.hasOwn(p, 'finance_pi') ? (p.finance_pi === 'rw' || p.finance_pi === true) : fin,
+                    finance_reconciliation: Object.hasOwn(p, 'finance_reconciliation') 
+                      ? (p.finance_reconciliation === 'rw' || p.finance_reconciliation === true) 
+                      : (p.reconciliation === 'rw' || p.reconciliation === true || p.pi_reconciliation === 'rw' || p.pi_reconciliation === true ? true : (role.name === 'Super Admin' || role.name === 'Admin')),
                     finance_bill: Object.hasOwn(p, 'finance_bill') ? (p.finance_bill === 'rw' || p.finance_bill === true) : fin,
                     approvals: p.approvals === 'rw' || p.approvals === true,
                     gate_pass: p.gate_pass === 'rw' || p.gate_pass === true,
@@ -154,25 +159,31 @@ export default function UserFormModal({ data, onSaved }) {
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
                 <input type="checkbox" checked={form.perms.challan} onChange={e=>setForm(f=>({...f, perms: {...f.perms, challan: e.target.checked}}))} /> Create Challan
               </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
-                <input type="checkbox" checked={form.perms.challan_receipt} onChange={e=>setForm(f=>({...f, perms: {...f.perms, challan_receipt: e.target.checked}}))} /> Challan Receipt (Receiver)
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, opacity: (currentUser?.roleName === 'Super Admin') ? 1 : 0.6, cursor: (currentUser?.roleName === 'Super Admin') ? 'pointer' : 'not-allowed' }}>
+                <input type="checkbox" checked={form.perms.challan_receipt} onChange={e=>setForm(f=>({...f, perms: {...f.perms, challan_receipt: e.target.checked}}))} disabled={currentUser?.roleName !== 'Super Admin'} /> Challan Receipt (Receiver)
               </label>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
                 <input type="checkbox" checked={form.perms.finance} onChange={e=>{
                   const val = e.target.checked;
-                  setForm(f=>({...f, perms: {...f.perms, finance: val, finance_pi: val, finance_bill: val}}));
+                  setForm(f=>({...f, perms: {...f.perms, finance: val, finance_pi: val, finance_reconciliation: val, finance_bill: val}}));
                 }} /> Finance (All)
               </label>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
                 <input type="checkbox" checked={form.perms.finance_pi} onChange={e=>{
                   const val = e.target.checked;
-                  setForm(f=>({...f, perms: {...f.perms, finance_pi: val, finance: val || f.perms.finance_bill}}));
+                  setForm(f=>({...f, perms: {...f.perms, finance_pi: val, finance: val || f.perms.finance_bill || f.perms.finance_reconciliation, finance_reconciliation: val ? f.perms.finance_reconciliation : false}}));
                 }} /> ↳ PI (Proforma)
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+                <input type="checkbox" checked={form.perms.finance_reconciliation} onChange={e=>{
+                  const val = e.target.checked;
+                  setForm(f=>({...f, perms: {...f.perms, finance_reconciliation: val, finance_pi: val || f.perms.finance_pi, finance: val || f.perms.finance || f.perms.finance_bill}}));
+                }} /> ↳ PI Reconciliation
               </label>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
                 <input type="checkbox" checked={form.perms.finance_bill} onChange={e=>{
                   const val = e.target.checked;
-                  setForm(f=>({...f, perms: {...f.perms, finance_bill: val, finance: val || f.perms.finance_pi}}));
+                  setForm(f=>({...f, perms: {...f.perms, finance_bill: val, finance: val || f.perms.finance_pi || f.perms.finance_reconciliation}}));
                 }} /> ↳ Commercial Bill
               </label>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>

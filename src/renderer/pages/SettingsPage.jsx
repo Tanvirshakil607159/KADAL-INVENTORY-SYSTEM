@@ -237,6 +237,7 @@ function UserSettings() {
         challan_receipt: rawPerms.challan_receipt === 'rw' || rawPerms.challan_receipt === true,
         finance: rawPerms.finance === 'rw' || rawPerms.finance === true,
         finance_pi: Object.hasOwn(rawPerms, 'finance_pi') ? (rawPerms.finance_pi === 'rw' || rawPerms.finance_pi === true) : (rawPerms.finance === 'rw' || rawPerms.finance === true),
+        finance_reconciliation: Object.hasOwn(rawPerms, 'finance_reconciliation') ? (rawPerms.finance_reconciliation === 'rw' || rawPerms.finance_reconciliation === true) : (rawPerms.reconciliation === 'rw' || rawPerms.reconciliation === true || rawPerms.pi_reconciliation === 'rw' || rawPerms.pi_reconciliation === true ? true : (u.role_name === 'Super Admin' || u.role_name === 'Admin')),
         finance_bill: Object.hasOwn(rawPerms, 'finance_bill') ? (rawPerms.finance_bill === 'rw' || rawPerms.finance_bill === true) : (rawPerms.finance === 'rw' || rawPerms.finance === true),
         approvals: rawPerms.approvals === 'rw' || rawPerms.approvals === true,
         gate_pass: rawPerms.gate_pass === 'rw' || rawPerms.gate_pass === true,
@@ -287,7 +288,7 @@ function UserSettings() {
 
   return (
     <div>
-      <div className="toolbar"><div className="toolbar-left"></div>{user?.permissions?.settings === 'rw' && <button className="btn btn-primary btn-sm" onClick={() => openModal('USER_FORM', { initialForm: { username: '', fullName: '', password: '', roleId: 2, perms: { dashboard: false, inventory: false, pending_items: false, warehouses: false, challan: false, approvals: false, gate_pass: false, requisition: false, issue: false, production: false, reports: false, settings: false, backup: false } }, onSaved: load })}><Plus size={14} /> Add User</button>}</div>
+      <div className="toolbar"><div className="toolbar-left"></div>{user?.permissions?.settings === 'rw' && <button className="btn btn-primary btn-sm" onClick={() => openModal('USER_FORM', { initialForm: { username: '', fullName: '', password: '', roleId: 2, perms: { dashboard: false, inventory: false, pending_items: false, warehouses: false, challan: false, approvals: false, gate_pass: false, requisition: false, issue: false, production: false, reports: false, settings: false, backup: false, finance: false, finance_pi: false, finance_reconciliation: false, finance_bill: false } }, onSaved: load })}><Plus size={14} /> Add User</button>}</div>
       <div className="table-wrapper">
         <table className="data-table">
           <thead><tr><th>Username</th><th>Full Name</th><th>Role</th><th>Status</th><th>Last Login</th><th>Actions</th></tr></thead>

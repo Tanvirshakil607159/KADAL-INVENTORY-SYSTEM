@@ -128,6 +128,14 @@ export default function Sidebar() {
             Object.prototype.hasOwnProperty.call(permsObj, permKey)
           );
           
+          // Restrict Challan Receipt to Super Admin and Recipient / Challan Receipt User only
+          if (item.id === 'challan-receipt') {
+            const userRole = user?.roleName || user?.role_name || '';
+            const isSuperAdmin = userRole === 'Super Admin';
+            const isRecipientRole = ['Challan Receipt User', 'Recipient', 'Recipient Portal'].includes(userRole);
+            if (!isSuperAdmin && !isRecipientRole) return null;
+          }
+
           if (hasExplicitPerm) {
             const val = permsObj[item.id] !== undefined ? permsObj[item.id] : permsObj[permKey];
             if (val !== 'rw' && val !== true && val !== 'r') return null;
@@ -139,14 +147,14 @@ export default function Sidebar() {
               if (!allowed.includes(item.id)) return null;
             }
             if (user?.roleName === 'Inventory') {
-              const allowed = ['dashboard', 'inventory', 'stock-in-out', 'pending-items', 'warehouses', 'challan-receipt', 'requisition', 'reports', 'approvals', 'settings'];
+              const allowed = ['dashboard', 'inventory', 'stock-in-out', 'pending-items', 'warehouses', 'requisition', 'reports', 'approvals', 'settings'];
               if (settings.allow_inventory_to_produce === 'true') {
                 allowed.push('production');
               }
               if (!allowed.includes(item.id)) return null;
             }
             if (user?.roleName === 'Challan') {
-              const allowed = ['dashboard', 'challan', 'challan-receipt', 'finance', 'gate-pass', 'reports', 'approvals', 'settings'];
+              const allowed = ['dashboard', 'challan', 'finance', 'gate-pass', 'reports', 'approvals', 'settings'];
               if (settings.allow_challan_to_issue === 'true') {
                 allowed.push('issue');
               }

@@ -16,6 +16,11 @@ const DEFAULT_SLIP_COL_WIDTHS = {
 
 export default function ChallanReceiptPage() {
   const { addToast, user } = useStore();
+  const userRole = user?.roleName || user?.role_name || '';
+  const isSuperAdmin = userRole === 'Super Admin';
+  const isRecipientRole = ['Challan Receipt User', 'Recipient', 'Recipient Portal'].includes(userRole);
+  const hasAccess = isSuperAdmin || isRecipientRole;
+
   const [loading, setLoading] = useState(true);
   const [challans, setChallans] = useState([]);
   const [statusTab, setStatusTab] = useState('PENDING'); // 'ALL', 'PENDING', 'RECEIVED', 'PARTIAL'
@@ -252,6 +257,25 @@ export default function ChallanReceiptPage() {
       setViewingSlipChallan(challan);
     }
   };
+
+  if (!hasAccess) {
+    return (
+      <div className="page-container" style={{ padding: '48px 32px', textAlign: 'center' }}>
+        <div style={{ maxWidth: 460, margin: '60px auto', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 12, padding: '36px 28px' }}>
+          <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'rgba(239, 68, 68, 0.12)', color: 'var(--danger, #ef4444)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 18px' }}>
+            <AlertTriangle size={30} />
+          </div>
+          <h2 style={{ fontSize: 20, fontWeight: 700, margin: '0 0 10px', color: 'var(--text)' }}>Access Restricted</h2>
+          <p style={{ fontSize: 14, color: 'var(--text-muted)', lineHeight: 1.6, margin: '0 0 20px' }}>
+            Challan Receipt is only accessible to <strong>Super Admin</strong> and <strong>Recipient / Challan Receipt User</strong> roles.
+          </p>
+          <div style={{ fontSize: 12, padding: '8px 12px', background: 'var(--bg-subtle, rgba(0,0,0,0.04))', borderRadius: 6, color: 'var(--text-muted)' }}>
+            Current Role: <strong>{userRole || 'None'}</strong>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="page-container" style={{ padding: '24px 32px' }}>

@@ -1,14 +1,49 @@
 import React, { useState } from 'react';
 import useStore from '../../store/useStore';
-import { Clock, CheckCircle, XCircle, Edit2, Download, FileText } from 'lucide-react';
+import { Clock, CheckCircle, XCircle, Edit2, Download, FileText, Printer, Eye, List } from 'lucide-react';
+import ProformaInvoicePrintView from '../finance/ProformaInvoicePrintView';
+import PiApprovalEditor from '../finance/PiApprovalEditor';
+import { parseApprovalData, buildPrintPi, toEditForm, buildApprovalPayload } from '../finance/piApprovalUtils';
 
 export default function ApprovalReviewModal({ data, onSaved }) {
   const { addToast, closeModal, openModal, setModalMinimized, modal, user, showConfirm } = useStore();
   const { selectedRequest, renderDataDetail } = data;
   const isMinimized = modal?.isMinimized;
   const isAdmin = user?.roleName === 'Super Admin' || user?.roleName === 'Admin';
+  const isPi = selectedRequest.type === 'CREATE_PI';
   
   const [notes, setNotes] = useState('');
+  // PI approval: local copy of request data so admin edits show immediately
+  const [piData, setPiData] = useState(() => (isPi ? parseApprovalData(selectedRequest.data) : null));
+  const [piTab, setPiTab] = useState('preview');
+  const [editingPi, setEditingPi] = useState(false);
+  const [savingPi, setSavingPi] = useState(false);
+  const canEditPi = isPi && isAdmin && selectedRequest.status === 'PENDING';
+
+  const handleSavePi = async (form) => {
+    setSavingPi(true);
+    try {
+      const payload = buildApprovalPayload(form, piData);
+      const res = await window.kadal.approvals.updateData(selectedRequest.id, payload);
+      if (res && res.success) {
+        setPiData(payload);
+        setEditingPi(false);
+        setPiTab('preview');
+        addToast('success', 'Proforma Invoice updated');
+        if (onSaved) onSaved();
+      } else {
+        addToast('error', (res && res.error) || 'Failed to update Proforma Invoice');
+      }
+    } catch (err) { addToast('error', err.message); }
+    finally { setSavingPi(false); }
+  };
+
+  const handleExportPiPdf = async () => {
+    try {
+      await window.kadal.finance.exportPdf(buildPrintPi(piData));
+      addToast('success', 'Report exported successfully');
+    } catch (err) { addToast('error', err.message || 'PDF export is not available'); }
+  };
 
   const handleApprove = async () => {
     // Duplicate check for Challan requests
@@ -110,7 +145,7 @@ export default function ApprovalReviewModal({ data, onSaved }) {
 
   return (
     <div className={`modal-overlay ${isMinimized ? 'minimized-mode' : ''}`}>
-      <div className={`modal ${isMinimized ? 'minimized' : ''}`} style={{ maxWidth: 650 }} onClick={e => e.stopPropagation()}>
+      <div className={`modal ${isMinimized ? 'minimized' : ''}`} style={{ maxWidth: isPi ? 960 : 650, width: isPi ? '96vw' : undefined }} onClick={e => e.stopPropagation()}>
         <div className="modal-header">
           <div className="modal-title flex items-center gap-2">
             <Clock size={18} className="text-warning" />
@@ -138,16 +173,62 @@ export default function ApprovalReviewModal({ data, onSaved }) {
               )}
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-secondary)' }}>Request Data</div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 8, flexWrap: 'wrap' }}>
+              <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-secondary)' }}>{isPi && editingPi ? 'Edit Proforma Invoice' : 'Request Data'}</div>
               {selectedRequest.status === 'PENDING' && isAdmin && (selectedRequest.type === 'CREATE_ITEM' || selectedRequest.type === 'UPDATE_ITEM') && (
                 <button className="btn btn-ghost btn-sm" onClick={handleEditData}>
                   <Edit2 size={14} /> Edit Data
                 </button>
               )}
+              {isPi && !editingPi && (
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  <button id="pi-tab-preview" className={`btn btn-sm ${piTab === 'preview' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setPiTab('preview')}>
+                    <Eye size={14} /> PDF Preview
+                  </button>
+                  <button id="pi-tab-details" className={`btn btn-sm ${piTab === 'details' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setPiTab('details')}>
+                    <List size={14} /> Details
+                  </button>
+                  {piTab === 'preview' && (
+                    <>
+                      <button id="pi-preview-print" className="btn btn-ghost btn-sm" onClick={() => window.print()}>
+                        <Printer size={14} /> Print
+                      </button>
+                      <button id="pi-preview-export" className="btn btn-ghost btn-sm" onClick={handleExportPiPdf}>
+                        <FileText size={14} /> Export PDF
+                      </button>
+                    </>
+                  )}
+                  {canEditPi && (
+                    <button id="pi-edit-btn" className="btn btn-outline btn-sm" onClick={() => setEditingPi(true)}>
+                      <Edit2 size={14} /> Edit PI
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
 
-            {renderDataDetail(selectedRequest.data, selectedRequest.type)}
+            {isPi ? (
+              editingPi ? (
+                <PiApprovalEditor
+                  initialForm={toEditForm(piData)}
+                  saving={savingPi}
+                  onSave={handleSavePi}
+                  onCancel={() => setEditingPi(false)}
+                />
+              ) : piTab === 'preview' ? (
+                <>
+                  <style>{`@media print { .pi-approval-preview-scroll { overflow: visible !important; max-height: none !important; background: none !important; padding: 0 !important; } }`}</style>
+                  <div
+                    className="pi-approval-preview-scroll"
+                    style={{ overflow: 'auto', maxHeight: '62vh', border: '1px solid var(--border)', borderRadius: 8, background: 'var(--bg-secondary, rgba(128,128,128,0.08))' }}
+                  >
+                    <div style={{ width: 'max-content', minWidth: '100%' }}>
+                      <ProformaInvoicePrintView pi={buildPrintPi(piData)} mode="pi" isModal={false} />
+                    </div>
+                  </div>
+                </>
+              ) : renderDataDetail(piData, selectedRequest.type)
+            ) : renderDataDetail(selectedRequest.data, selectedRequest.type)}
 
             {selectedRequest.status !== 'PENDING' && selectedRequest.notes && (
               <div className="approval-section" style={{ marginTop: 20, borderLeft: `4px solid var(--${selectedRequest.status === 'APPROVED' ? 'success' : 'danger'})` }}>
@@ -178,7 +259,7 @@ export default function ApprovalReviewModal({ data, onSaved }) {
             )}
           </div>
 
-          {selectedRequest.status === 'PENDING' && (
+          {selectedRequest.status === 'PENDING' && !editingPi && (
             <div className="approval-notes-box">
               <div className="form-group">
                 <label className="form-label">Decision Notes</label>
@@ -195,7 +276,7 @@ export default function ApprovalReviewModal({ data, onSaved }) {
         </div>
         <div className="modal-footer">
           <button className="btn btn-outline" onClick={closeModal}>{selectedRequest.status === 'PENDING' ? 'Later' : 'Close'}</button>
-          {selectedRequest.status === 'PENDING' && isAdmin && (
+          {selectedRequest.status === 'PENDING' && isAdmin && !editingPi && (
             <>
               <button className="btn btn-danger" onClick={handleReject}>
                 <XCircle size={16} /> Reject Request

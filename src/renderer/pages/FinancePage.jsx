@@ -20,6 +20,14 @@ export default function FinancePage() {
   const canAccessPi = user?.roleName === 'Super Admin' || user?.roleName === 'Admin' || (userPerms.finance_pi !== 'none' && userPerms.finance_pi !== false);
   const canAccessBills = user?.roleName === 'Super Admin' || user?.roleName === 'Admin' || (userPerms.finance_bill !== 'none' && userPerms.finance_bill !== false);
   const isAdmin = user?.roleName === 'Super Admin' || user?.roleName === 'Admin';
+  const canAccessReconciliation = isAdmin || (
+    userPerms.finance_reconciliation === 'rw' ||
+    userPerms.finance_reconciliation === true ||
+    userPerms.pi_reconciliation === 'rw' ||
+    userPerms.pi_reconciliation === true ||
+    userPerms.reconciliation === 'rw' ||
+    userPerms.reconciliation === true
+  );
   const [pendingPiApprovalsCount, setPendingPiApprovalsCount] = useState(0);
 
   // Primary section: 'pi' (Proforma Invoices) or 'bills' (Commercial Bills)
@@ -563,6 +571,10 @@ export default function FinancePage() {
 
   // Open Reconciliation Modal
   const handleOpenReconciliation = async (pi) => {
+    if (!canAccessReconciliation) {
+      addToast('error', 'Access denied: PI Reconciliation is restricted to Admins and assigned users.');
+      return;
+    }
     setReconciliationModalPi(pi);
     setLoadingRecon(true);
     try {
@@ -579,6 +591,10 @@ export default function FinancePage() {
   // Open User-Defined Transfer Modal
   const handleOpenTransferModal = async (pi) => {
     if (!pi) return;
+    if (!canAccessReconciliation) {
+      addToast('error', 'Access denied: Commercial bill transfer requires PI Reconciliation permission.');
+      return;
+    }
     setTransferPiTarget(pi);
     setCustomBillDate(new Date().toISOString().split('T')[0]);
     setTransferModalOpen(true);
@@ -1153,14 +1169,16 @@ export default function FinancePage() {
                                 >
                                   <Eye size={13} /> View
                                 </button>
-                                <button
-                                  className="btn btn-outline btn-sm"
-                                  onClick={() => handleOpenReconciliation(pi)}
-                                  title="View Reconciliation & Transfer to Bill"
-                                  style={{ display: 'flex', alignItems: 'center', gap: 4 }}
-                                >
-                                  <BarChart3 size={13} /> Reconcile
-                                </button>
+                                {canAccessReconciliation && (
+                                  <button
+                                    className="btn btn-outline btn-sm"
+                                    onClick={() => handleOpenReconciliation(pi)}
+                                    title="View Reconciliation & Transfer to Bill"
+                                    style={{ display: 'flex', alignItems: 'center', gap: 4 }}
+                                  >
+                                    <BarChart3 size={13} /> Reconcile
+                                  </button>
+                                )}
                                 <button
                                   className="btn btn-ghost btn-sm btn-icon"
                                   onClick={() => handlePreview(pi, 'pi')}
@@ -1933,7 +1951,7 @@ export default function FinancePage() {
       {/* ========================================================================= */}
       {/* RECONCILIATION & TRANSFER MODAL */}
       {/* ========================================================================= */}
-      {reconciliationModalPi && (
+      {reconciliationModalPi && canAccessReconciliation && (
         <div className="modal-backdrop" style={{ 
           position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, 
           display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 
