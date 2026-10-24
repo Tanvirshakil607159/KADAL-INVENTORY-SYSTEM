@@ -1721,12 +1721,22 @@ export const webBridge = {
       if (data.billNumber !== undefined) updateData.bill_number = data.billNumber;
       if (data.piDate !== undefined) updateData.pi_date = data.piDate;
       if (data.billDate !== undefined) updateData.bill_date = data.billDate;
+      if (data.recipientId !== undefined) updateData.recipient_id = data.recipientId;
+      if (data.applicantName !== undefined) updateData.applicant_name = data.applicantName;
+      if (data.applicantAddress !== undefined) updateData.applicant_address = data.applicantAddress;
+      if (data.beneficiaryName !== undefined) updateData.beneficiary_name = data.beneficiaryName;
+      if (data.beneficiaryAddress !== undefined) updateData.beneficiary_address = data.beneficiaryAddress;
+      if (data.beneficiaryBin !== undefined) updateData.beneficiary_bin = data.beneficiaryBin;
+      if (data.bankDetails !== undefined) updateData.bank_details = data.bankDetails;
       if (data.buyer !== undefined) updateData.buyer = data.buyer;
+      if (data.currency !== undefined) updateData.currency = data.currency;
+      if (data.currencySymbol !== undefined) updateData.currency_symbol = data.currencySymbol;
       if (data.netWeight !== undefined) updateData.net_weight = data.netWeight;
       if (data.grossWeight !== undefined) updateData.gross_weight = data.grossWeight;
       if (data.termsConditions !== undefined) updateData.terms_conditions = data.termsConditions;
       if (data.status !== undefined) updateData.status = data.status;
       if (data.notes !== undefined) updateData.notes = data.notes;
+      if (data.challanNumbers !== undefined) updateData.challan_numbers = data.challanNumbers;
       if (data.totalAmount !== undefined) updateData.total_amount = Number(data.totalAmount);
       if (data.totalQuantity !== undefined) updateData.total_quantity = Number(data.totalQuantity);
       if (data.amountInWords !== undefined) updateData.amount_in_words = data.amountInWords;
@@ -1734,6 +1744,54 @@ export const webBridge = {
 
       const { error } = await supabase.from('proforma_invoices').update(updateData).eq('id', id);
       if (error) throw error;
+
+      if (Array.isArray(data.items)) {
+        const { data: existingRows, error: exErr } = await supabase
+          .from('proforma_invoice_items').select('id').eq('pi_id', id);
+        if (exErr) throw exErr;
+        const existingIds = new Set((existingRows || []).map(r => String(r.id)));
+        const keptIds = new Set();
+        const newRows = [];
+
+        for (const [idx, it] of data.items.entries()) {
+          const desc = it.itemDescription || it.item_description || it.item_name || it.name || '';
+          const { combined } = formatBridgePoStyle(it);
+          const rate = Number(it.unitPrice !== undefined ? it.unitPrice : it.unit_price) || 0;
+          const lineTotal = Number(it.totalAmount !== undefined ? it.totalAmount : (it.total_amount !== undefined ? it.total_amount : (Number(it.quantity || 0) * rate).toFixed(2)));
+          const row = {
+            sl_no: it.slNo || it.sl_no || idx + 1,
+            challan_id: it.challanId || it.challan_id || null,
+            item_id: it.itemId || it.item_id || null,
+            item_description: desc,
+            po_style_no: combined,
+            quantity: Number(it.quantity) || 0,
+            unit: (it.unit || 'PCS').toUpperCase(),
+            unit_price: rate,
+            total_amount: lineTotal,
+            notes: it.notes || null
+          };
+
+          if (it.id && existingIds.has(String(it.id))) {
+            keptIds.add(String(it.id));
+            const { error: upErr } = await supabase.from('proforma_invoice_items').update(row).eq('id', it.id);
+            if (upErr) throw upErr;
+          } else {
+            newRows.push({ ...row, pi_id: id });
+          }
+        }
+
+        const removedIds = (existingRows || []).map(r => r.id).filter(rid => !keptIds.has(String(rid)));
+        if (removedIds.length > 0) {
+          await supabase.from('challan_items').update({ pi_item_id: null }).in('pi_item_id', removedIds);
+          const { error: delErr } = await supabase.from('proforma_invoice_items').delete().in('id', removedIds);
+          if (delErr) throw delErr;
+        }
+        if (newRows.length > 0) {
+          const { error: insErr } = await supabase.from('proforma_invoice_items').insert(newRows);
+          if (insErr) throw insErr;
+        }
+      }
+
       return true;
     }),
 

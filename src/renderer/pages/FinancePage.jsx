@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { numberToCurrencyWords } from '../utils/numberToWords';
 import ProformaInvoicePrintView from '../components/finance/ProformaInvoicePrintView';
+import PiEditModal from '../components/finance/PiEditModal';
 
 export default function FinancePage() {
   const { addToast, user, showConfirm } = useStore();
@@ -27,6 +28,12 @@ export default function FinancePage() {
     userPerms.pi_reconciliation === true ||
     userPerms.reconciliation === 'rw' ||
     userPerms.reconciliation === true
+  );
+  const canEditPi = isAdmin || (
+    userPerms.finance_pi === 'rw' ||
+    userPerms.finance_pi === true ||
+    userPerms.finance === 'rw' ||
+    userPerms.finance === true
   );
   const [pendingPiApprovalsCount, setPendingPiApprovalsCount] = useState(0);
 
@@ -96,6 +103,9 @@ export default function FinancePage() {
   const [editPiModal, setEditPiModal] = useState(null);
   const [editPiNumberValue, setEditPiNumberValue] = useState('');
   const [savingEditPi, setSavingEditPi] = useState(false);
+
+  // Full PI edit (same editor as the Approvals page)
+  const [fullEditPi, setFullEditPi] = useState(null);
 
   const [editBillModal, setEditBillModal] = useState(null);
   const [editBillNumberValue, setEditBillNumberValue] = useState('');
@@ -1179,6 +1189,17 @@ export default function FinancePage() {
                                     <BarChart3 size={13} /> Reconcile
                                   </button>
                                 )}
+                                {canEditPi && !isBilled && (
+                                  <button
+                                    id={`pi-edit-${pi.id}`}
+                                    className="btn btn-outline btn-sm"
+                                    onClick={() => setFullEditPi(pi)}
+                                    title="Edit Proforma Invoice (all fields & items)"
+                                    style={{ display: 'flex', alignItems: 'center', gap: 4 }}
+                                  >
+                                    <Edit3 size={13} /> Edit
+                                  </button>
+                                )}
                                 <button
                                   className="btn btn-ghost btn-sm btn-icon"
                                   onClick={() => handlePreview(pi, 'pi')}
@@ -1186,16 +1207,18 @@ export default function FinancePage() {
                                 >
                                   <Printer size={15} />
                                 </button>
-                                <button
-                                  className="btn btn-ghost btn-sm btn-icon"
-                                  onClick={() => {
-                                    setEditPiModal(pi);
-                                    setEditPiNumberValue(pi.pi_number || '');
-                                  }}
-                                  title="Edit PI Number (User Defined)"
-                                >
-                                  <Edit3 size={15} />
-                                </button>
+                                {(!canEditPi || isBilled) && (
+                                  <button
+                                    className="btn btn-ghost btn-sm btn-icon"
+                                    onClick={() => {
+                                      setEditPiModal(pi);
+                                      setEditPiNumberValue(pi.pi_number || '');
+                                    }}
+                                    title="Edit PI Number (User Defined)"
+                                  >
+                                    <Edit3 size={15} />
+                                  </button>
+                                )}
                                 <button
                                   className="btn btn-ghost btn-sm btn-icon"
                                   onClick={async () => {
@@ -2717,6 +2740,19 @@ export default function FinancePage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* FULL PI EDIT MODAL (SAME EDITOR AS APPROVALS PAGE) */}
+      {/* ========================================================================= */}
+      {fullEditPi && (
+        <PiEditModal
+          key={fullEditPi.id}
+          pi={fullEditPi}
+          existingPiNumbers={new Set(records.filter(r => r.id !== fullEditPi.id && r.pi_number).map(r => r.pi_number))}
+          onClose={() => setFullEditPi(null)}
+          onSaved={loadInitialData}
+        />
       )}
 
       {/* ========================================================================= */}

@@ -135,6 +135,47 @@ function normalizePiItem(it, idx) {
   };
 }
 
+/** Header fields accepted by update(): camelCase payload key -> DB column. */
+const PI_UPDATE_FIELDS = {
+  piNumber: 'pi_number',
+  billNumber: 'bill_number',
+  piDate: 'pi_date',
+  billDate: 'bill_date',
+  recipientId: 'recipient_id',
+  applicantName: 'applicant_name',
+  applicantAddress: 'applicant_address',
+  beneficiaryName: 'beneficiary_name',
+  beneficiaryAddress: 'beneficiary_address',
+  beneficiaryBin: 'beneficiary_bin',
+  bankDetails: 'bank_details',
+  buyer: 'buyer',
+  currency: 'currency',
+  currencySymbol: 'currency_symbol',
+  netWeight: 'net_weight',
+  grossWeight: 'gross_weight',
+  termsConditions: 'terms_conditions',
+  status: 'status',
+  notes: 'notes',
+  challanNumbers: 'challan_numbers',
+  amountInWords: 'amount_in_words'
+};
+
+/** Normalized PI item -> DB row (without pi_id). */
+function toPiItemRow(it) {
+  return {
+    sl_no: it.slNo,
+    challan_id: it.challanId || null,
+    item_id: it.itemId || null,
+    item_description: it.itemDescription,
+    po_style_no: it.po_style_no || it.poStyleNo || null,
+    quantity: it.quantity,
+    unit: it.unit,
+    unit_price: it.unitPrice,
+    total_amount: it.totalAmount,
+    notes: it.notes || null
+  };
+}
+
 function normalizePi(pi) {
   if (!pi) return null;
   const rawItems = pi.items || pi.proforma_invoice_items || [];
@@ -753,29 +794,55 @@ const FinanceRepo = {
   },
 
   async update(id, data) {
+    const hasItems = Array.isArray(data.items);
+    const normalizedItems = hasItems ? data.items.map((it, idx) => normalizePiItem(it, idx)) : [];
+
     if (isCloudEnabled()) {
       try {
         const supabase = getSupabase();
         const updateData = {};
-        if (data.piNumber !== undefined) updateData.pi_number = data.piNumber;
-        if (data.billNumber !== undefined) updateData.bill_number = data.billNumber;
-        if (data.piDate !== undefined) updateData.pi_date = data.piDate;
-        if (data.billDate !== undefined) updateData.bill_date = data.billDate;
-        if (data.buyer !== undefined) updateData.buyer = data.buyer;
-        if (data.netWeight !== undefined) updateData.net_weight = data.netWeight;
-        if (data.grossWeight !== undefined) updateData.gross_weight = data.grossWeight;
-        if (data.termsConditions !== undefined) updateData.terms_conditions = data.termsConditions;
-        if (data.status !== undefined) updateData.status = data.status;
-        if (data.notes !== undefined) updateData.notes = data.notes;
+        for (const [key, col] of Object.entries(PI_UPDATE_FIELDS)) {
+          if (data[key] !== undefined) updateData[col] = data[key];
+        }
         if (data.challanIds !== undefined) updateData.challan_ids = typeof data.challanIds === 'string' ? data.challanIds : JSON.stringify(data.challanIds);
-        if (data.challanNumbers !== undefined) updateData.challan_numbers = data.challanNumbers;
         if (data.totalAmount !== undefined) updateData.total_amount = Number(data.totalAmount);
         if (data.totalQuantity !== undefined) updateData.total_quantity = Number(data.totalQuantity);
-        if (data.amountInWords !== undefined) updateData.amount_in_words = data.amountInWords;
         updateData.updated_at = new Date().toISOString();
 
         const { error } = await supabase.from('proforma_invoices').update(updateData).eq('id', id);
         if (error) throw error;
+
+        if (hasItems) {
+          const { data: existingRows, error: exErr } = await supabase
+            .from('proforma_invoice_items').select('id').eq('pi_id', id);
+          if (exErr) throw exErr;
+          const existingIds = new Set((existingRows || []).map(r => String(r.id)));
+          const keptIds = new Set();
+          const newRows = [];
+
+          for (const it of normalizedItems) {
+            const row = toPiItemRow(it);
+            if (it.id && existingIds.has(String(it.id))) {
+              keptIds.add(String(it.id));
+              const { error: upErr } = await supabase.from('proforma_invoice_items').update(row).eq('id', it.id);
+              if (upErr) throw upErr;
+            } else {
+              newRows.push({ ...row, pi_id: id });
+            }
+          }
+
+          const removedIds = (existingRows || []).map(r => r.id).filter(rid => !keptIds.has(String(rid)));
+          if (removedIds.length > 0) {
+            await supabase.from('challan_items').update({ pi_item_id: null }).in('pi_item_id', removedIds);
+            const { error: delErr } = await supabase.from('proforma_invoice_items').delete().in('id', removedIds);
+            if (delErr) throw delErr;
+          }
+          if (newRows.length > 0) {
+            const { error: insErr } = await supabase.from('proforma_invoice_items').insert(newRows);
+            if (insErr) throw insErr;
+          }
+        }
+
         await syncSavedSequence(data.piNumber, data.billNumber);
         return true;
       } catch (cloudErr) {
@@ -785,28 +852,54 @@ const FinanceRepo = {
 
     const sets = [];
     const params = [];
-    if (data.piNumber !== undefined) { sets.push('pi_number = ?'); params.push(data.piNumber); }
-    if (data.billNumber !== undefined) { sets.push('bill_number = ?'); params.push(data.billNumber); }
-    if (data.piDate !== undefined) { sets.push('pi_date = ?'); params.push(data.piDate); }
-    if (data.billDate !== undefined) { sets.push('bill_date = ?'); params.push(data.billDate); }
-    if (data.buyer !== undefined) { sets.push('buyer = ?'); params.push(data.buyer); }
+    for (const [key, col] of Object.entries(PI_UPDATE_FIELDS)) {
+      if (data[key] !== undefined) { sets.push(`${col} = ?`); params.push(data[key]); }
+    }
     if (data.challanIds !== undefined) {
       sets.push('challan_ids = ?');
       params.push(typeof data.challanIds === 'string' ? data.challanIds : JSON.stringify(data.challanIds));
     }
-    if (data.challanNumbers !== undefined) { sets.push('challan_numbers = ?'); params.push(data.challanNumbers); }
-    if (data.netWeight !== undefined) { sets.push('net_weight = ?'); params.push(data.netWeight); }
-    if (data.grossWeight !== undefined) { sets.push('gross_weight = ?'); params.push(data.grossWeight); }
-    if (data.termsConditions !== undefined) { sets.push('terms_conditions = ?'); params.push(data.termsConditions); }
-    if (data.status !== undefined) { sets.push('status = ?'); params.push(data.status); }
-    if (data.notes !== undefined) { sets.push('notes = ?'); params.push(data.notes); }
     if (data.totalAmount !== undefined) { sets.push('total_amount = ?'); params.push(Number(data.totalAmount)); }
     if (data.totalQuantity !== undefined) { sets.push('total_quantity = ?'); params.push(Number(data.totalQuantity)); }
-    if (data.amountInWords !== undefined) { sets.push('amount_in_words = ?'); params.push(data.amountInWords); }
     sets.push('updated_at = CURRENT_TIMESTAMP');
 
     params.push(id);
     dbPrepare(`UPDATE proforma_invoices SET ${sets.join(', ')} WHERE id = ?`).run(...params);
+
+    if (hasItems) {
+      const existingRows = dbPrepare('SELECT id FROM proforma_invoice_items WHERE pi_id = ?').all(id);
+      const existingIds = new Set(existingRows.map(r => String(r.id)));
+      const keptIds = new Set();
+
+      for (const it of normalizedItems) {
+        const r = toPiItemRow(it);
+        if (it.id && existingIds.has(String(it.id))) {
+          keptIds.add(String(it.id));
+          dbPrepare(`
+            UPDATE proforma_invoice_items SET
+              sl_no = ?, challan_id = ?, item_id = ?, item_description = ?, po_style_no = ?,
+              quantity = ?, unit = ?, unit_price = ?, total_amount = ?, notes = ?
+            WHERE id = ? AND pi_id = ?
+          `).run(r.sl_no, r.challan_id, r.item_id, r.item_description, r.po_style_no,
+            r.quantity, r.unit, r.unit_price, r.total_amount, r.notes, it.id, id);
+        } else {
+          dbPrepare(`
+            INSERT INTO proforma_invoice_items (
+              pi_id, sl_no, challan_id, item_id, item_description,
+              po_style_no, quantity, unit, unit_price, total_amount, notes
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(id, r.sl_no, r.challan_id, r.item_id, r.item_description,
+            r.po_style_no, r.quantity, r.unit, r.unit_price, r.total_amount, r.notes);
+        }
+      }
+
+      for (const row of existingRows) {
+        if (keptIds.has(String(row.id))) continue;
+        try { dbPrepare('UPDATE challan_items SET pi_item_id = NULL WHERE pi_item_id = ?').run(row.id); } catch (e) { /* column may not exist on legacy DBs */ }
+        dbPrepare('DELETE FROM proforma_invoice_items WHERE id = ?').run(row.id);
+      }
+    }
+
     await syncSavedSequence(data.piNumber, data.billNumber);
     return true;
   },

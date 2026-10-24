@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Plus, Trash2, Save, X } from 'lucide-react';
 import { CURRENCY_SYMBOLS, calcTotals } from './piApprovalUtils';
 
@@ -11,13 +11,21 @@ const sectionTitle = {
 };
 const cellInput = { width: '100%', minWidth: 0, padding: '6px 8px', fontSize: 12 };
 
+const DEFAULT_NOTICE = 'Editing this Proforma Invoice. Changes apply to the pending request and are used when it is approved.';
+
 /**
- * Full-PI editor used by admins inside the approval review modal.
+ * Full-PI editor used by admins inside the approval review modal
+ * and for editing existing PIs from the Finance page.
  * `form` is produced by toEditForm(); onSave receives the edited form.
+ * Optional: `notice` overrides the banner text, `onFormChange` reports live edits.
  */
-export default function PiApprovalEditor({ initialForm, saving, onSave, onCancel }) {
+export default function PiApprovalEditor({ initialForm, saving, onSave, onCancel, notice = DEFAULT_NOTICE, onFormChange }) {
   const [form, setForm] = useState(initialForm);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (onFormChange) onFormChange(form);
+  }, [form, onFormChange]);
 
   const set = (field, val) => setForm(prev => ({ ...prev, [field]: val }));
 
@@ -72,7 +80,7 @@ export default function PiApprovalEditor({ initialForm, saving, onSave, onCancel
         background: 'var(--accent-dim)', border: '1px solid var(--accent)', borderRadius: 8,
         padding: '8px 12px', fontSize: 12, color: 'var(--accent)', marginBottom: 4
       }}>
-        Editing this Proforma Invoice. Changes apply to the pending request and are used when it is approved.
+        {notice}
       </div>
 
       <div style={sectionTitle}>Invoice</div>

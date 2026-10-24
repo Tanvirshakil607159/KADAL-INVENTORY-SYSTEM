@@ -205,3 +205,53 @@ export const buildApprovalPayload = (form, originalRaw) => {
     items
   };
 };
+
+/**
+ * Editor form + existing (saved) PI record -> payload for finance.update(id, payload).
+ * Item `id`s are kept so the backend updates rows in place (preserving challan links).
+ */
+export const buildPiUpdatePayload = (form, existingPi) => {
+  const merged = buildApprovalPayload(form, existingPi);
+  const pNum = merged.purchaseNumber;
+
+  // Keep "Purchase No" discoverable in notes (same convention as PI creation)
+  let notes = merged.notes || '';
+  if (pNum && !/purchase\s*no/i.test(notes)) {
+    notes = notes ? `${notes} | Purchase No: ${pNum}` : `Purchase No: ${pNum}`;
+  }
+
+  return {
+    piNumber: merged.piNumber,
+    piDate: merged.piDate,
+    applicantName: merged.applicantName,
+    applicantAddress: merged.applicantAddress || null,
+    beneficiaryName: merged.beneficiaryName,
+    beneficiaryAddress: merged.beneficiaryAddress,
+    beneficiaryBin: merged.beneficiaryBin,
+    bankDetails: merged.bankDetails,
+    buyer: merged.buyer || null,
+    currency: merged.currency,
+    currencySymbol: merged.currencySymbol,
+    netWeight: merged.netWeight,
+    grossWeight: merged.grossWeight,
+    termsConditions: merged.termsConditions,
+    notes: notes || null,
+    totalQuantity: merged.totalQuantity,
+    totalAmount: merged.totalAmount,
+    amountInWords: merged.amountInWords,
+    items: merged.items.map((it) => ({
+      id: it.id || null,
+      slNo: it.slNo,
+      challanId: it.challanId || it.challan_id || null,
+      itemId: it.itemId || null,
+      itemDescription: it.itemDescription,
+      purchaseNo: it.purchaseNo,
+      poStyleNo: it.poStyleNo,
+      quantity: it.quantity,
+      unit: it.unit,
+      unitPrice: it.unitPrice,
+      totalAmount: it.totalAmount,
+      notes: it.notes || null
+    }))
+  };
+};

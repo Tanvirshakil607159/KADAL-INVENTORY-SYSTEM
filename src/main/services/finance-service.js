@@ -172,6 +172,24 @@ const FinanceService = {
     const old = await FinanceRepo.getById(id);
     if (!old) throw new Error('Proforma Invoice not found');
 
+    // Full content edits (line items) are not allowed once a PI is billed
+    if (Array.isArray(data.items) && (old.status === 'BILLED' || old.bill_number)) {
+      throw new Error('This Proforma Invoice is already transferred to a Commercial Bill and cannot be edited.');
+    }
+
+    // Prevent duplicate PI numbers
+    if (data.piNumber !== undefined) {
+      const newNum = String(data.piNumber || '').trim();
+      if (!newNum) throw new Error('Proforma Invoice Number cannot be empty');
+      if (newNum !== old.pi_number) {
+        const clash = await FinanceRepo.getByNumber(newNum);
+        if (clash && String(clash.id) !== String(id)) {
+          throw new Error(`PI Number "${newNum}" is already used by another Proforma Invoice`);
+        }
+      }
+      data = { ...data, piNumber: newNum };
+    }
+
     const res = await FinanceRepo.update(id, data);
 
     await AuditLogsRepo.create({
@@ -179,7 +197,7 @@ const FinanceService = {
       action: 'UPDATE',
       entityType: 'proforma_invoice',
       entityId: id,
-      oldValue: { piNumber: old.pi_number, status: old.status },
+      oldValue: { piNumber: old.pi_number, status: old.status, totalAmount: old.total_amount, itemCount: (old.items || []).length },
       newValue: data,
     });
 
