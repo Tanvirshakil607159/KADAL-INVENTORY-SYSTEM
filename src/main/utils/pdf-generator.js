@@ -1258,7 +1258,7 @@ const PdfGenerator = {
         if (displayPoStyle && displayPoStyle.includes(' / ')) {
           displayPoStyle = displayPoStyle.split(' / ').join('\n');
         }
-        const lineTotal = Number((m.qty * m.rate).toFixed(2));
+        const lineTotal = Number(m.total !== undefined ? m.total.toFixed(2) : (m.qty * m.rate).toFixed(2));
 
         return [
           { text: String(idx + 1), alignment: 'center', style: 'piTableCell' },
@@ -1272,8 +1272,8 @@ const PdfGenerator = {
         ];
       });
 
-      totalQty = Array.from(mergedMap.values()).reduce((sum, it) => sum + it.qty, 0);
-      totalAmt = Array.from(mergedMap.values()).reduce((sum, it) => sum + Number((it.qty * it.rate).toFixed(2)), 0);
+      totalQty = pi.total_quantity !== undefined ? Number(pi.total_quantity) : Array.from(mergedMap.values()).reduce((sum, it) => sum + it.qty, 0);
+      totalAmt = pi.total_amount !== undefined ? Number(pi.total_amount) : Number(Array.from(mergedMap.values()).reduce((sum, it) => sum + (it.total || 0), 0).toFixed(2));
     }
 
     // Total row
@@ -1290,8 +1290,8 @@ const PdfGenerator = {
 
     const sigTopMargin = Math.max(15, Math.min(180, 200 - (items.length * 16)));
 
-    const cw = pi.customColWidths || { sl: 32, desc: 195, purch: 105, po: 115, qty: 55, unit: 40, rate: 65, total: 75 };
-    const totalPx = (cw.sl || 32) + (cw.desc || 195) + (cw.purch || 105) + (cw.po || 115) + (cw.qty || 55) + (cw.unit || 40) + (cw.rate || 65) + (cw.total || 75);
+    const cw = pi.customColWidths || { sl: 28, desc: 165, purch: 80, po: 155, qty: 55, unit: 36, rate: 65, total: 88 };
+    const totalPx = (cw.sl || 28) + (cw.desc || 165) + (cw.purch || 80) + (cw.po || 155) + (cw.qty || 55) + (cw.unit || 36) + (cw.rate || 65) + (cw.total || 88);
     const pdfWidths = [
       `${((cw.sl || 32) / totalPx * 100).toFixed(2)}%`,
       `${((cw.desc || 195) / totalPx * 100).toFixed(2)}%`,
