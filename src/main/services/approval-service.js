@@ -31,7 +31,7 @@ const ApprovalService = {
     try {
       switch (request.type) {
         case 'CREATE_ITEM':
-          result = await InventoryService._executeCreate(data);
+          result = await InventoryService._executeCreate(data, { excludeApprovalId: id });
           break;
         case 'PENDING_ITEM': // Merchandiser creates item, inventory approves -> goes to Admin Approval
           result = await this.createRequest('CREATE_ITEM', data);

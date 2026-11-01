@@ -586,25 +586,40 @@ const ItemsRepo = {
     return dbPrepare(`SELECT i.*, c.name as category_name FROM items i LEFT JOIN categories c ON i.category_id = c.id ${w} ORDER BY (i.current_stock - i.min_stock_level) ASC`).all(...params);
   },
 
-  async checkCodeExists(code, excludeId = null) {
+  async checkCodeExists(code, excludeId = null, options = {}) {
+    let excludeApprovalId = null;
+    let checkPending = true;
+    if (typeof options === 'object' && options !== null) {
+      excludeApprovalId = options.excludeApprovalId || null;
+      if (options.checkPending !== undefined) checkPending = options.checkPending;
+    } else if (typeof options === 'number' || typeof options === 'string') {
+      excludeApprovalId = options;
+    }
+
     if (isCloudEnabled()) {
       let query = getSupabase().from('items').select('id').eq('item_code', code);
       if (excludeId) query = query.neq('id', excludeId);
       const { data, error } = await query;
       if (error) throw error;
-      if (data.length > 0) return data[0];
+      if (data && data.length > 0) return data[0];
+
+      if (!checkPending) return null;
 
       // Also check pending approvals
-      const { data: pending, error: pErr } = await getSupabase()
+      let pQuery = getSupabase()
         .from('approvals')
-        .select('data')
+        .select('id, data')
         .eq('type', 'CREATE_ITEM')
         .eq('status', 'PENDING');
+      if (excludeApprovalId) {
+        pQuery = pQuery.neq('id', excludeApprovalId);
+      }
+      const { data: pending, error: pErr } = await pQuery;
       
       if (pErr) throw pErr;
-      const found = pending.find(a => {
+      const found = (pending || []).find(a => {
         const d = typeof a.data === 'string' ? JSON.parse(a.data) : a.data;
-        return d.itemCode === code;
+        return d && d.itemCode === code;
       });
       return found ? { id: 'pending' } : null;
     }
@@ -617,11 +632,19 @@ const ItemsRepo = {
       if (existing) return existing;
     }
 
+    if (!checkPending) return null;
+
     // Check pending approvals locally
-    const pending = dbPrepare("SELECT data FROM approvals WHERE type = 'CREATE_ITEM' AND status = 'PENDING'").all();
+    let sql = "SELECT id, data FROM approvals WHERE type = 'CREATE_ITEM' AND status = 'PENDING'";
+    const params = [];
+    if (excludeApprovalId) {
+      sql += " AND id != ?";
+      params.push(excludeApprovalId);
+    }
+    const pending = dbPrepare(sql).all(...params);
     const found = pending.find(a => {
       const d = typeof a.data === 'string' ? JSON.parse(a.data) : a.data;
-      return d.itemCode === code;
+      return d && d.itemCode === code;
     });
     return found ? { id: 'pending' } : null;
   },
@@ -685,7 +708,7 @@ const ItemsRepo = {
     return { names, colors, sizes, styles, purchases, orders, buyers, notes, receivers };
   },
 
-  async getNextCode() {
+  async getNextCode(excludeApprovalId = null) {
     let allCodes = [];
 
     if (isCloudEnabled()) {
@@ -699,16 +722,20 @@ const ItemsRepo = {
       allCodes = (data || []).map(i => i.item_code);
 
       // Also fetch pending approvals to ensure they are skipped
-      const { data: pending, error: pErr } = await getSupabase()
+      let pQuery = getSupabase()
         .from('approvals')
-        .select('data')
+        .select('id, data')
         .eq('type', 'CREATE_ITEM')
         .eq('status', 'PENDING');
+      if (excludeApprovalId) {
+        pQuery = pQuery.neq('id', excludeApprovalId);
+      }
+      const { data: pending, error: pErr } = await pQuery;
       
       if (!pErr && pending) {
         pending.forEach(a => {
           const d = typeof a.data === 'string' ? JSON.parse(a.data) : a.data;
-          if (d.itemCode) allCodes.push(d.itemCode);
+          if (d && d.itemCode) allCodes.push(d.itemCode);
         });
       }
     } else {
@@ -716,10 +743,16 @@ const ItemsRepo = {
       allCodes = all.map(item => item.item_code);
 
       // Check pending approvals locally
-      const pending = dbPrepare("SELECT data FROM approvals WHERE type = 'CREATE_ITEM' AND status = 'PENDING'").all();
+      let sql = "SELECT id, data FROM approvals WHERE type = 'CREATE_ITEM' AND status = 'PENDING'";
+      const params = [];
+      if (excludeApprovalId) {
+        sql += " AND id != ?";
+        params.push(excludeApprovalId);
+      }
+      const pending = dbPrepare(sql).all(...params);
       pending.forEach(a => {
         const d = typeof a.data === 'string' ? JSON.parse(a.data) : a.data;
-        if (d.itemCode) allCodes.push(d.itemCode);
+        if (d && d.itemCode) allCodes.push(d.itemCode);
       });
     }
 

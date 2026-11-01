@@ -884,12 +884,17 @@ export default function ProformaInvoicePrintView({
                 </tbody>
               </table>
 
-              {/* Continuation Notice on non-final pages */}
-              {!page.isLastPage && (
-                <div className="pi-continuation-notice">
-                  <span>--- Continued on Page {page.pageIndex + 2} ---</span>
-                </div>
-              )}
+              {/* Table Bottom Page Indicator & Continuation Notice */}
+              <div className="pi-table-bottom-bar">
+                <span className="pi-table-page-number">
+                  Page {page.pageIndex + 1} of {page.totalPages}
+                </span>
+                {!page.isLastPage && (
+                  <span className="pi-continuation-notice">
+                    --- Continued on Page {page.pageIndex + 2} ---
+                  </span>
+                )}
+              </div>
 
               {/* Summary and Signatures on Final Page */}
               {page.isLastPage && (

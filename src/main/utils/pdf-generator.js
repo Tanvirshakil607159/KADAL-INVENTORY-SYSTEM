@@ -1330,7 +1330,14 @@ const PdfGenerator = {
                 ]
               },
               {
-                width: 230,
+                width: 100,
+                alignment: 'center',
+                stack: [
+                  { text: `Page ${currentPage} of ${pageCount}`, fontSize: 8.5, bold: true, color: '#047857', alignment: 'center', margin: [0, 6, 0, 0] }
+                ]
+              },
+              {
+                width: 215,
                 alignment: 'right',
                 stack: [
                   { text: 'Contact Details:', bold: true, fontSize: 8, color: '#047857', alignment: 'right' },
