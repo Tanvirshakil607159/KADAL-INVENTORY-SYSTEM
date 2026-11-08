@@ -429,7 +429,7 @@ const ChallansRepo = {
   },
 
   async create({ challanNumber, receiverName, receiverContact, receiverAddress, notes, challanDate, createdBy, items, piId, pi_id }) {
-    const linkedPiId = piId || pi_id || null;
+    let linkedPiId = piId || pi_id || null;
     // Check for duplicate challan number
     if (isCloudEnabled()) {
       const { data: existing } = await getSupabase().from('challans').select('id').eq('challan_number', challanNumber).single();
@@ -441,6 +441,46 @@ const ChallansRepo = {
 
     if (isCloudEnabled()) {
       const supabase = getSupabase();
+
+      // Policy: If any item belongs to a specific active PI, automatically link this challan to that PI
+      if (!linkedPiId && items && items.length > 0) {
+        const itemIds = items.map(it => it.itemId || it.item_id).filter(Boolean);
+        if (itemIds.length > 0) {
+          try {
+            const { data: piItems, error: piiErr } = await supabase
+              .from('proforma_invoice_items')
+              .select('id, pi_id, item_id, proforma_invoices!inner(id, status)')
+              .in('item_id', itemIds)
+              .neq('proforma_invoices.status', 'CANCELLED')
+              .order('pi_id', { ascending: false });
+
+            if (!piiErr && piItems && piItems.length > 0) {
+              linkedPiId = piItems[0].pi_id;
+            }
+          } catch (err) {
+            console.warn('[ChallansRepo] Error auto-detecting PI for challan items:', err.message);
+          }
+        }
+      }
+
+      // If linkedPiId is set, fetch its PI items to auto-map missing pi_item_id on each item
+      let piItemMap = {};
+      if (linkedPiId) {
+        try {
+          const { data: pItems } = await supabase
+            .from('proforma_invoice_items')
+            .select('id, item_id')
+            .eq('pi_id', linkedPiId);
+          if (pItems) {
+            pItems.forEach(piIt => {
+              if (piIt.item_id) piItemMap[piIt.item_id] = piIt.id;
+            });
+          }
+        } catch (err) {
+          console.warn('[ChallansRepo] Error fetching PI items for mapping:', err.message);
+        }
+      }
+
       const insertObj = {
         challan_number: challanNumber,
         receiver_name: receiverName,
@@ -450,20 +490,24 @@ const ChallansRepo = {
         challan_date: challanDate,
         created_by: createdBy
       };
-      if (linkedPiId) insertObj.pi_id = linkedPiId;
+      if (linkedPiId) {
+        insertObj.pi_id = linkedPiId;
+        insertObj.received_status = 'PENDING';
+      }
 
       const { data: challan, error } = await supabase.from('challans').insert([insertObj]).select().single();
       if (error) throw error;
       
       const challanItems = items.map(item => {
+        const itemId = item.itemId || item.item_id;
         const obj = {
           challan_id: challan.id,
-          item_id: item.itemId,
+          item_id: itemId,
           quantity: item.quantity,
           unit: item.unit,
           notes: item.notes || null
         };
-        const piItem = item.piItemId || item.pi_item_id;
+        const piItem = item.piItemId || item.pi_item_id || piItemMap[itemId];
         if (piItem) obj.pi_item_id = piItem;
         if (linkedPiId) obj.received_quantity = 0;
         return obj;
@@ -476,7 +520,63 @@ const ChallansRepo = {
         throw itemsError;
       }
       
+      if (linkedPiId) {
+        try {
+          const { data: allLinked } = await supabase
+            .from('challans')
+            .select('id, challan_number')
+            .eq('pi_id', linkedPiId)
+            .eq('status', 'ACTIVE');
+          const ids = (allLinked || []).map(c => c.id);
+          const numbers = (allLinked || []).map(c => c.challan_number).join(', ');
+          await supabase
+            .from('proforma_invoices')
+            .update({ challan_ids: ids, challan_numbers: numbers, updated_at: new Date().toISOString() })
+            .eq('id', linkedPiId);
+
+          const FinanceRepo = require('./finance');
+          await FinanceRepo.checkAndUpdatePiStatus(linkedPiId);
+        } catch (e) {
+          console.warn('[ChallansRepo] Error updating linked PI status:', e.message);
+        }
+      }
+
       return challan.id;
+    }
+
+    // Policy: SQLite local mode auto-detect PI
+    if (!linkedPiId && items && items.length > 0) {
+      const itemIds = items.map(it => it.itemId || it.item_id).filter(Boolean);
+      if (itemIds.length > 0) {
+        try {
+          const placeholders = itemIds.map(() => '?').join(',');
+          const piRow = dbPrepare(`
+            SELECT pii.id as pi_item_id, pii.pi_id, pii.item_id 
+            FROM proforma_invoice_items pii 
+            JOIN proforma_invoices pi ON pii.pi_id = pi.id 
+            WHERE pii.item_id IN (${placeholders}) AND pi.status != 'CANCELLED'
+            ORDER BY pi.id DESC
+            LIMIT 1
+          `).get(...itemIds);
+          if (piRow) {
+            linkedPiId = piRow.pi_id;
+          }
+        } catch (err) {
+          console.warn('[ChallansRepo] Error auto-detecting SQLite PI for challan items:', err.message);
+        }
+      }
+    }
+
+    let localPiItemMap = {};
+    if (linkedPiId) {
+      try {
+        const pItems = dbPrepare(`SELECT id, item_id FROM proforma_invoice_items WHERE pi_id = ?`).all(linkedPiId);
+        (pItems || []).forEach(piIt => {
+          if (piIt.item_id) localPiItemMap[piIt.item_id] = piIt.id;
+        });
+      } catch (err) {
+        console.warn('[ChallansRepo] Error fetching SQLite PI items for mapping:', err.message);
+      }
     }
 
     const r = dbPrepare(`INSERT INTO challans (challan_number, receiver_name, receiver_contact, receiver_address, notes, challan_date, created_by, pi_id, received_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PENDING')`).run(
@@ -484,13 +584,20 @@ const ChallansRepo = {
     );
     const challanId = r.lastInsertRowid;
     for (const item of items) {
+      const itemId = item.itemId || item.item_id;
+      const piItemId = item.piItemId || item.pi_item_id || localPiItemMap[itemId] || null;
       dbPrepare(`INSERT INTO challan_items (challan_id, item_id, quantity, unit, notes, pi_item_id, received_quantity) VALUES (?, ?, ?, ?, ?, ?, 0)`).run(
-        challanId, item.itemId, item.quantity, item.unit, item.notes||null, item.piItemId || item.pi_item_id || null
+        challanId, itemId, item.quantity, item.unit, item.notes||null, piItemId
       );
     }
 
     if (linkedPiId) {
       try {
+        const allLinked = dbPrepare("SELECT id, challan_number FROM challans WHERE pi_id = ? AND status = 'ACTIVE'").all(linkedPiId);
+        const ids = allLinked.map(c => c.id);
+        const numbers = allLinked.map(c => c.challan_number).join(', ');
+        dbPrepare('UPDATE proforma_invoices SET challan_ids = ?, challan_numbers = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(JSON.stringify(ids), numbers, linkedPiId);
+
         const FinanceRepo = require('./finance');
         await FinanceRepo.checkAndUpdatePiStatus(linkedPiId);
       } catch (e) {
@@ -623,14 +730,44 @@ const ChallansRepo = {
 
   async cancel(id, cancelledBy, reason) {
     if (isCloudEnabled()) {
-      const { error } = await getSupabase().from('challans')
+      const supabase = getSupabase();
+      const { data: ch } = await supabase.from('challans').select('pi_id').eq('id', id).maybeSingle();
+      const { error } = await supabase.from('challans')
         .update({ status: 'CANCELLED', cancelled_by: cancelledBy, cancel_reason: reason, updated_at: new Date().toISOString() })
         .eq('id', id)
         .eq('status', 'ACTIVE');
       if (error) throw error;
+
+      if (ch?.pi_id) {
+        try {
+          const { data: allLinked } = await supabase.from('challans').select('id, challan_number').eq('pi_id', ch.pi_id).eq('status', 'ACTIVE');
+          const ids = (allLinked || []).map(c => c.id);
+          const numbers = (allLinked || []).map(c => c.challan_number).join(', ');
+          await supabase.from('proforma_invoices').update({ challan_ids: ids, challan_numbers: numbers, updated_at: new Date().toISOString() }).eq('id', ch.pi_id);
+          const FinanceRepo = require('./finance');
+          await FinanceRepo.checkAndUpdatePiStatus(ch.pi_id);
+        } catch (e) {
+          console.warn('[ChallansRepo] Error updating PI after challan cancel:', e.message);
+        }
+      }
       return true;
     }
-    return dbPrepare(`UPDATE challans SET status = 'CANCELLED', cancelled_by = ?, cancel_reason = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'ACTIVE'`).run(cancelledBy, reason, id);
+
+    const ch = dbPrepare('SELECT pi_id FROM challans WHERE id = ?').get(id);
+    const result = dbPrepare(`UPDATE challans SET status = 'CANCELLED', cancelled_by = ?, cancel_reason = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'ACTIVE'`).run(cancelledBy, reason, id);
+    if (ch?.pi_id) {
+      try {
+        const allLinked = dbPrepare("SELECT id, challan_number FROM challans WHERE pi_id = ? AND status = 'ACTIVE'").all(ch.pi_id);
+        const ids = allLinked.map(c => c.id);
+        const numbers = allLinked.map(c => c.challan_number).join(', ');
+        dbPrepare('UPDATE proforma_invoices SET challan_ids = ?, challan_numbers = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(JSON.stringify(ids), numbers, ch.pi_id);
+        const FinanceRepo = require('./finance');
+        await FinanceRepo.checkAndUpdatePiStatus(ch.pi_id);
+      } catch (e) {
+        console.warn('[ChallansRepo] Error updating PI after SQLite challan cancel:', e.message);
+      }
+    }
+    return result;
   },
 
   async getNextNumber(prefix = 'KA') {
@@ -876,18 +1013,46 @@ const ChallansRepo = {
   async delete(id) {
     if (isCloudEnabled()) {
       const supabase = getSupabase();
+      const { data: ch } = await supabase.from('challans').select('pi_id').eq('id', id).maybeSingle();
       await supabase.from('stock_transactions').delete().eq('challan_id', id);
       await supabase.from('challan_items').delete().eq('challan_id', id);
       const { error } = await supabase.from('challans').delete().eq('id', id);
       if (error) throw error;
+
+      if (ch?.pi_id) {
+        try {
+          const { data: allLinked } = await supabase.from('challans').select('id, challan_number').eq('pi_id', ch.pi_id).eq('status', 'ACTIVE');
+          const ids = (allLinked || []).map(c => c.id);
+          const numbers = (allLinked || []).map(c => c.challan_number).join(', ');
+          await supabase.from('proforma_invoices').update({ challan_ids: ids, challan_numbers: numbers, updated_at: new Date().toISOString() }).eq('id', ch.pi_id);
+          const FinanceRepo = require('./finance');
+          await FinanceRepo.checkAndUpdatePiStatus(ch.pi_id);
+        } catch (e) {
+          console.warn('[ChallansRepo] Error updating PI after challan delete:', e.message);
+        }
+      }
       return true;
     }
 
+    const ch = dbPrepare('SELECT pi_id FROM challans WHERE id = ?').get(id);
     const db = require('../connection').getDb();
     db.run('DELETE FROM stock_transactions WHERE challan_id = ?', [id]);
     db.run('DELETE FROM challan_items WHERE challan_id = ?', [id]);
     db.run('DELETE FROM challans WHERE id = ?', [id]);
     require('../connection').saveDatabase();
+
+    if (ch?.pi_id) {
+      try {
+        const allLinked = dbPrepare("SELECT id, challan_number FROM challans WHERE pi_id = ? AND status = 'ACTIVE'").all(ch.pi_id);
+        const ids = allLinked.map(c => c.id);
+        const numbers = allLinked.map(c => c.challan_number).join(', ');
+        dbPrepare('UPDATE proforma_invoices SET challan_ids = ?, challan_numbers = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(JSON.stringify(ids), numbers, ch.pi_id);
+        const FinanceRepo = require('./finance');
+        await FinanceRepo.checkAndUpdatePiStatus(ch.pi_id);
+      } catch (e) {
+        console.warn('[ChallansRepo] Error updating PI after SQLite challan delete:', e.message);
+      }
+    }
     return true;
   }
 };

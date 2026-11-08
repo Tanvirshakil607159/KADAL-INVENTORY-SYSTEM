@@ -483,6 +483,18 @@ export const webBridge = {
           }]);
         }
       }
+
+      if (challan.pi_id) {
+        try {
+          const { data: allLinked } = await supabase.from('challans').select('id, challan_number').eq('pi_id', challan.pi_id).eq('status', 'ACTIVE');
+          const ids = (allLinked || []).map(c => c.id);
+          const numbers = (allLinked || []).map(c => c.challan_number).join(', ');
+          await supabase.from('proforma_invoices').update({ challan_ids: ids, challan_numbers: numbers, updated_at: new Date().toISOString() }).eq('id', challan.pi_id);
+        } catch (e) {
+          console.warn('[web-bridge] Error updating PI after cancel:', e);
+        }
+      }
+
       return true;
     }),
     delete: (id) => wrap(async () => {
@@ -521,6 +533,17 @@ export const webBridge = {
       await supabase.from('challan_items').delete().eq('challan_id', id);
       const { error: delErr } = await supabase.from('challans').delete().eq('id', id);
       if (delErr) throw delErr;
+
+      if (challan.pi_id) {
+        try {
+          const { data: allLinked } = await supabase.from('challans').select('id, challan_number').eq('pi_id', challan.pi_id).eq('status', 'ACTIVE');
+          const ids = (allLinked || []).map(c => c.id);
+          const numbers = (allLinked || []).map(c => c.challan_number).join(', ');
+          await supabase.from('proforma_invoices').update({ challan_ids: ids, challan_numbers: numbers, updated_at: new Date().toISOString() }).eq('id', challan.pi_id);
+        } catch (e) {
+          console.warn('[web-bridge] Error updating PI after delete:', e);
+        }
+      }
 
       return true;
     }),

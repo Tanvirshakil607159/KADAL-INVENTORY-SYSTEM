@@ -119,29 +119,101 @@ export const challansApi = {
   },
   create: async (data) => {
     const supabase = getSupabase();
+    let linkedPiId = data.piId || data.pi_id || null;
+
+    // Policy: If any item belongs to a specific active PI, automatically link this challan to that PI
+    if (!linkedPiId && data.items && data.items.length > 0) {
+      const itemIds = data.items.map(it => it.itemId || it.item_id).filter(Boolean);
+      if (itemIds.length > 0) {
+        try {
+          const { data: piItems, error: piiErr } = await supabase
+            .from('proforma_invoice_items')
+            .select('id, pi_id, item_id, proforma_invoices!inner(id, status)')
+            .in('item_id', itemIds)
+            .neq('proforma_invoices.status', 'CANCELLED')
+            .order('pi_id', { ascending: false });
+
+          if (!piiErr && piItems && piItems.length > 0) {
+            linkedPiId = piItems[0].pi_id;
+          }
+        } catch (err) {
+          console.warn('[challansApi] Error auto-detecting PI for challan items:', err.message);
+        }
+      }
+    }
+
+    let piItemMap = {};
+    if (linkedPiId) {
+      try {
+        const { data: pItems } = await supabase
+          .from('proforma_invoice_items')
+          .select('id, item_id')
+          .eq('pi_id', linkedPiId);
+        if (pItems) {
+          pItems.forEach(piIt => {
+            if (piIt.item_id) piItemMap[piIt.item_id] = piIt.id;
+          });
+        }
+      } catch (err) {
+        console.warn('[challansApi] Error fetching PI items for mapping:', err.message);
+      }
+    }
+
     // 1. Create challan
-    const { data: challan, error } = await supabase.from('challans').insert([{
+    const challanInsert = {
       challan_number: data.challanNumber,
       challan_date: data.challanDate,
       receiver_name: data.receiverName,
-      receiver_contact: data.receiverContact,
-      receiver_address: data.receiverAddress,
-      notes: data.notes,
+      receiver_contact: data.receiverContact || null,
+      receiver_address: data.receiverAddress || null,
+      notes: data.notes || null,
       total_items: data.items.length,
-      status: 'DELIVERED'
-    }]).select().single();
+      status: 'ACTIVE'
+    };
+    if (linkedPiId) {
+      challanInsert.pi_id = linkedPiId;
+      challanInsert.received_status = 'PENDING';
+    }
+
+    const { data: challan, error } = await supabase.from('challans').insert([challanInsert]).select().single();
     if (error) throw error;
 
     // 2. Create challan items
-    const challanItems = data.items.map(item => ({
-      challan_id: challan.id,
-      item_id: item.itemId,
-      quantity: item.quantity,
-      unit: item.unit,
-      notes: item.notes
-    }));
+    const challanItems = data.items.map(item => {
+      const itemId = item.itemId || item.item_id;
+      const piItem = item.piItemId || item.pi_item_id || piItemMap[itemId];
+      const obj = {
+        challan_id: challan.id,
+        item_id: itemId,
+        quantity: item.quantity,
+        unit: item.unit,
+        notes: item.notes || null
+      };
+      if (piItem) obj.pi_item_id = piItem;
+      if (linkedPiId) obj.received_quantity = 0;
+      return obj;
+    });
     const { error: itemsErr } = await supabase.from('challan_items').insert(challanItems);
     if (itemsErr) throw itemsErr;
+
+    // Update PI records
+    if (linkedPiId) {
+      try {
+        const { data: allLinked } = await supabase
+          .from('challans')
+          .select('id, challan_number')
+          .eq('pi_id', linkedPiId)
+          .eq('status', 'ACTIVE');
+        const ids = (allLinked || []).map(c => c.id);
+        const numbers = (allLinked || []).map(c => c.challan_number).join(', ');
+        await supabase
+          .from('proforma_invoices')
+          .update({ challan_ids: ids, challan_numbers: numbers, updated_at: new Date().toISOString() })
+          .eq('id', linkedPiId);
+      } catch (e) {
+        console.warn('[challansApi] Error updating PI challan records:', e.message);
+      }
+    }
 
     // 3. Update stock (simplified for web) and write stock transactions
     const userRaw = sessionStorage.getItem('kadal_user');

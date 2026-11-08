@@ -163,6 +163,63 @@ export default function ChallanPage() {
 
   const selectedPi = availablePis.find(p => p.id === Number(selectedPiId));
 
+  // Policy: Auto-detect and link to PI if any item in challan belongs to an active PI
+  useEffect(() => {
+    if (!challanItems || challanItems.length === 0 || !availablePis || availablePis.length === 0) return;
+
+    let foundMatchingPi = null;
+    let matchedItemName = '';
+
+    for (const ci of challanItems) {
+      const itId = ci.itemId || ci.id;
+      if (!itId) continue;
+
+      const p = availablePis.find(pi => 
+        (pi.items || []).some(piIt => (piIt.itemId || piIt.item_id) === itId)
+      );
+
+      if (p) {
+        foundMatchingPi = p;
+        matchedItemName = ci.itemName || 'Item';
+        break;
+      }
+    }
+
+    if (foundMatchingPi) {
+      if (Number(selectedPiId) !== foundMatchingPi.id) {
+        setSelectedPiId(foundMatchingPi.id);
+        setChallanForm(prev => ({
+          ...prev,
+          piId: foundMatchingPi.id,
+          receiverId: prev.receiverId || foundMatchingPi.recipient_id || null,
+          receiverName: prev.receiverName || foundMatchingPi.applicant_name || '',
+          receiverAddress: prev.receiverAddress || foundMatchingPi.applicant_address || '',
+          notes: prev.notes || `Against PI #${foundMatchingPi.pi_number}${foundMatchingPi.buyer ? ` (Buyer: ${foundMatchingPi.buyer})` : ''}`
+        }));
+        addToast('info', `Item "${matchedItemName}" is in PI #${foundMatchingPi.pi_number}. Challan automatically linked!`);
+      }
+
+      // Ensure matching items have piItemId set
+      let needsUpdate = false;
+      const updatedItems = challanItems.map(ci => {
+        const itId = ci.itemId || ci.id;
+        const matchedPiIt = (foundMatchingPi.items || []).find(piIt => (piIt.itemId || piIt.item_id) === itId);
+        if (matchedPiIt && ci.piItemId !== matchedPiIt.id) {
+          needsUpdate = true;
+          return {
+            ...ci,
+            piItemId: matchedPiIt.id
+          };
+        }
+        return ci;
+      });
+
+      if (needsUpdate) {
+        setChallanItems(updatedItems);
+      }
+    }
+  }, [challanItems, availablePis, selectedPiId, addToast, setChallanForm, setChallanItems]);
+
   const handlePiSelect = (piIdStr) => {
     const pId = piIdStr ? Number(piIdStr) : null;
     setSelectedPiId(pId || '');
@@ -582,7 +639,7 @@ export default function ChallanPage() {
             <div style={{ flex: 1, minWidth: 260 }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 700, color: 'var(--text)', marginBottom: 6 }}>
                 <FileCheck size={16} color="var(--primary)" />
-                Link to Proforma Invoice (PI) <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>(Optional / Required for 100% Receipt Billing Flow)</span>
+                Link to Proforma Invoice (PI) <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>(Auto-links when delivering PI items)</span>
               </label>
               <select
                 className="form-input"
