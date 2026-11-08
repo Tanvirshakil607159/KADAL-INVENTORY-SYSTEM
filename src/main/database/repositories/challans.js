@@ -501,6 +501,52 @@ const ChallansRepo = {
     return challanId;
   },
 
+  async linkToPi(challanId, piId) {
+    const parsedChallanId = Number(challanId);
+    const parsedPiId = Number(piId);
+    if (!parsedChallanId || !parsedPiId) throw new Error('Invalid challanId or piId');
+
+    const FinanceRepo = require('./finance');
+    const pi = await FinanceRepo.getById(parsedPiId);
+    if (!pi) throw new Error(`PI #${parsedPiId} not found`);
+
+    const challan = await this.getById(parsedChallanId);
+    if (!challan) throw new Error(`Challan #${parsedChallanId} not found`);
+
+    if (isCloudEnabled()) {
+      const supabase = getSupabase();
+      await supabase.from('challans').update({ pi_id: parsedPiId, updated_at: new Date().toISOString() }).eq('id', parsedChallanId);
+
+      for (const ci of (challan.items || [])) {
+        const matched = (pi.items || []).find(piIt => piIt.item_id === ci.item_id || piIt.id === ci.pi_item_id);
+        if (matched) {
+          await supabase.from('challan_items').update({ pi_item_id: matched.id }).eq('id', ci.id);
+        }
+      }
+
+      const { data: allLinked } = await supabase.from('challans').select('id, challan_number').eq('pi_id', parsedPiId).eq('status', 'ACTIVE');
+      const ids = (allLinked || []).map(c => c.id);
+      const numbers = (allLinked || []).map(c => c.challan_number).join(', ');
+      await supabase.from('proforma_invoices').update({ challan_ids: ids, challan_numbers: numbers, updated_at: new Date().toISOString() }).eq('id', parsedPiId);
+      await FinanceRepo.checkAndUpdatePiStatus(parsedPiId);
+      return { success: true };
+    }
+
+    dbPrepare('UPDATE challans SET pi_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(parsedPiId, parsedChallanId);
+    for (const ci of (challan.items || [])) {
+      const matched = (pi.items || []).find(piIt => piIt.item_id === ci.item_id || piIt.id === ci.pi_item_id);
+      if (matched) {
+        dbPrepare('UPDATE challan_items SET pi_item_id = ? WHERE id = ?').run(matched.id, ci.id);
+      }
+    }
+    const allLinked = dbPrepare("SELECT id, challan_number FROM challans WHERE pi_id = ? AND status = 'ACTIVE'").all(parsedPiId);
+    const ids = allLinked.map(c => c.id);
+    const numbers = allLinked.map(c => c.challan_number).join(', ');
+    dbPrepare('UPDATE proforma_invoices SET challan_ids = ?, challan_numbers = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(JSON.stringify(ids), numbers, parsedPiId);
+    await FinanceRepo.checkAndUpdatePiStatus(parsedPiId);
+    return { success: true };
+  },
+
   async receiveChallan(id, receiptData) {
     const { receivedBy, receivedAt, receivedNotes, items } = receiptData;
     const dateVal = receivedAt || new Date().toISOString();

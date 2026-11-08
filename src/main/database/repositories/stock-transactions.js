@@ -2,17 +2,23 @@ const { dbPrepare, getSupabase, isCloudEnabled } = require('../connection');
 
 const StockTransactionsRepo = {
   async create(data) {
-    const OneMinuteAgo = new Date(Date.now() - 60000).toISOString();
+    const TwoSecondsAgo = new Date(Date.now() - 2000).toISOString();
     if (isCloudEnabled()) {
-      // duplicate check
-      const { data: duplicates } = await getSupabase()
+      // Duplicate check: only block if the exact same transaction (same item, type, quantity, stockBefore, stockAfter, reference) was inserted in the last 2 seconds
+      let dupQuery = getSupabase()
         .from('stock_transactions')
         .select('id')
         .eq('item_id', data.itemId)
         .eq('type', data.type)
         .eq('quantity', data.quantity)
         .eq('created_by', data.createdBy || null)
-        .gte('created_at', OneMinuteAgo);
+        .gte('created_at', TwoSecondsAgo);
+
+      if (data.stockBefore !== undefined) dupQuery = dupQuery.eq('stock_before', data.stockBefore);
+      if (data.stockAfter !== undefined) dupQuery = dupQuery.eq('stock_after', data.stockAfter);
+      if (data.reference) dupQuery = dupQuery.eq('reference', data.reference);
+
+      const { data: duplicates } = await dupQuery;
         
       if (duplicates && duplicates.length > 0) {
         console.warn(`[StockTransactionsRepo] Duplicate transaction blocked for item ${data.itemId}`);
@@ -41,8 +47,10 @@ const StockTransactionsRepo = {
       return inserted.id;
     }
 
-    // duplicate check for local DB
-    const dup = dbPrepare(`SELECT id FROM stock_transactions WHERE item_id = ? AND type = ? AND quantity = ? AND (created_by = ? OR (created_by IS NULL AND ? IS NULL)) AND created_at >= ? LIMIT 1`).get(data.itemId, data.type, data.quantity, data.createdBy || null, data.createdBy || null, OneMinuteAgo);
+    // Duplicate check for local DB
+    const dup = dbPrepare(`SELECT id FROM stock_transactions WHERE item_id = ? AND type = ? AND quantity = ? AND stock_before = ? AND stock_after = ? AND (reference = ? OR (reference IS NULL AND ? IS NULL)) AND (created_by = ? OR (created_by IS NULL AND ? IS NULL)) AND created_at >= ? LIMIT 1`).get(
+      data.itemId, data.type, data.quantity, data.stockBefore ?? null, data.stockAfter ?? null, data.reference || null, data.reference || null, data.createdBy || null, data.createdBy || null, TwoSecondsAgo
+    );
     
     if (dup) {
       console.warn(`[StockTransactionsRepo] Duplicate local transaction blocked for item ${data.itemId}`);

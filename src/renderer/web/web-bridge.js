@@ -242,6 +242,22 @@ export const webBridge = {
     delete: (id) => wrap(() => inventoryApi.items.delete(id)),
     getNextCode: () => wrap(inventoryApi.items.getNextCode),
     updateTier: (tierId, data) => wrap(() => inventoryApi.items.updateTier(tierId, data)),
+    reconcileStock: (itemId) => wrap(async () => {
+      const parsedId = Number(itemId);
+      if (!parsedId) return { success: false, error: 'Invalid item ID' };
+      const supabase = getSupabase();
+      const { data: item } = await supabase.from('items').select('id, current_stock').eq('id', parsedId).single();
+      if (!item) return { success: false, error: 'Item not found' };
+      const { data: activeTiers } = await supabase.from('item_price_tiers').select('quantity').eq('item_id', parsedId).gt('quantity', 0);
+      if (activeTiers && activeTiers.length > 0) {
+        const tierSum = activeTiers.reduce((acc, t) => acc + Number(t.quantity || 0), 0);
+        if (Math.abs(tierSum - Number(item.current_stock)) > 0.001) {
+          await supabase.from('items').update({ current_stock: tierSum, updated_at: new Date().toISOString() }).eq('id', parsedId);
+          return { success: true, reconciled: true, oldStock: item.current_stock, newStock: tierSum };
+        }
+      }
+      return { success: true, reconciled: false, currentStock: item.current_stock };
+    }),
     getDistinctValues: () => wrap(inventoryApi.items.getDistinctValues),
   },
 
@@ -255,19 +271,21 @@ export const webBridge = {
       const userRaw = sessionStorage.getItem('kadal_user');
       const user = userRaw ? JSON.parse(userRaw) : null;
 
-      // Duplicate prevention (Idempotency within 60s)
-      const OneMinuteAgo = new Date(Date.now() - 60000).toISOString();
-      const { data: duplicates } = await supabase.from('stock_transactions')
+      // Duplicate prevention (Idempotency within 4s)
+      const FourSecsAgo = new Date(Date.now() - 4000).toISOString();
+      let dupQuery = supabase.from('stock_transactions')
         .select('id, stock_after')
         .eq('item_id', data.itemId)
         .eq('type', data.type)
         .eq('quantity', data.quantity)
-        .eq('created_by', user?.id || null)
-        .gte('created_at', OneMinuteAgo);
+        .gte('created_at', FourSecsAgo);
+      if (user?.id) dupQuery = dupQuery.eq('created_by', user.id);
+      if (data.reference) dupQuery = dupQuery.eq('reference', data.reference);
+      const { data: duplicates } = await dupQuery;
         
       if (duplicates && duplicates.length > 0) {
         console.warn('[WebBridge] Duplicate transaction blocked for item', data.itemId);
-        return { success: true, stockAfter: duplicates[0].stock_after };
+        return { success: true, stockAfter: duplicates[0].stock_after, duplicatePrevented: true };
       }
 
       const stockBefore = item.current_stock || 0;
@@ -341,6 +359,21 @@ export const webBridge = {
       } else {
         throw new Error('Invalid movement type');
       }
+
+      // If active price tiers exist, guarantee stock matches tier total
+      try {
+        const { data: currentTiers } = await supabase.from('item_price_tiers')
+          .select('quantity')
+          .eq('item_id', data.itemId)
+          .gt('quantity', 0);
+        if (currentTiers && currentTiers.length > 0) {
+          const tierSum = currentTiers.reduce((sum, t) => sum + Number(t.quantity || 0), 0);
+          if (Math.abs(tierSum - stockAfter) > 0.001) {
+            console.warn(`[WebBridge] Synchronizing stockAfter (${stockAfter}) with price tier sum (${tierSum}) for item ${data.itemId}`);
+            stockAfter = tierSum;
+          }
+        }
+      } catch (tierSyncErr) {}
 
       const itemUpdates = { current_stock: stockAfter, updated_at: new Date().toISOString() };
       if (data.type === 'IN' && curr === 'USD' && convRate !== null && convRate !== undefined) {
@@ -495,6 +528,33 @@ export const webBridge = {
     exportExcel: () => wrap(async () => { alert('Excel Export coming soon to web version'); return true; }),
     receive: (id, receiptData) => wrap(() => challansApi.receive(id, receiptData)),
     getPendingReceipt: (filters) => wrap(() => challansApi.getPendingReceipt(filters)),
+    linkToPi: (challanId, piId) => wrap(async () => {
+      const parsedChallanId = Number(challanId);
+      const parsedPiId = Number(piId);
+      if (!parsedChallanId || !parsedPiId) throw new Error('Invalid challanId or piId');
+      const supabase = getSupabase();
+      
+      const { data: pi, error: pErr } = await supabase.from('proforma_invoices').select('*, items:proforma_invoice_items(*)').eq('id', parsedPiId).single();
+      if (pErr || !pi) throw new Error(`PI #${parsedPiId} not found`);
+
+      const { data: challan, error: cErr } = await supabase.from('challans').select('*, items:challan_items(*)').eq('id', parsedChallanId).single();
+      if (cErr || !challan) throw new Error(`Challan #${parsedChallanId} not found`);
+
+      await supabase.from('challans').update({ pi_id: parsedPiId, updated_at: new Date().toISOString() }).eq('id', parsedChallanId);
+
+      for (const ci of (challan.items || [])) {
+        const matched = (pi.items || []).find(piIt => piIt.item_id === ci.item_id || piIt.id === ci.pi_item_id);
+        if (matched) {
+          await supabase.from('challan_items').update({ pi_item_id: matched.id }).eq('id', ci.id);
+        }
+      }
+
+      const { data: allLinked } = await supabase.from('challans').select('id, challan_number').eq('pi_id', parsedPiId).eq('status', 'ACTIVE');
+      const ids = (allLinked || []).map(c => c.id);
+      const numbers = (allLinked || []).map(c => c.challan_number).join(', ');
+      await supabase.from('proforma_invoices').update({ challan_ids: ids, challan_numbers: numbers, updated_at: new Date().toISOString() }).eq('id', parsedPiId);
+      return { success: true };
+    }),
   },
 
   // Warehouses

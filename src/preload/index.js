@@ -67,6 +67,7 @@ contextBridge.exposeInMainWorld('kadal', {
     getDistinctValues: () => ipcRenderer.invoke('items:getDistinctValues'),
     getNextCode: () => ipcRenderer.invoke('items:getNextCode'),
     updateTier: (tierId, data) => ipcRenderer.invoke('items:updateTier', tierId, data),
+    reconcileStock: (itemId) => ipcRenderer.invoke('items:reconcileStock', itemId),
   },
 
   // Stock
@@ -94,6 +95,7 @@ contextBridge.exposeInMainWorld('kadal', {
     deleteSuggestion: (field, value) => ipcRenderer.invoke('challans:deleteSuggestion', field, value),
     receive: (id, receiptData) => ipcRenderer.invoke('challans:receive', id, receiptData),
     getPendingReceipt: (filters) => ipcRenderer.invoke('challans:getPendingReceipt', filters),
+    linkToPi: (challanId, piId) => ipcRenderer.invoke('challans:linkToPi', challanId, piId),
   },
 
   // Reports

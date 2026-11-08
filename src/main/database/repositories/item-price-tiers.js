@@ -318,6 +318,15 @@ const ItemPriceTiersRepo = {
           })
           .eq('id', parsedId);
         if (error) throw error;
+
+        // Auto-sync item current_stock to sum of active tiers
+        const { data: tierRow } = await supabase.from('item_price_tiers').select('item_id').eq('id', parsedId).single();
+        if (tierRow?.item_id) {
+          const { data: allActive } = await supabase.from('item_price_tiers').select('quantity').eq('item_id', tierRow.item_id).gt('quantity', 0);
+          const totalStock = (allActive || []).reduce((sum, t) => sum + Number(t.quantity || 0), 0);
+          await supabase.from('items').update({ current_stock: totalStock, updated_at: new Date().toISOString() }).eq('id', tierRow.item_id);
+        }
+
         return true;
       } catch (e) {
         console.warn('[ItemPriceTiersRepo] Cloud updateTier error:', e.message);
@@ -329,6 +338,13 @@ const ItemPriceTiersRepo = {
       dbPrepare(
         'UPDATE item_price_tiers SET quantity = ?, unit_price = ?, currency = ?, conversion_rate = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
       ).run(numQty, numPrice, curr, convRate, parsedId);
+
+      const tierRow = dbPrepare('SELECT item_id FROM item_price_tiers WHERE id = ?').get(parsedId);
+      if (tierRow?.item_id) {
+        const totalStock = dbPrepare('SELECT COALESCE(SUM(quantity), 0) as total FROM item_price_tiers WHERE item_id = ? AND quantity > 0').get(tierRow.item_id)?.total || 0;
+        dbPrepare('UPDATE items SET current_stock = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(totalStock, tierRow.item_id);
+      }
+
       return true;
     } catch (e) {
       console.warn('[ItemPriceTiersRepo] Local updateTier error:', e.message);

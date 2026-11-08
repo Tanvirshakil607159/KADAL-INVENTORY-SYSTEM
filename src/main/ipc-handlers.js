@@ -231,6 +231,10 @@ function registerIpcHandlers() {
     return InventoryService.updateTier(tierId, data);
   }));
 
+  ipcMain.handle('items:reconcileStock', wrapHandler((itemId) => {
+    return InventoryService.reconcileItemStock(itemId);
+  }));
+
   // ==================== STOCK ====================
   ipcMain.handle('stock:addMovement', wrapHandler((data) => {
     return InventoryService.addStockMovement(data);
@@ -279,6 +283,10 @@ function registerIpcHandlers() {
 
   ipcMain.handle('challans:getTotalDelivered', wrapHandler((itemId) => {
     return ChallanService.getTotalDelivered(itemId);
+  }));
+
+  ipcMain.handle('challans:linkToPi', wrapHandler((challanId, piId) => {
+    return ChallanService.linkToPi(challanId, piId);
   }));
 
   ipcMain.handle('challans:exportPdf', wrapHandler(async (id) => {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import useStore from '../../store/useStore';
 import { Edit2, Save, X } from 'lucide-react';
 
@@ -11,6 +11,7 @@ export default function ItemTiersModal({ data, onSaved }) {
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState({});
   const [saving, setSaving] = useState(false);
+  const isSavingRef = useRef(false);
 
   useEffect(() => {
     setTiers(item.price_tiers || []);
@@ -32,6 +33,8 @@ export default function ItemTiersModal({ data, onSaved }) {
   };
 
   const handleSave = async (tierId) => {
+    if (isSavingRef.current || saving) return;
+    isSavingRef.current = true;
     setSaving(true);
     try {
       const payload = {
@@ -53,8 +56,10 @@ export default function ItemTiersModal({ data, onSaved }) {
       }
     } catch (e) {
       addToast('error', e.message);
+    } finally {
+      isSavingRef.current = false;
+      setSaving(false);
     }
-    setSaving(false);
   };
 
   return (

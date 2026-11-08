@@ -7,6 +7,25 @@ const AuthService = require('./auth-service');
 const WarehousesRepo = require('../database/repositories/warehouses');
 const { dbTransaction } = require('../database/connection');
 
+// In-memory mutex per item to serialize stock movements on the same item and eliminate race conditions
+const itemMovementLocks = new Map();
+async function withItemLock(itemId, fn) {
+  const parsedId = Number(itemId);
+  const prevPromise = itemMovementLocks.get(parsedId) || Promise.resolve();
+  let release;
+  const lockPromise = new Promise(resolve => { release = resolve; });
+  itemMovementLocks.set(parsedId, prevPromise.then(() => lockPromise).catch(() => lockPromise));
+  try {
+    await prevPromise;
+    return await fn();
+  } finally {
+    release();
+    if (itemMovementLocks.get(parsedId) === lockPromise) {
+      itemMovementLocks.delete(parsedId);
+    }
+  }
+}
+
 const InventoryService = {
   async getAll(filters) { return await ItemsRepo.getAll(filters); },
   async getById(id) { return await ItemsRepo.getById(id); },
@@ -191,67 +210,124 @@ const InventoryService = {
   },
 
   async _executeStockMovement({ itemId, type, quantity, reference, notes, warehouseId, unitPrice, currency, conversionRate }) {
-    const item = await ItemsRepo.getById(itemId);
-    if (!item) throw new Error('Item not found');
-    if (quantity <= 0) throw new Error('Quantity must be greater than 0');
+    return await withItemLock(itemId, async () => {
+      const user = AuthService.getCurrentUser();
+      const numQty = Number(quantity);
+      if (!numQty || numQty <= 0) throw new Error('Quantity must be greater than 0');
 
-    const stockBefore = item.current_stock;
-    let stockAfter;
-    const restockPrice = unitPrice !== undefined && unitPrice !== null && unitPrice !== '' ? Number(unitPrice) : Number(item.unit_price || 0);
-    const curr = currency || item.currency || 'BDT';
-    const convRate = conversionRate !== undefined ? conversionRate : item.conversion_rate;
-
-    if (type === 'IN') { 
-      stockAfter = stockBefore + quantity; 
-      await ItemPriceTiersRepo.addStockTier(itemId, quantity, restockPrice, curr, convRate);
-    }
-    else if (type === 'OUT') {
-      stockAfter = stockBefore - quantity;
-      if (stockAfter < 0) {
-        throw new Error(`Insufficient stock. Available: ${stockBefore}, Requested: ${quantity}`);
-      }
-      await ItemPriceTiersRepo.deductStockFIFO(itemId, quantity);
-    } else if (type === 'ADJUSTMENT') { 
-      stockAfter = quantity; 
-      await ItemPriceTiersRepo.adjustStock(itemId, quantity, item.unit_price, item.currency);
-    }
-    else throw new Error('Invalid transaction type');
-
-    await ItemsRepo.updateStock(itemId, stockAfter);
-    if (type === 'IN' && curr === 'USD' && convRate !== null && convRate !== undefined) {
+      // 1. Rapid duplicate / double-click prevention BEFORE mutating any stock or tiers
+      const FourSecsAgo = new Date(Date.now() - 4000).toISOString();
       try {
-        await ItemsRepo.updateConversionRate(itemId, convRate);
+        const recentTxns = await StockTransactionsRepo.getAll({
+          itemId,
+          type,
+          dateFrom: FourSecsAgo
+        });
+        const duplicate = (recentTxns || []).find(t => 
+          Number(t.quantity) === numQty &&
+          (t.reference || null) === (reference || null) &&
+          (!user?.id || t.created_by === user.id)
+        );
+        if (duplicate) {
+          console.warn(`[InventoryService] Rapid duplicate stock movement prevented for item ${itemId} (matched tx #${duplicate.id})`);
+          const currentItem = await ItemsRepo.getById(itemId);
+          return { success: true, stockAfter: currentItem.current_stock, transactionId: duplicate.id, duplicatePrevented: true };
+        }
+      } catch (checkErr) {
+        console.warn('[InventoryService] Warning checking recent txns:', checkErr.message);
+      }
+
+      const item = await ItemsRepo.getById(itemId);
+      if (!item) throw new Error('Item not found');
+
+      const stockBefore = Number(item.current_stock) || 0;
+      let stockAfter;
+      const restockPrice = unitPrice !== undefined && unitPrice !== null && unitPrice !== '' ? Number(unitPrice) : Number(item.unit_price || 0);
+      const curr = currency || item.currency || 'BDT';
+      const convRate = conversionRate !== undefined ? conversionRate : item.conversion_rate;
+
+      if (type === 'IN') { 
+        stockAfter = stockBefore + numQty; 
+        await ItemPriceTiersRepo.addStockTier(itemId, numQty, restockPrice, curr, convRate);
+      }
+      else if (type === 'OUT') {
+        stockAfter = stockBefore - numQty;
+        if (stockAfter < 0) {
+          throw new Error(`Insufficient stock. Available: ${stockBefore}, Requested: ${numQty}`);
+        }
+        await ItemPriceTiersRepo.deductStockFIFO(itemId, numQty);
+      } else if (type === 'ADJUSTMENT') { 
+        stockAfter = numQty; 
+        await ItemPriceTiersRepo.adjustStock(itemId, numQty, item.unit_price, item.currency);
+      }
+      else throw new Error('Invalid transaction type');
+
+      // 2. Active price tier alignment: if active price tiers exist, guarantee stock matches tier sum
+      try {
+        const activeTiers = await ItemPriceTiersRepo.getActiveByItem(itemId);
+        if (activeTiers && activeTiers.length > 0) {
+          const tierSum = activeTiers.reduce((acc, t) => acc + Number(t.quantity || 0), 0);
+          if (Math.abs(tierSum - stockAfter) > 0.001) {
+            console.warn(`[InventoryService] Synchronizing stockAfter (${stockAfter}) with price tier sum (${tierSum}) for item ${itemId}`);
+            stockAfter = tierSum;
+          }
+        }
+      } catch (tierSyncErr) {
+        console.warn('[InventoryService] Warning syncing tier total:', tierSyncErr.message);
+      }
+
+      await ItemsRepo.updateStock(itemId, stockAfter);
+      if (type === 'IN' && curr === 'USD' && convRate !== null && convRate !== undefined) {
+        try {
+          await ItemsRepo.updateConversionRate(itemId, convRate);
+        } catch (e) {
+          console.warn('[InventoryService] Failed to update item conversion rate:', e.message);
+        }
+      }
+      
+      // Sync with warehouse
+      const whId = warehouseId || SettingsRepo.get('default_warehouse_id') || 1;
+      let whDelta = 0;
+      if (type === 'IN') whDelta = numQty;
+      else if (type === 'OUT') whDelta = -numQty;
+      else if (type === 'ADJUSTMENT') {
+         const whStocks = await WarehousesRepo.getStockByItem(itemId);
+         const currentWhStock = whStocks.find(w => w.warehouse_id === Number(whId))?.quantity || 0;
+         whDelta = numQty - currentWhStock;
+      }
+      
+      try {
+        await WarehousesRepo.adjustStock(whId, itemId, whDelta);
       } catch (e) {
-        console.warn('[InventoryService] Failed to update item conversion rate:', e.message);
+        console.error('[InventoryService] Failed to sync warehouse stock:', e);
+      }
+      
+      const txnId = await StockTransactionsRepo.create({
+        itemId, type, quantity: numQty, stockBefore, stockAfter, reference, notes,
+        unitPrice: type === 'IN' ? restockPrice : item.unit_price,
+        currency: curr,
+        conversionRate: convRate,
+        createdBy: user?.id,
+      });
+      return { success: true, stockAfter, transactionId: txnId };
+    });
+  },
+
+  async reconcileItemStock(itemId) {
+    const parsedId = Number(itemId);
+    if (!parsedId) return { success: false, error: 'Invalid item ID' };
+    const item = await ItemsRepo.getById(parsedId);
+    if (!item) return { success: false, error: 'Item not found' };
+
+    const activeTiers = await ItemPriceTiersRepo.getActiveByItem(parsedId);
+    if (activeTiers && activeTiers.length > 0) {
+      const tierSum = activeTiers.reduce((acc, t) => acc + Number(t.quantity || 0), 0);
+      if (Math.abs(tierSum - Number(item.current_stock)) > 0.001) {
+        await ItemsRepo.updateStock(parsedId, tierSum);
+        return { success: true, reconciled: true, oldStock: item.current_stock, newStock: tierSum };
       }
     }
-    
-    // Sync with warehouse
-    const whId = warehouseId || SettingsRepo.get('default_warehouse_id') || 1;
-    let whDelta = 0;
-    if (type === 'IN') whDelta = quantity;
-    else if (type === 'OUT') whDelta = -quantity;
-    else if (type === 'ADJUSTMENT') {
-       // Find current warehouse stock to calculate delta
-       const whStocks = await WarehousesRepo.getStockByItem(itemId);
-       const currentWhStock = whStocks.find(w => w.warehouse_id === Number(whId))?.quantity || 0;
-       whDelta = quantity - currentWhStock;
-    }
-    
-    try {
-      await WarehousesRepo.adjustStock(whId, itemId, whDelta);
-    } catch (e) {
-      console.error('[InventoryService] Failed to sync warehouse stock:', e);
-    }
-    
-    const txnId = await StockTransactionsRepo.create({
-      itemId, type, quantity, stockBefore, stockAfter, reference, notes,
-      unitPrice: type === 'IN' ? restockPrice : item.unit_price,
-      currency: curr,
-      conversionRate: convRate,
-      createdBy: AuthService.getCurrentUser()?.id,
-    });
-    return { success: true, stockAfter, transactionId: txnId };
+    return { success: true, reconciled: false, currentStock: item.current_stock };
   },
 
   async getTransactions(filters) { return await StockTransactionsRepo.getAll(filters); },

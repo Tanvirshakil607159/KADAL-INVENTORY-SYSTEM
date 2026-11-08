@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import useStore from '../../store/useStore';
 import { Search } from 'lucide-react';
 
@@ -18,6 +18,7 @@ export default function StockMovementModal({ data, onSaved }) {
   const [reference, setReference] = useState('');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
+  const isSavingRef = useRef(false);
   const [suggestions, setSuggestions] = useState({ reference: [], notes: [] });
 
   const handleSearchItems = async (q) => {
@@ -44,9 +45,11 @@ export default function StockMovementModal({ data, onSaved }) {
   };
 
   const handleSave = async () => {
+    if (isSavingRef.current || saving) return;
     if (!selectedItem) { addToast('error', 'Please select an item first'); return; }
     const qty = Number(quantity);
     if (!qty || qty <= 0) { addToast('error', 'Enter a valid quantity'); return; }
+    isSavingRef.current = true;
     setSaving(true);
     try {
       const res = await window.kadal.stock.addMovement({ 
@@ -79,7 +82,10 @@ export default function StockMovementModal({ data, onSaved }) {
         closeModal();
       } else { addToast('error', res.data?.error || res.error || 'Failed'); }
     } catch (e) { addToast('error', e.message); }
-    setSaving(false);
+    finally {
+      isSavingRef.current = false;
+      setSaving(false);
+    }
   };
 
   return (

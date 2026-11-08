@@ -258,6 +258,35 @@ export const inventoryApi = {
       if (error) throw error;
       return true;
     },
+    updateTier: async (tierId, data) => {
+      const parsedId = Number(tierId);
+      if (!parsedId) throw new Error('Invalid tier ID');
+      const supabase = getSupabase();
+      const numQty = Number(data.quantity);
+      const numPrice = Number(data.unit_price || 0);
+      const curr = data.currency || 'BDT';
+      const convRate = curr === 'USD' ? (Number(data.conversion_rate) || null) : null;
+
+      const { error } = await supabase
+        .from('item_price_tiers')
+        .update({
+          quantity: numQty,
+          unit_price: numPrice,
+          currency: curr,
+          conversion_rate: convRate,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', parsedId);
+      if (error) throw error;
+
+      const { data: tierRow } = await supabase.from('item_price_tiers').select('item_id').eq('id', parsedId).single();
+      if (tierRow?.item_id) {
+        const { data: allActive } = await supabase.from('item_price_tiers').select('quantity').eq('item_id', tierRow.item_id).gt('quantity', 0);
+        const totalStock = (allActive || []).reduce((sum, t) => sum + Number(t.quantity || 0), 0);
+        await supabase.from('items').update({ current_stock: totalStock, updated_at: new Date().toISOString() }).eq('id', tierRow.item_id);
+      }
+      return true;
+    },
     getNextCode: async () => {
       const { data, error } = await getSupabase().from('items').select('item_code').order('item_code', { ascending: false }).limit(1);
       if (error) throw error;

@@ -259,6 +259,19 @@ const ChallanService = {
       onlyWithPi: true,
       receivedStatus: filters.receivedStatus || 'PENDING'
     });
+  },
+
+  async linkToPi(challanId, piId) {
+    const res = await ChallansRepo.linkToPi(challanId, piId);
+    const user = await AuthService.getCurrentUser();
+    await AuditLogsRepo.create({
+      userId: user?.id,
+      action: 'UPDATE',
+      entityType: 'challan_pi_link',
+      entityId: challanId,
+      newValue: { challanId, piId }
+    });
+    return res;
   }
 
 };
