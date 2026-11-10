@@ -288,11 +288,67 @@ export const inventoryApi = {
       return true;
     },
     getNextCode: async () => {
-      const { data, error } = await getSupabase().from('items').select('item_code').order('item_code', { ascending: false }).limit(1);
-      if (error) throw error;
-      const last = data[0]?.item_code || 'KADAL-0000';
-      const num = parseInt(last.split('-')[1]) + 1;
-      return `KADAL-${num.toString().padStart(4, '0')}`;
+      const supabase = getSupabase();
+      if (!supabase) return 'KADAL-0001';
+
+      let maxSeq = 0;
+
+      // 1. Check most recent items by auto-incrementing id
+      const { data: recentById } = await supabase
+        .from('items')
+        .select('item_code')
+        .order('id', { ascending: false })
+        .limit(50);
+
+      (recentById || []).forEach(i => {
+        if (!i.item_code) return;
+        const m = i.item_code.match(/KADAL-(\d+)/i);
+        if (m) {
+          const num = parseInt(m[1], 10);
+          if (num > maxSeq) maxSeq = num;
+        }
+      });
+
+      // 2. Unlimited multi-magnitude check across digit lengths
+      const currentDigits = maxSeq > 0 ? String(maxSeq).length : 4;
+      const maxDigitsToCheck = Math.max(currentDigits + 2, 8);
+
+      for (let digits = maxDigitsToCheck; digits >= Math.max(currentDigits, 4); digits--) {
+        const pattern = 'KADAL-' + '_'.repeat(digits);
+        const { data } = await supabase
+          .from('items')
+          .select('item_code')
+          .like('item_code', pattern)
+          .order('item_code', { ascending: false })
+          .limit(1);
+
+        if (data && data.length > 0) {
+          const m = data[0].item_code.match(/KADAL-(\d+)/i);
+          if (m) {
+            const num = parseInt(m[1], 10);
+            if (num > maxSeq) maxSeq = num;
+          }
+          break;
+        }
+      }
+
+      let nextSeq = maxSeq + 1;
+      let digits = Math.max(4, String(nextSeq).length);
+      let candidateCode = `KADAL-${nextSeq.toString().padStart(digits, '0')}`;
+
+      let exists = true;
+      while (exists) {
+        const { data: check } = await supabase.from('items').select('id').eq('item_code', candidateCode).limit(1);
+        if (check && check.length > 0) {
+          nextSeq++;
+          digits = Math.max(4, String(nextSeq).length);
+          candidateCode = `KADAL-${nextSeq.toString().padStart(digits, '0')}`;
+        } else {
+          exists = false;
+        }
+      }
+
+      return candidateCode;
     },
     getDistinctValues: async () => {
       const supabase = getSupabase();

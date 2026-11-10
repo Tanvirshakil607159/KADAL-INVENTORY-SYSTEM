@@ -586,6 +586,64 @@ const ItemsRepo = {
     return dbPrepare(`SELECT i.*, c.name as category_name FROM items i LEFT JOIN categories c ON i.category_id = c.id ${w} ORDER BY (i.current_stock - i.min_stock_level) ASC`).all(...params);
   },
 
+  async findMatchingItem(criteria) {
+    if (!criteria || !criteria.name) return null;
+    const cleanName = criteria.name.trim();
+    const cleanSize = criteria.size ? criteria.size.trim() : null;
+    const cleanColor = criteria.color ? criteria.color.trim() : null;
+    const cleanStyle = criteria.styleName ? criteria.styleName.trim() : null;
+    const cleanOrder = criteria.orderNumber ? criteria.orderNumber.trim() : null;
+    const cleanPO = criteria.purchaseNo ? criteria.purchaseNo.trim() : null;
+
+    if (isCloudEnabled()) {
+      let query = getSupabase()
+        .from('items')
+        .select('id, item_code, name, is_active')
+        .eq('is_active', true)
+        .ilike('name', cleanName);
+
+      if (cleanSize) query = query.ilike('size', cleanSize);
+      else query = query.or('size.is.null,size.eq.');
+
+      if (cleanColor) query = query.ilike('color', cleanColor);
+      else query = query.or('color.is.null,color.eq.');
+
+      if (cleanStyle) query = query.ilike('style_name', cleanStyle);
+      else query = query.or('style_name.is.null,style_name.eq.');
+
+      if (cleanOrder) query = query.ilike('order_number', cleanOrder);
+      else query = query.or('order_number.is.null,order_number.eq.');
+
+      if (cleanPO) query = query.ilike('purchase_no', cleanPO);
+      else query = query.or('purchase_no.is.null,purchase_no.eq.');
+
+      const { data, error } = await query.limit(1);
+      if (error || !data || data.length === 0) return null;
+      return data[0];
+    }
+
+    let sql = 'SELECT id, item_code, name FROM items WHERE is_active = 1 AND LOWER(TRIM(name)) = LOWER(?)';
+    const params = [cleanName];
+
+    if (cleanSize) { sql += ' AND LOWER(TRIM(size)) = LOWER(?)'; params.push(cleanSize); }
+    else { sql += " AND (size IS NULL OR TRIM(size) = '')"; }
+
+    if (cleanColor) { sql += ' AND LOWER(TRIM(color)) = LOWER(?)'; params.push(cleanColor); }
+    else { sql += " AND (color IS NULL OR TRIM(color) = '')"; }
+
+    if (cleanStyle) { sql += ' AND LOWER(TRIM(style_name)) = LOWER(?)'; params.push(cleanStyle); }
+    else { sql += " AND (style_name IS NULL OR TRIM(style_name) = '')"; }
+
+    if (cleanOrder) { sql += ' AND LOWER(TRIM(order_number)) = LOWER(?)'; params.push(cleanOrder); }
+    else { sql += " AND (order_number IS NULL OR TRIM(order_number) = '')"; }
+
+    if (cleanPO) { sql += ' AND LOWER(TRIM(purchase_no)) = LOWER(?)'; params.push(cleanPO); }
+    else { sql += " AND (purchase_no IS NULL OR TRIM(purchase_no) = '')"; }
+
+    sql += ' LIMIT 1';
+    return dbPrepare(sql).get(...params) || null;
+  },
+
   async checkCodeExists(code, excludeId = null, options = {}) {
     let excludeApprovalId = null;
     let checkPending = true;
@@ -709,20 +767,54 @@ const ItemsRepo = {
   },
 
   async getNextCode(excludeApprovalId = null) {
-    let allCodes = [];
+    let maxSeq = 0;
 
     if (isCloudEnabled()) {
-      const { data, error } = await getSupabase()
+      const supabase = getSupabase();
+
+      // 1. Check most recent items by auto-incrementing id (newest items always have highest id)
+      const { data: recentById } = await supabase
         .from('items')
         .select('item_code')
-        .like('item_code', 'KADAL-%')
-        .order('item_code', { ascending: false })
-        .limit(2000); // Increased limit to be safer
-      if (error) throw error;
-      allCodes = (data || []).map(i => i.item_code);
+        .order('id', { ascending: false })
+        .limit(50);
 
-      // Also fetch pending approvals to ensure they are skipped
-      let pQuery = getSupabase()
+      (recentById || []).forEach(i => {
+        if (!i.item_code) return;
+        const m = i.item_code.match(/KADAL-(\d+)/i);
+        if (m) {
+          const num = parseInt(m[1], 10);
+          if (num > maxSeq) maxSeq = num;
+        }
+      });
+
+      // 2. Unlimited multi-magnitude check: scan dynamically from higher digit lengths downward
+      // This ensures that no matter how large the sequence number becomes (5, 6, 7, 8, 9+ digits),
+      // the true maximum is always found directly without any truncation or row limit
+      const currentDigits = maxSeq > 0 ? String(maxSeq).length : 4;
+      const maxDigitsToCheck = Math.max(currentDigits + 2, 8);
+
+      for (let digits = maxDigitsToCheck; digits >= Math.max(currentDigits, 4); digits--) {
+        const pattern = 'KADAL-' + '_'.repeat(digits);
+        const { data } = await supabase
+          .from('items')
+          .select('item_code')
+          .like('item_code', pattern)
+          .order('item_code', { ascending: false })
+          .limit(1);
+
+        if (data && data.length > 0) {
+          const m = data[0].item_code.match(/KADAL-(\d+)/i);
+          if (m) {
+            const num = parseInt(m[1], 10);
+            if (num > maxSeq) maxSeq = num;
+          }
+          break; // Found the highest digit group
+        }
+      }
+
+      // Also fetch pending approvals to ensure reserved codes are skipped
+      let pQuery = supabase
         .from('approvals')
         .select('id, data')
         .eq('type', 'CREATE_ITEM')
@@ -730,17 +822,31 @@ const ItemsRepo = {
       if (excludeApprovalId) {
         pQuery = pQuery.neq('id', excludeApprovalId);
       }
-      const { data: pending, error: pErr } = await pQuery;
+      const { data: pending } = await pQuery;
       
-      if (!pErr && pending) {
+      if (pending) {
         pending.forEach(a => {
           const d = typeof a.data === 'string' ? JSON.parse(a.data) : a.data;
-          if (d && d.itemCode) allCodes.push(d.itemCode);
+          if (d && d.itemCode) {
+            const m = d.itemCode.match(/KADAL-(\d+)/i);
+            if (m) {
+              const num = parseInt(m[1], 10);
+              if (num > maxSeq) maxSeq = num;
+            }
+          }
         });
       }
     } else {
-      const all = dbPrepare("SELECT item_code FROM items WHERE item_code LIKE 'KADAL-%'").all();
-      allCodes = all.map(item => item.item_code);
+      // Local SQLite: Query maximum sequence across the entire table with no limits
+      const row = dbPrepare(`
+        SELECT MAX(CAST(SUBSTR(item_code, 7) AS INTEGER)) AS max_seq
+        FROM items
+        WHERE item_code LIKE 'KADAL-%'
+          AND SUBSTR(item_code, 7) GLOB '[0-9]*'
+      `).get();
+      if (row && row.max_seq && row.max_seq > maxSeq) {
+        maxSeq = row.max_seq;
+      }
 
       // Check pending approvals locally
       let sql = "SELECT id, data FROM approvals WHERE type = 'CREATE_ITEM' AND status = 'PENDING'";
@@ -752,23 +858,28 @@ const ItemsRepo = {
       const pending = dbPrepare(sql).all(...params);
       pending.forEach(a => {
         const d = typeof a.data === 'string' ? JSON.parse(a.data) : a.data;
-        if (d && d.itemCode) allCodes.push(d.itemCode);
+        if (d && d.itemCode) {
+          const m = d.itemCode.match(/KADAL-(\d+)/i);
+          if (m) {
+            const num = parseInt(m[1], 10);
+            if (num > maxSeq) maxSeq = num;
+          }
+        }
       });
     }
 
-    let maxSeq = 0;
-    allCodes.forEach(code => {
-      const parts = code.split('-');
-      for (let i = parts.length - 1; i >= 0; i--) {
-        const num = parseInt(parts[i], 10);
-        if (!isNaN(num) && /^\d+$/.test(parts[i])) {
-          if (num > maxSeq) maxSeq = num;
-          break;
-        }
-      }
-    });
+    let nextSeq = maxSeq + 1;
+    let digits = Math.max(4, String(nextSeq).length);
+    let candidateCode = `KADAL-${nextSeq.toString().padStart(digits, '0')}`;
 
-    return `KADAL-${(maxSeq + 1).toString().padStart(4, '0')}`;
+    // Safety loop: guarantee uniqueness before returning
+    while (await this.checkCodeExists(candidateCode, null, { excludeApprovalId, checkPending: true })) {
+      nextSeq++;
+      digits = Math.max(4, String(nextSeq).length);
+      candidateCode = `KADAL-${nextSeq.toString().padStart(digits, '0')}`;
+    }
+
+    return candidateCode;
   },
 };
 

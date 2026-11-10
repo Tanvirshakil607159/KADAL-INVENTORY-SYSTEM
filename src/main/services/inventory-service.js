@@ -94,18 +94,18 @@ const InventoryService = {
   async _executeCreate(data, options = {}) {
     if (!data.name) throw new Error('Item name is required');
     
+    if (!data.itemCode) {
+      data.itemCode = await ItemsRepo.getNextCode(options.excludeApprovalId);
+    }
+
     // Check if the code already exists (common in approval race conditions)
     // We use a loop to be 100% sure we get a unique code
     let attempts = 0;
-    while (data.itemCode && await ItemsRepo.checkCodeExists(data.itemCode, null, { excludeApprovalId: options.excludeApprovalId, checkPending: false }) && attempts < 10) {
+    while (await ItemsRepo.checkCodeExists(data.itemCode, null, { excludeApprovalId: options.excludeApprovalId, checkPending: false }) && attempts < 15) {
       const oldCode = data.itemCode;
       data.itemCode = await ItemsRepo.getNextCode(options.excludeApprovalId);
       console.warn(`[InventoryService] Item code collision: "${oldCode}" already exists. Using new code: "${data.itemCode}"`);
       attempts++;
-    }
-    
-    if (!data.itemCode) {
-      data.itemCode = await ItemsRepo.getNextCode(options.excludeApprovalId);
     }
 
     const id = await ItemsRepo.create(data);

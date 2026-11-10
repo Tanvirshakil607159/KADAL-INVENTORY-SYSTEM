@@ -166,41 +166,62 @@ const ImportService = {
     let skipped = 0;
     const errors = [];
 
+    // Pre-cache categories, suppliers, buyers to make bulk import fast and efficient
+    const cats = await CategoriesRepo.getAll();
+    const supps = await SuppliersRepo.getAll();
+    const buyers = await BuyersRepo.getAll();
+
     for (const row of rows) {
       try {
+        // Check if identical item already exists in database
+        const existingItem = await ItemsRepo.findMatchingItem({
+          name: row.name,
+          size: row.size,
+          color: row.color,
+          styleName: row.styleName,
+          orderNumber: row.orderNumber,
+          purchaseNo: row.purchaseNo,
+        });
+
+        if (existingItem) {
+          skipped++;
+          errors.push(`Row "${row.name} (${row.size || 'N/A'}, ${row.color || 'N/A'})": Already exists in inventory (${existingItem.item_code})`);
+          continue;
+        }
+
         // Auto-create category if specified and doesn't exist
         let categoryId = null;
         if (row.category) {
-          const cats = await CategoriesRepo.getAll();
           const existing = cats.find(c => c.name.toLowerCase() === row.category.toLowerCase());
           if (existing) {
             categoryId = existing.id;
           } else {
             const r = await CategoriesRepo.create({ name: row.category });
-            categoryId = r.lastInsertRowid || r;
+            categoryId = r.lastInsertRowid || r?.id || r;
+            cats.push({ id: categoryId, name: row.category });
           }
         }
 
         // Auto-create supplier if specified and doesn't exist
         let supplierId = null;
         if (row.supplier) {
-          const supps = await SuppliersRepo.getAll();
           const existing = supps.find(s => s.name.toLowerCase() === row.supplier.toLowerCase());
           if (existing) {
             supplierId = existing.id;
           } else {
             const r = await SuppliersRepo.create({ name: row.supplier });
-            supplierId = r.lastInsertRowid || r;
+            supplierId = r.lastInsertRowid || r?.id || r;
+            supps.push({ id: supplierId, name: row.supplier });
           }
         }
 
         // Normalize and auto-create buyer if specified and doesn't exist
         if (row.buyerName) {
           row.buyerName = normalizeBuyerName(row.buyerName);
-          const buyers = await BuyersRepo.getAll();
           const existing = buyers.find(b => b.name.toUpperCase() === row.buyerName.toUpperCase());
           if (!existing) {
-            await BuyersRepo.create({ name: row.buyerName });
+            const newBuyer = await BuyersRepo.create({ name: row.buyerName });
+            buyers.push({ id: newBuyer?.id || newBuyer, name: row.buyerName });
           }
         }
 
@@ -244,28 +265,47 @@ const ImportService = {
     let skipped = 0;
     const errors = [];
 
+    const cats = await CategoriesRepo.getAll();
+    const buyers = await BuyersRepo.getAll();
+
     for (const row of productionRows) {
       try {
+        // Check if identical item already exists in database
+        const existingItem = await ItemsRepo.findMatchingItem({
+          name: row.name,
+          size: row.size,
+          color: row.color,
+          styleName: row.styleName,
+          orderNumber: row.orderNumber,
+          purchaseNo: row.purchaseNo,
+        });
+
+        if (existingItem) {
+          skipped++;
+          errors.push(`Row "${row.name} (${row.size || 'N/A'}, ${row.color || 'N/A'})": Already exists in inventory (${existingItem.item_code})`);
+          continue;
+        }
+
         // Auto-create category if specified and doesn't exist
         let categoryId = null;
         if (row.category) {
-          const cats = await CategoriesRepo.getAll();
           const existing = cats.find(c => c.name.toLowerCase() === row.category.toLowerCase());
           if (existing) {
             categoryId = existing.id;
           } else {
             const r = await CategoriesRepo.create({ name: row.category });
-            categoryId = r.lastInsertRowid || r;
+            categoryId = r.lastInsertRowid || r?.id || r;
+            cats.push({ id: categoryId, name: row.category });
           }
         }
 
         // Normalize and auto-create buyer if specified and doesn't exist
         if (row.buyerName) {
           row.buyerName = normalizeBuyerName(row.buyerName);
-          const buyers = await BuyersRepo.getAll();
           const existing = buyers.find(b => b.name.toUpperCase() === row.buyerName.toUpperCase());
           if (!existing) {
-            await BuyersRepo.create({ name: row.buyerName });
+            const newBuyer = await BuyersRepo.create({ name: row.buyerName });
+            buyers.push({ id: newBuyer?.id || newBuyer, name: row.buyerName });
           }
         }
 
