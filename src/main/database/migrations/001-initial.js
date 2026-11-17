@@ -332,6 +332,54 @@ function runMigrations(db) {
     db.run("INSERT INTO _migrations (name) VALUES ('037-add-pi-approval-setting')");
     console.log('[DB] Migration 037-add-pi-approval-setting applied successfully');
   }
+
+  // NEW MIGRATION: 038-allow-transfer-stock-transactions
+  const applied38 = db.exec("SELECT * FROM _migrations WHERE name = '038-allow-transfer-stock-transactions'");
+  if (applied38.length === 0 || applied38[0].values.length === 0) {
+    console.log('[DB] Running migration: 038-allow-transfer-stock-transactions');
+    if (applyThirtyEighthMigration(db)) {
+      db.run("INSERT INTO _migrations (name) VALUES ('038-allow-transfer-stock-transactions')");
+      console.log('[DB] Migration 038-allow-transfer-stock-transactions applied successfully');
+    }
+  }
+}
+
+// Warehouse transfers log a 'TRANSFER' stock transaction, but the original table only allowed
+// IN / OUT / ADJUSTMENT, so every local transfer failed. SQLite cannot alter a CHECK constraint,
+// so the table is rebuilt with the same columns and the wider CHECK.
+function applyThirtyEighthMigration(db) {
+  const res = db.exec("SELECT sql FROM sqlite_master WHERE type='table' AND name='stock_transactions'");
+  if (res.length === 0) return true;
+  const createSql = res[0].values[0][0];
+  if (createSql.includes("'TRANSFER'")) return true;
+  const newSql = createSql
+    .replace(/CHECK\s*\(\s*type\s+IN\s*\(\s*'IN'\s*,\s*'OUT'\s*,\s*'ADJUSTMENT'\s*\)\s*\)/i,
+      "CHECK(type IN ('IN', 'OUT', 'ADJUSTMENT', 'TRANSFER'))")
+    .replace(/CREATE TABLE\s+(IF NOT EXISTS\s+)?"?stock_transactions"?/i, 'CREATE TABLE stock_transactions_new');
+  if (!newSql.includes("'TRANSFER'")) {
+    console.error('[DB] Migration 038: unexpected stock_transactions schema, skipped');
+    return false;
+  }
+  const cols = db.exec('PRAGMA table_info(stock_transactions)')[0].values.map(r => `"${r[1]}"`).join(', ');
+  const indexes = db.exec("SELECT sql FROM sqlite_master WHERE type='index' AND tbl_name='stock_transactions' AND sql IS NOT NULL");
+  const indexSql = indexes.length ? indexes[0].values.map(r => r[0]) : [];
+  db.run('PRAGMA foreign_keys = OFF');
+  db.run('BEGIN TRANSACTION');
+  try {
+    db.run(newSql);
+    db.run(`INSERT INTO stock_transactions_new (${cols}) SELECT ${cols} FROM stock_transactions`);
+    db.run('DROP TABLE stock_transactions');
+    db.run('ALTER TABLE stock_transactions_new RENAME TO stock_transactions');
+    for (const sql of indexSql) db.run(sql);
+    db.run('COMMIT');
+    return true;
+  } catch (e) {
+    try { db.run('ROLLBACK'); } catch (rbErr) {}
+    console.error('[DB] Migration 038 error:', e.message);
+    return false;
+  } finally {
+    db.run('PRAGMA foreign_keys = ON');
+  }
 }
 
 

@@ -1,3 +1,5 @@
+import { dayStartIso, dayEndIso } from '../utils/dateRange';
+import { syncTiersToStock } from './tier-sync';
 import { getSupabase } from './supabase-client';
 
 export const challansApi = {
@@ -15,8 +17,8 @@ export const challansApi = {
     if (filters.piId) query = query.eq('pi_id', filters.piId);
     if (filters.onlyWithPi) query = query.not('pi_id', 'is', null);
     if (filters.receiverName) query = query.ilike('receiver_name', `%${filters.receiverName}%`);
-    if (filters.dateFrom) query = query.gte('challan_date', filters.dateFrom);
-    if (filters.dateTo) query = query.lte('challan_date', filters.dateTo + 'T23:59:59.999Z');
+    if (filters.dateFrom) query = query.gte('challan_date', dayStartIso(filters.dateFrom));
+    if (filters.dateTo) query = query.lte('challan_date', dayEndIso(filters.dateTo));
 
     const limit = filters.limit || 2000;
     const { data, error } = await query.limit(limit);
@@ -117,8 +119,23 @@ export const challansApi = {
     });
     return challan;
   },
-  create: async (data) => {
+  create: async (rawData) => {
     const supabase = getSupabase();
+    if (!rawData?.receiverName) throw new Error('Receiver name is required');
+    if (!rawData.items || rawData.items.length === 0) throw new Error('At least one item is required');
+    const data = { ...rawData, items: rawData.items.map(it => ({ ...it, itemId: it.itemId || it.item_id, quantity: Number(it.quantity) })) };
+
+    // Validate stock before writing anything
+    for (const item of data.items) {
+      if (!(item.quantity > 0)) throw new Error('Quantity must be greater than 0');
+      const { data: dbItem, error: dbErr } = await supabase.from('items').select('id, name, current_stock').eq('id', item.itemId).maybeSingle();
+      if (dbErr) throw dbErr;
+      if (!dbItem) throw new Error(`Item not found: ${item.itemId}`);
+      if (Number(dbItem.current_stock) < item.quantity) {
+        throw new Error(`Insufficient stock for "${dbItem.name}". Available: ${dbItem.current_stock}`);
+      }
+    }
+
     let linkedPiId = data.piId || data.pi_id || null;
 
     // Policy: If any item belongs to a specific active PI, automatically link this challan to that PI
@@ -159,10 +176,11 @@ export const challansApi = {
       }
     }
 
-    // 1. Create challan
+    // 1. Create challan (number allocated here, same format as the desktop app)
+    let challanNumber = data.challanNumber || await challansApi.getNextNumber();
     const challanInsert = {
-      challan_number: data.challanNumber,
-      challan_date: data.challanDate,
+      challan_number: challanNumber,
+      challan_date: data.challanDate || new Date().toISOString(),
       receiver_name: data.receiverName,
       receiver_contact: data.receiverContact || null,
       receiver_address: data.receiverAddress || null,
@@ -175,8 +193,14 @@ export const challansApi = {
       challanInsert.received_status = 'PENDING';
     }
 
-    const { data: challan, error } = await supabase.from('challans').insert([challanInsert]).select().single();
-    if (error) throw error;
+    let challan;
+    for (let attempt = 0; ; attempt++) {
+      const res = await supabase.from('challans').insert([{ ...challanInsert, challan_number: challanNumber }]).select().single();
+      if (!res.error) { challan = res.data; break; }
+      const duplicate = res.error.code === '23505' || /duplicate|unique/i.test(res.error.message || '');
+      if (!duplicate || attempt >= 4 || data.challanNumber) throw res.error;
+      challanNumber = await challansApi.getNextNumber();
+    }
 
     // 2. Create challan items
     const challanItems = data.items.map(item => {
@@ -221,9 +245,10 @@ export const challansApi = {
 
     for (const item of data.items) {
       const { data: currentItem } = await supabase.from('items').select('current_stock').eq('id', item.itemId).single();
-      const stockBefore = currentItem?.current_stock || 0;
+      const stockBefore = Number(currentItem?.current_stock) || 0;
       const newStock = stockBefore - item.quantity;
       await supabase.from('items').update({ current_stock: newStock }).eq('id', item.itemId);
+      try { await syncTiersToStock(supabase, item.itemId); } catch (e) { console.warn('[Web] tier sync failed', e?.message); }
 
       // Log transaction
       await supabase.from('stock_transactions').insert([{
@@ -233,20 +258,40 @@ export const challansApi = {
         stock_before: stockBefore,
         stock_after: newStock,
         challan_id: challan.id,
-        reference: `Challan: ${data.challanNumber}`,
+        reference: `Challan: ${challanNumber}`,
         notes: `Delivered to ${data.receiverName}`,
         created_by: user?.id || null
       }]);
     }
 
-    return challan.id;
+    return { success: true, id: challan.id, challanNumber };
   },
-  getNextNumber: async () => {
-    const { data, error } = await getSupabase().from('challans').select('challan_number').order('challan_number', { ascending: false }).limit(1);
+  getNextNumber: async (prefixArg) => {
+    const supabase = getSupabase();
+    let prefix = prefixArg;
+    if (!prefix) {
+      const { data: setting } = await supabase.from('settings').select('value').eq('key', 'challan_prefix').maybeSingle();
+      prefix = setting?.value || 'KA';
+    }
+    // Same format as the desktop app: <prefix>-<yyyymmdd>-<seq>, local date
+    const d = new Date();
+    const dateStr = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+    const head = `${prefix}-${dateStr}-`;
+    const { data, error } = await supabase.from('challans').select('challan_number').ilike('challan_number', `${head}%`);
     if (error) throw error;
-    const last = data[0]?.challan_number || 'CH-0000';
-    const num = parseInt(last.replace('CH-', '')) + 1;
-    return `CH-${num.toString().padStart(4, '0')}`;
+    const taken = new Set((data || []).map(r => (r.challan_number || '').toUpperCase()));
+    let maxSeq = 0;
+    (data || []).forEach(r => {
+      const seq = parseInt((r.challan_number || '').slice(head.length), 10);
+      if (!isNaN(seq) && seq > maxSeq) maxSeq = seq;
+    });
+    let seq = maxSeq + 1;
+    let candidate = `${head}${String(seq).padStart(4, '0')}`;
+    while (taken.has(candidate.toUpperCase()) || taken.has(`${candidate}-REJ`.toUpperCase())) {
+      seq++;
+      candidate = `${head}${String(seq).padStart(4, '0')}`;
+    }
+    return candidate;
   },
   receive: async (id, receiptData) => {
     const supabase = getSupabase();

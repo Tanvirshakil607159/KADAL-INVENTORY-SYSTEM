@@ -26,6 +26,18 @@ async function withItemLock(itemId, fn) {
   }
 }
 
+// Idempotency: the screen sends a fresh requestId per Save click. A repeat of the same requestId
+// (double submit / retry) is ignored; different requests are always recorded, even if identical.
+const recentRequestIds = new Map(); // requestId -> { at, result }
+const REQUEST_ID_TTL_MS = 10 * 60 * 1000;
+function rememberRequest(requestId, result) {
+  const now = Date.now();
+  for (const [key, entry] of recentRequestIds) {
+    if (now - entry.at > REQUEST_ID_TTL_MS) recentRequestIds.delete(key);
+  }
+  recentRequestIds.set(requestId, { at: now, result });
+}
+
 const InventoryService = {
   async getAll(filters) { return await ItemsRepo.getAll(filters); },
   async getById(id) { return await ItemsRepo.getById(id); },
@@ -209,15 +221,20 @@ const InventoryService = {
     return await this._executeStockMovement(data);
   },
 
-  async _executeStockMovement({ itemId, type, quantity, reference, notes, warehouseId, unitPrice, currency, conversionRate }) {
+  async _executeStockMovement({ itemId, type, quantity, reference, notes, warehouseId, unitPrice, currency, conversionRate, requestId }) {
     return await withItemLock(itemId, async () => {
       const user = AuthService.getCurrentUser();
       const numQty = Number(quantity);
       if (!numQty || numQty <= 0) throw new Error('Quantity must be greater than 0');
 
-      // 1. Rapid duplicate / double-click prevention BEFORE mutating any stock or tiers
+      // 1. Duplicate prevention BEFORE mutating any stock or tiers
+      if (requestId) {
+        const seen = recentRequestIds.get(requestId);
+        if (seen) return { ...seen.result, duplicatePrevented: true };
+      }
       const FourSecsAgo = new Date(Date.now() - 4000).toISOString();
-      try {
+      // Without a requestId (older callers) fall back to the 4-second double-click heuristic
+      if (!requestId) try {
         const recentTxns = await StockTransactionsRepo.getAll({
           itemId,
           type,
@@ -262,21 +279,14 @@ const InventoryService = {
       }
       else throw new Error('Invalid transaction type');
 
-      // 2. Active price tier alignment: if active price tiers exist, guarantee stock matches tier sum
-      try {
-        const activeTiers = await ItemPriceTiersRepo.getActiveByItem(itemId);
-        if (activeTiers && activeTiers.length > 0) {
-          const tierSum = activeTiers.reduce((acc, t) => acc + Number(t.quantity || 0), 0);
-          if (Math.abs(tierSum - stockAfter) > 0.001) {
-            console.warn(`[InventoryService] Synchronizing stockAfter (${stockAfter}) with price tier sum (${tierSum}) for item ${itemId}`);
-            stockAfter = tierSum;
-          }
-        }
-      } catch (tierSyncErr) {
-        console.warn('[InventoryService] Warning syncing tier total:', tierSyncErr.message);
-      }
-
       await ItemsRepo.updateStock(itemId, stockAfter);
+      // 2. Keep FIFO price tiers in line with stock. Stock is the source of truth: older
+      // returns/production may have left tiers short, and they must not erase real stock.
+      try {
+        await ItemPriceTiersRepo.syncItemToStock(itemId);
+      } catch (tierSyncErr) {
+        console.warn('[InventoryService] Warning syncing price tiers:', tierSyncErr.message);
+      }
       if (type === 'IN' && curr === 'USD' && convRate !== null && convRate !== undefined) {
         try {
           await ItemsRepo.updateConversionRate(itemId, convRate);
@@ -309,7 +319,9 @@ const InventoryService = {
         conversionRate: convRate,
         createdBy: user?.id,
       });
-      return { success: true, stockAfter, transactionId: txnId };
+      const result = { success: true, stockAfter, transactionId: txnId };
+      if (requestId) rememberRequest(requestId, result);
+      return result;
     });
   },
 
@@ -319,13 +331,12 @@ const InventoryService = {
     const item = await ItemsRepo.getById(parsedId);
     if (!item) return { success: false, error: 'Item not found' };
 
-    const activeTiers = await ItemPriceTiersRepo.getActiveByItem(parsedId);
-    if (activeTiers && activeTiers.length > 0) {
-      const tierSum = activeTiers.reduce((acc, t) => acc + Number(t.quantity || 0), 0);
-      if (Math.abs(tierSum - Number(item.current_stock)) > 0.001) {
-        await ItemsRepo.updateStock(parsedId, tierSum);
-        return { success: true, reconciled: true, oldStock: item.current_stock, newStock: tierSum };
-      }
+    // Stock is the source of truth: bring the price tiers in line with it, never the reverse.
+    const before = await ItemPriceTiersRepo.getActiveByItem(parsedId);
+    const tierSum = before.reduce((acc, t) => acc + Number(t.quantity || 0), 0);
+    if (Math.abs(tierSum - Number(item.current_stock)) > 0.001) {
+      await ItemPriceTiersRepo.syncItemToStock(parsedId);
+      return { success: true, reconciled: true, oldTierTotal: tierSum, newTierTotal: Number(item.current_stock), currentStock: item.current_stock };
     }
     return { success: true, reconciled: false, currentStock: item.current_stock };
   },

@@ -38,7 +38,8 @@ const ChallanService = {
 
   async create(data) {
     const user = await AuthService.getCurrentUser();
-    if (user?.roleName !== 'Admin') {
+    const isAdmin = ['Admin', 'Super Admin'].includes(user?.roleName) || ['Admin', 'Super Admin'].includes(user?.role_name);
+    if (!isAdmin) {
       const ApprovalService = require('./approval-service');
       const requireAll = await SettingsRepo.get('require_challan_approval') === 'true';
       
@@ -116,6 +117,7 @@ const ChallanService = {
       // Rollback any stock that was already deducted in this loop
       for (const deduction of completedDeductions) {
         await ItemsRepo.updateStock(deduction.itemId, deduction.stockBefore);
+        await ItemPriceTiersRepo.syncItemToStock(deduction.itemId);
       }
       throw err;
     }
@@ -150,6 +152,7 @@ const ChallanService = {
       // Rollback all stock updates if challan creation completely fails
       for (const deduction of completedDeductions) {
         await ItemsRepo.updateStock(deduction.itemId, deduction.stockBefore);
+        await ItemPriceTiersRepo.syncItemToStock(deduction.itemId);
       }
       throw err;
     }
@@ -179,7 +182,8 @@ const ChallanService = {
     const result = await ChallansRepo.cancel(id, user?.id, reason);
     const affectedRows = result?.changes !== undefined ? result.changes : (result === true ? 1 : 0);
     
-    if (affectedRows === 0 && !isCloudEnabled()) {
+    // Only the call that actually flipped ACTIVE -> CANCELLED may reverse stock (local and cloud)
+    if (affectedRows === 0) {
       throw new Error('Challan already cancelled or not active');
     }
 

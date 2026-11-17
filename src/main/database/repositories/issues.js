@@ -1,4 +1,5 @@
 const { dbPrepare, getSupabase, isCloudEnabled } = require('../connection');
+const { dayStartIso, dayEndIso, dayStartSql, dayEndSql, inLocalRange } = require('../../utils/date-range');
 
 function extractProdIds(record) {
   let prodIds = [];
@@ -57,8 +58,8 @@ const IssuesRepo = {
       if (filters.issueType) query = query.eq('issue_type', filters.issueType);
       if (filters.recipientId) query = query.eq('recipient_id', filters.recipientId);
       if (filters.status) query = query.eq('status', filters.status);
-      if (filters.dateFrom) query = query.gte('issue_date', filters.dateFrom);
-      if (filters.dateTo) query = query.lte('issue_date', filters.dateTo + 'T23:59:59.999Z');
+      if (filters.dateFrom) query = query.gte('issue_date', dayStartIso(filters.dateFrom));
+      if (filters.dateTo) query = query.lte('issue_date', dayEndIso(filters.dateTo));
       if (filters.search) {
         query = query.or(`issue_id.ilike.%${filters.search}%,recipient_name.ilike.%${filters.search}%`);
       }
@@ -77,8 +78,8 @@ const IssuesRepo = {
     if (filters.issueType) { where.push('iss.issue_type = ?'); params.push(filters.issueType); }
     if (filters.recipientId) { where.push('iss.recipient_id = ?'); params.push(filters.recipientId); }
     if (filters.status) { where.push('iss.status = ?'); params.push(filters.status); }
-    if (filters.dateFrom) { where.push('iss.issue_date >= ?'); params.push(filters.dateFrom); }
-    if (filters.dateTo) { where.push('iss.issue_date <= ?'); params.push(filters.dateTo + 'T23:59:59.999Z'); }
+    if (filters.dateFrom) { where.push('datetime(iss.issue_date) >= ?'); params.push(dayStartSql(filters.dateFrom)); }
+    if (filters.dateTo) { where.push('datetime(iss.issue_date) <= ?'); params.push(dayEndSql(filters.dateTo)); }
     if (filters.search) {
       where.push('(iss.issue_id LIKE ? OR iss.recipient_name LIKE ?)');
       const s = `%${filters.search}%`; params.push(s, s);
@@ -592,8 +593,8 @@ const IssuesRepo = {
 
       if (filters.issueType) result = result.filter(r => r.issue_type === filters.issueType);
       if (filters.status) result = result.filter(r => r.status === filters.status);
-      if (filters.dateFrom) result = result.filter(r => r.issue_date >= filters.dateFrom);
-      if (filters.dateTo) result = result.filter(r => r.issue_date <= filters.dateTo + 'T23:59:59.999Z');
+      if (filters.dateFrom) result = result.filter(r => inLocalRange(r.issue_date, filters.dateFrom, null));
+      if (filters.dateTo) result = result.filter(r => inLocalRange(r.issue_date, null, filters.dateTo));
       if (filters.recipientName) result = result.filter(r => r.recipient_name?.toLowerCase().includes(filters.recipientName.toLowerCase()));
       if (filters.buyerName) {
         const b = filters.buyerName.toLowerCase();
@@ -654,8 +655,8 @@ const IssuesRepo = {
     let where = []; let params = [];
     if (filters.issueType) { where.push('iss.issue_type = ?'); params.push(filters.issueType); }
     if (filters.status) { where.push('iss.status = ?'); params.push(filters.status); }
-    if (filters.dateFrom) { where.push('iss.issue_date >= ?'); params.push(filters.dateFrom); }
-    if (filters.dateTo) { where.push('iss.issue_date <= ?'); params.push(filters.dateTo + 'T23:59:59.999Z'); }
+    if (filters.dateFrom) { where.push('datetime(iss.issue_date) >= ?'); params.push(dayStartSql(filters.dateFrom)); }
+    if (filters.dateTo) { where.push('datetime(iss.issue_date) <= ?'); params.push(dayEndSql(filters.dateTo)); }
     if (filters.recipientName) { where.push('iss.recipient_name LIKE ?'); params.push(`%${filters.recipientName}%`); }
     const w = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
 
@@ -798,16 +799,16 @@ const IssuesRepo = {
         rejected_quantity: r.rejected_quantity,
         notes: r.notes,
       }));
-      if (filters.dateFrom) result = result.filter(r => r.return_date >= filters.dateFrom);
-      if (filters.dateTo) result = result.filter(r => r.return_date <= filters.dateTo + 'T23:59:59.999Z');
+      if (filters.dateFrom) result = result.filter(r => inLocalRange(r.return_date, filters.dateFrom, null));
+      if (filters.dateTo) result = result.filter(r => inLocalRange(r.return_date, null, filters.dateTo));
       if (filters.issueType) result = result.filter(r => r.issue_type === filters.issueType);
       if (filters.recipientName) result = result.filter(r => r.recipient_name?.toLowerCase().includes(filters.recipientName.toLowerCase()));
       return result;
     }
 
     let where = []; let params = [];
-    if (filters.dateFrom) { where.push('ret.return_date >= ?'); params.push(filters.dateFrom); }
-    if (filters.dateTo) { where.push('ret.return_date <= ?'); params.push(filters.dateTo + 'T23:59:59.999Z'); }
+    if (filters.dateFrom) { where.push('datetime(ret.return_date) >= ?'); params.push(dayStartSql(filters.dateFrom)); }
+    if (filters.dateTo) { where.push('datetime(ret.return_date) <= ?'); params.push(dayEndSql(filters.dateTo)); }
     if (filters.issueType) { where.push('iss.issue_type = ?'); params.push(filters.issueType); }
     if (filters.recipientName) { where.push('iss.recipient_name LIKE ?'); params.push(`%${filters.recipientName}%`); }
     const w = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
@@ -850,16 +851,16 @@ const IssuesRepo = {
         }))
         .filter(r => r.outstanding > 0);
       if (filters.recipientName) result = result.filter(r => r.recipient_name?.toLowerCase().includes(filters.recipientName.toLowerCase()));
-      if (filters.dateFrom) result = result.filter(r => r.issue_date >= filters.dateFrom);
-      if (filters.dateTo) result = result.filter(r => r.issue_date <= filters.dateTo + 'T23:59:59.999Z');
+      if (filters.dateFrom) result = result.filter(r => inLocalRange(r.issue_date, filters.dateFrom, null));
+      if (filters.dateTo) result = result.filter(r => inLocalRange(r.issue_date, null, filters.dateTo));
       return result;
     }
 
     let where = ["iss.issue_type = 'EMPLOYEE'", "(ii.quantity - COALESCE(ii.returned_quantity,0) - COALESCE(ii.damage_quantity,0) - COALESCE(ii.rejected_quantity,0) - COALESCE(ii.consumed_quantity,0)) > 0"];
     let params = [];
     if (filters.recipientName) { where.push('iss.recipient_name LIKE ?'); params.push(`%${filters.recipientName}%`); }
-    if (filters.dateFrom) { where.push('iss.issue_date >= ?'); params.push(filters.dateFrom); }
-    if (filters.dateTo) { where.push('iss.issue_date <= ?'); params.push(filters.dateTo + 'T23:59:59.999Z'); }
+    if (filters.dateFrom) { where.push('datetime(iss.issue_date) >= ?'); params.push(dayStartSql(filters.dateFrom)); }
+    if (filters.dateTo) { where.push('datetime(iss.issue_date) <= ?'); params.push(dayEndSql(filters.dateTo)); }
     const w = `WHERE ${where.join(' AND ')}`;
 
     return dbPrepare(`
@@ -920,8 +921,8 @@ const IssuesRepo = {
         };
       });
 
-      if (filters.dateFrom) result = result.filter(r => r.produced_at >= filters.dateFrom);
-      if (filters.dateTo) result = result.filter(r => r.produced_at <= filters.dateTo + 'T23:59:59.999Z');
+      if (filters.dateFrom) result = result.filter(r => inLocalRange(r.produced_at, filters.dateFrom, null));
+      if (filters.dateTo) result = result.filter(r => inLocalRange(r.produced_at, null, filters.dateTo));
       return result;
     }
 
@@ -966,8 +967,8 @@ const IssuesRepo = {
           outstanding: totalIssued - totalReturned - totalDamaged - totalRejected - totalConsumed,
         };
       });
-      if (filters.dateFrom) result = result.filter(r => r.issue_date >= filters.dateFrom);
-      if (filters.dateTo) result = result.filter(r => r.issue_date <= filters.dateTo + 'T23:59:59.999Z');
+      if (filters.dateFrom) result = result.filter(r => inLocalRange(r.issue_date, filters.dateFrom, null));
+      if (filters.dateTo) result = result.filter(r => inLocalRange(r.issue_date, null, filters.dateTo));
       if (filters.issueType) result = result.filter(r => r.issue_type === filters.issueType);
       if (filters.status) result = result.filter(r => r.status === filters.status);
       if (filters.recipientName) result = result.filter(r => r.recipient_name?.toLowerCase().includes(filters.recipientName.toLowerCase()));
@@ -975,8 +976,8 @@ const IssuesRepo = {
     }
 
     let where = []; let params = [];
-    if (filters.dateFrom) { where.push('iss.issue_date >= ?'); params.push(filters.dateFrom); }
-    if (filters.dateTo) { where.push('iss.issue_date <= ?'); params.push(filters.dateTo + 'T23:59:59.999Z'); }
+    if (filters.dateFrom) { where.push('datetime(iss.issue_date) >= ?'); params.push(dayStartSql(filters.dateFrom)); }
+    if (filters.dateTo) { where.push('datetime(iss.issue_date) <= ?'); params.push(dayEndSql(filters.dateTo)); }
     if (filters.issueType) { where.push('iss.issue_type = ?'); params.push(filters.issueType); }
     if (filters.status) { where.push('iss.status = ?'); params.push(filters.status); }
     if (filters.recipientName) { where.push('iss.recipient_name LIKE ?'); params.push(`%${filters.recipientName}%`); }

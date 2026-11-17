@@ -31,7 +31,14 @@ const getPageType = (page) => {
   return 'middle';
 };
 
-export default function ProformaInvoicePrintView({ 
+// The null check lives in this wrapper so the inner component always calls the same hooks
+// in the same order (React's rules of hooks), even if `pi` switches between null and a PI.
+export default function ProformaInvoicePrintView(props) {
+  if (!props.pi) return null;
+  return <ProformaInvoicePrintViewContent {...props} />;
+}
+
+function ProformaInvoicePrintViewContent({ 
   pi, 
   onPrint, 
   onExportPdf, 
@@ -41,8 +48,6 @@ export default function ProformaInvoicePrintView({
   isModal = false,
   mode = null // 'pi' or 'bill'
 }) {
-  if (!pi) return null;
-
   const isBill = mode === 'bill' || (mode !== 'pi' && !!pi.bill_number);
 
   const formatDate = (dateStr) => {

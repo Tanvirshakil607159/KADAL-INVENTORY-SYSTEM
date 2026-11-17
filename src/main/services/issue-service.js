@@ -139,6 +139,7 @@ const IssueService = {
       // Rollback any stock that was already deducted in this loop
       for (const deduction of completedDeductions) {
         await ItemsRepo.updateStock(deduction.itemId, deduction.stockBefore);
+        await ItemPriceTiersRepo.syncItemToStock(deduction.itemId);
       }
       throw err;
     }
@@ -166,6 +167,7 @@ const IssueService = {
       // Rollback all stock updates if issue creation fails
       for (const deduction of completedDeductions) {
         await ItemsRepo.updateStock(deduction.itemId, deduction.stockBefore);
+        await ItemPriceTiersRepo.syncItemToStock(deduction.itemId);
       }
       throw err;
     }
@@ -328,6 +330,7 @@ const IssueService = {
     } catch (err) {
       for (const deduction of completedDeductions) {
         await ItemsRepo.updateStock(deduction.itemId, deduction.stockBefore);
+        await ItemPriceTiersRepo.syncItemToStock(deduction.itemId);
       }
       throw err;
     }
@@ -346,6 +349,7 @@ const IssueService = {
     } catch (err) {
       for (const deduction of completedDeductions) {
         await ItemsRepo.updateStock(deduction.itemId, deduction.stockBefore);
+        await ItemPriceTiersRepo.syncItemToStock(deduction.itemId);
       }
       throw err;
     }
@@ -398,9 +402,15 @@ const IssueService = {
     const issue = await IssuesRepo.getById(id);
     if (!issue) throw new Error('Issue not found');
 
-    // Reverse outstanding stock: add back (issued - returned) for each item
+    // Reverse outstanding stock: add back only what is still out at the recipient.
+    // Returned goods are already back in stock; consumed, wasted (damage) and rejected
+    // material no longer exists as usable stock.
     for (const item of (issue.items || [])) {
-      const outstanding = item.quantity - (item.returned_quantity || 0);
+      const outstanding = Number(item.quantity)
+        - Number(item.returned_quantity || 0)
+        - Number(item.damage_quantity || 0)
+        - Number(item.rejected_quantity || 0)
+        - Number(item.consumed_quantity || 0);
       if (outstanding > 0) {
         const dbItem = await ItemsRepo.getById(item.item_id);
         if (dbItem) {
@@ -412,7 +422,7 @@ const IssueService = {
             itemId: item.item_id, type: 'IN', quantity: outstanding,
             stockBefore, stockAfter,
             reference: `Issue Deleted: ${issue.issue_id}`,
-            notes: `Stock reversed on issue deletion by ${user.full_name}`,
+            notes: `Stock reversed on issue deletion by ${user.fullName || user.full_name || user.username || 'user'}`,
             createdBy: user.id,
           });
         }

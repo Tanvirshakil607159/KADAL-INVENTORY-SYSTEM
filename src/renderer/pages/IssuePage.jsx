@@ -2,7 +2,7 @@ import SearchableSelect from '../components/ui/SearchableSelect';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import useStore from '../store/useStore';
 import PaginationBar from '../components/common/PaginationBar';
-import { Send, RotateCcw, BarChart3, Plus, Trash2, FileSpreadsheet, FileText, Search, Package, Eye, Clock, Filter, X } from 'lucide-react';
+import { Send, RotateCcw, BarChart3, Plus, Trash2, FileSpreadsheet, FileText, Search, Package, Eye, Clock, Filter, X, AlertCircle } from 'lucide-react';
 
 const TABS = [
   { id: 'entry', label: 'Issue Entry', icon: Send },

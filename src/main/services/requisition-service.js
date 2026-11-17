@@ -12,7 +12,28 @@ const RequisitionService = {
 
   async getNextNumber() {
     const prefix = SettingsRepo.get('requisition_prefix') || 'REQ';
-    return await RequisitionsRepo.getNextNumber(prefix);
+    const next = await RequisitionsRepo.getNextNumber(prefix);
+    // Requests waiting for approval already show a number; don't hand the same one out twice.
+    let maxPending = 0;
+    try {
+      const ApprovalsRepo = require('../database/repositories/approvals');
+      const pending = await ApprovalsRepo.getAll({ status: 'PENDING' });
+      for (const a of (pending || [])) {
+        if (a.type !== 'CREATE_REQUISITION') continue;
+        const d = typeof a.data === 'string' ? JSON.parse(a.data) : (a.data || {});
+        const no = d.requisitionNo || '';
+        if (!no.startsWith(`${prefix}-`)) continue;
+        const n = parseInt(no.split('-').pop(), 10);
+        if (!isNaN(n) && n > maxPending) maxPending = n;
+      }
+    } catch (e) {
+      console.warn('[RequisitionService] Could not check pending approvals for numbering:', e.message);
+    }
+    const nextSeq = parseInt(next.split('-').pop(), 10);
+    if (!isNaN(nextSeq) && maxPending >= nextSeq) {
+      return `${prefix}-${String(maxPending + 1).padStart(4, '0')}`;
+    }
+    return next;
   },
 
   async create(data) {
@@ -55,17 +76,31 @@ const RequisitionService = {
 
   // Internal create method called by ApprovalService when a CREATE_REQUISITION approval is approved
   async _executeCreate(data) {
-    const id = await RequisitionsRepo.create({
-      requisitionNo: data.requisitionNo,
-      recipientId: data.recipientId,
-      requesterName: data.requesterName,
-      department: data.department,
-      purpose: data.purpose,
-      notes: data.notes,
-      requisitionDate: data.requisitionDate || new Date().toISOString(),
-      createdBy: data.createdBy,
-      items: data.items,
-    });
+    // The number shown while the request waited for approval is only provisional: another
+    // requisition may have taken it in the meantime, so fall back to the next free number.
+    let requisitionNo = data.requisitionNo || await this.getNextNumber();
+    let id;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        id = await RequisitionsRepo.create({
+          requisitionNo,
+          recipientId: data.recipientId,
+          requesterName: data.requesterName,
+          department: data.department,
+          purpose: data.purpose,
+          notes: data.notes,
+          requisitionDate: data.requisitionDate || new Date().toISOString(),
+          createdBy: data.createdBy,
+          items: data.items,
+        });
+        break;
+      } catch (err) {
+        const isDuplicateNo = /unique|duplicate/i.test(err.message || '') && /requisition_no|requisitions/i.test(err.message || '');
+        if (!isDuplicateNo || attempt >= 4) throw err;
+        requisitionNo = await this.getNextNumber();
+      }
+    }
+    data = { ...data, requisitionNo };
 
     AuditLogsRepo.create({
       userId: data.createdBy, action: 'CREATE', entityType: 'requisition', entityId: id,
@@ -168,6 +203,7 @@ const RequisitionService = {
       // Rollback any deductions already made
       for (const { item, stockBefore } of completedDeductions) {
         await ItemsRepo.updateStock(item.item_id, stockBefore);
+        await ItemPriceTiersRepo.syncItemToStock(item.item_id);
       }
       throw err;
     }

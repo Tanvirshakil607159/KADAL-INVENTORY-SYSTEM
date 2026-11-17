@@ -1,4 +1,5 @@
 const { dbPrepare, getSupabase, isCloudEnabled } = require('../connection');
+const { dayStartIso, dayEndIso, dayStartSql, dayEndSql, inLocalRange } = require('../../utils/date-range');
 
 const RequisitionsRepo = {
   // ==================== Requisitions ====================
@@ -15,8 +16,8 @@ const RequisitionsRepo = {
 
       if (filters.status) query = query.eq('status', filters.status);
       if (filters.recipientId) query = query.eq('recipient_id', filters.recipientId);
-      if (filters.dateFrom) query = query.gte('requisition_date', filters.dateFrom);
-      if (filters.dateTo) query = query.lte('requisition_date', filters.dateTo + 'T23:59:59.999Z');
+      if (filters.dateFrom) query = query.gte('requisition_date', dayStartIso(filters.dateFrom));
+      if (filters.dateTo) query = query.lte('requisition_date', dayEndIso(filters.dateTo));
       if (filters.search) {
         query = query.or(`requisition_no.ilike.%${filters.search}%,requester_name.ilike.%${filters.search}%,department.ilike.%${filters.search}%`);
       }
@@ -35,8 +36,8 @@ const RequisitionsRepo = {
     let where = []; let params = [];
     if (filters.status) { where.push('r.status = ?'); params.push(filters.status); }
     if (filters.recipientId) { where.push('r.recipient_id = ?'); params.push(filters.recipientId); }
-    if (filters.dateFrom) { where.push('r.requisition_date >= ?'); params.push(filters.dateFrom); }
-    if (filters.dateTo) { where.push('r.requisition_date <= ?'); params.push(filters.dateTo + 'T23:59:59.999Z'); }
+    if (filters.dateFrom) { where.push('datetime(r.requisition_date) >= ?'); params.push(dayStartSql(filters.dateFrom)); }
+    if (filters.dateTo) { where.push('datetime(r.requisition_date) <= ?'); params.push(dayEndSql(filters.dateTo)); }
     if (filters.search) {
       where.push('(r.requisition_no LIKE ? OR r.requester_name LIKE ? OR r.department LIKE ?)');
       const s = `%${filters.search}%`; params.push(s, s, s);

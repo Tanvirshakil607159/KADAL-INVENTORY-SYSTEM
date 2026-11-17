@@ -1,4 +1,12 @@
 const { dbPrepare, dbTransaction, getSupabase, isCloudEnabled } = require('../connection');
+const { dayStartIso, dayEndIso, dayStartSql, dayEndSql, inLocalRange } = require('../../utils/date-range');
+
+// Sequence part of "<prefix>-<yyyymmdd>-<seq>[-REJ]". Reading what follows the known head keeps
+// prefixes that themselves contain hyphens (e.g. "KA-CH") working.
+function seqAfterPrefix(number, head) {
+  if (!number || !number.toUpperCase().startsWith(head.toUpperCase())) return NaN;
+  return parseInt(number.slice(head.length), 10);
+}
 
 const ChallansRepo = {
   async getAll(filters = {}) {
@@ -14,8 +22,8 @@ const ChallansRepo = {
       if (filters.receivedStatus) query = query.eq('received_status', filters.receivedStatus);
       if (filters.piId) query = query.eq('pi_id', filters.piId);
       if (filters.onlyWithPi) query = query.not('pi_id', 'is', null);
-      if (filters.dateFrom) query = query.gte('challan_date', filters.dateFrom);
-      if (filters.dateTo) query = query.lte('challan_date', filters.dateTo + 'T23:59:59.999Z');
+      if (filters.dateFrom) query = query.gte('challan_date', dayStartIso(filters.dateFrom));
+      if (filters.dateTo) query = query.lte('challan_date', dayEndIso(filters.dateTo));
 
       const { data, error } = await query;
       if (error) throw error;
@@ -88,8 +96,8 @@ const ChallansRepo = {
       where.push('EXISTS (SELECT 1 FROM challan_items ci JOIN items i ON ci.item_id = i.id WHERE ci.challan_id = c.id AND i.buyer_name = ?)');
       params.push(filters.buyerName);
     }
-    if (filters.dateFrom && filters.dateFrom.trim()) { where.push('c.challan_date >= ?'); params.push(filters.dateFrom); }
-    if (filters.dateTo && filters.dateTo.trim()) { where.push("c.challan_date <= ?"); params.push(filters.dateTo + 'T23:59:59.999Z'); }
+    if (filters.dateFrom && filters.dateFrom.trim()) { where.push('datetime(c.challan_date) >= ?'); params.push(dayStartSql(filters.dateFrom)); }
+    if (filters.dateTo && filters.dateTo.trim()) { where.push("datetime(c.challan_date) <= ?"); params.push(dayEndSql(filters.dateTo)); }
     
     if (filters.excludeUsedInGatePass) {
       const GatePassRepo = require('./gate-passes');
@@ -140,8 +148,8 @@ const ChallansRepo = {
       `).order('challan_date', { foreignTable: 'challans', ascending: false });
 
       if (filters.status) query = query.eq('challans.status', filters.status);
-      if (filters.dateFrom) query = query.gte('challans.challan_date', filters.dateFrom);
-      if (filters.dateTo) query = query.lte('challans.challan_date', filters.dateTo + 'T23:59:59.999Z');
+      if (filters.dateFrom) query = query.gte('challans.challan_date', dayStartIso(filters.dateFrom));
+      if (filters.dateTo) query = query.lte('challans.challan_date', dayEndIso(filters.dateTo));
       if (filters.receiverName) query = query.ilike('challans.receiver_name', `%${filters.receiverName}%`);
       if (filters.buyerName) query = query.eq('items.buyer_name', filters.buyerName);
       if (filters.styleName) query = query.eq('items.style_name', filters.styleName);
@@ -234,8 +242,8 @@ const ChallansRepo = {
 
     let where = []; let params = [];
     if (filters.status) { where.push('c.status = ?'); params.push(filters.status); }
-    if (filters.dateFrom) { where.push('c.challan_date >= ?'); params.push(filters.dateFrom); }
-    if (filters.dateTo) { where.push('c.challan_date <= ?'); params.push(filters.dateTo + 'T23:59:59.999Z'); }
+    if (filters.dateFrom) { where.push('datetime(c.challan_date) >= ?'); params.push(dayStartSql(filters.dateFrom)); }
+    if (filters.dateTo) { where.push('datetime(c.challan_date) <= ?'); params.push(dayEndSql(filters.dateTo)); }
     if (filters.receiverName) { where.push('c.receiver_name LIKE ?'); params.push(`%${filters.receiverName}%`); }
     if (filters.buyerName) { where.push('i.buyer_name = ?'); params.push(filters.buyerName); }
     if (filters.styleName) { where.push('i.style_name = ?'); params.push(filters.styleName); }
@@ -732,11 +740,15 @@ const ChallansRepo = {
     if (isCloudEnabled()) {
       const supabase = getSupabase();
       const { data: ch } = await supabase.from('challans').select('pi_id').eq('id', id).maybeSingle();
-      const { error } = await supabase.from('challans')
+      // .select() returns the rows actually changed, so a second (racing) cancel reports 0
+      const { data: updatedRows, error } = await supabase.from('challans')
         .update({ status: 'CANCELLED', cancelled_by: cancelledBy, cancel_reason: reason, updated_at: new Date().toISOString() })
         .eq('id', id)
-        .eq('status', 'ACTIVE');
+        .eq('status', 'ACTIVE')
+        .select('id');
       if (error) throw error;
+      const changes = (updatedRows || []).length;
+      if (changes === 0) return { changes: 0 };
 
       if (ch?.pi_id) {
         try {
@@ -750,7 +762,7 @@ const ChallansRepo = {
           console.warn('[ChallansRepo] Error updating PI after challan cancel:', e.message);
         }
       }
-      return true;
+      return { changes };
     }
 
     const ch = dbPrepare('SELECT pi_id FROM challans WHERE id = ?').get(id);
@@ -784,15 +796,13 @@ const ChallansRepo = {
       
       if (error) throw error;
       (data || []).forEach(r => {
-        const parts = r.challan_number.split('-');
-        const seq = parseInt(parts[2], 10);
+        const seq = seqAfterPrefix(r.challan_number, `${prefix}-${dateStr}-`);
         if (!isNaN(seq) && seq > maxSeq) maxSeq = seq;
       });
     } else {
       const rows = dbPrepare(`SELECT challan_number FROM challans WHERE challan_number LIKE ?`).all(pattern);
       rows.forEach(r => {
-        const parts = r.challan_number.split('-');
-        const seq = parseInt(parts[2], 10);
+        const seq = seqAfterPrefix(r.challan_number, `${prefix}-${dateStr}-`);
         if (!isNaN(seq) && seq > maxSeq) maxSeq = seq;
       });
     }
@@ -829,16 +839,17 @@ const ChallansRepo = {
 
   async getTodayCount() {
     if (isCloudEnabled()) {
-      const today = new Date().toISOString().split('T')[0];
+      const today = require('../../utils/date-range').todayLocal();
       const { count, error } = await getSupabase()
         .from('challans')
         .select('*', { count: 'exact', head: true })
-        .gte('challan_date', today + 'T00:00:00Z')
-        .lte('challan_date', today + 'T23:59:59.999Z');
+        .gte('challan_date', dayStartIso(today))
+        .lte('challan_date', dayEndIso(today));
       if (error) throw error;
       return count || 0;
     }
-    const r = dbPrepare(`SELECT COUNT(*) as count FROM challans WHERE DATE(challan_date) = DATE('now')`).get();
+    const todayLocal = require('../../utils/date-range').todayLocal();
+    const r = dbPrepare(`SELECT COUNT(*) as count FROM challans WHERE datetime(challan_date) >= ? AND datetime(challan_date) <= ?`).get(dayStartSql(todayLocal), dayEndSql(todayLocal));
     return r ? r.count : 0;
   },
 
@@ -970,9 +981,11 @@ const ChallansRepo = {
 
     const db = require('../connection').getDb();
     db.run('DELETE FROM gate_passes');
+    // Child rows first: foreign keys are enforced in local mode
+    db.run('DELETE FROM stock_transactions WHERE challan_id IS NOT NULL');
+    db.run('UPDATE proforma_invoice_items SET challan_id = NULL WHERE challan_id IS NOT NULL');
     db.run('DELETE FROM challan_items');
     db.run('DELETE FROM challans');
-    db.run('DELETE FROM stock_transactions WHERE challan_id IS NOT NULL');
     db.run("DELETE FROM sqlite_sequence WHERE name IN ('challans', 'challan_items', 'gate_passes')");
     require('../connection').saveDatabase();
     return true;
@@ -995,17 +1008,24 @@ const ChallansRepo = {
     }
 
     const db = require('../connection').getDb();
-    db.run('DELETE FROM gate_passes');
-    db.run('DELETE FROM approvals');
-    db.run('DELETE FROM stock_transactions');
-    db.run('DELETE FROM challan_items');
-    db.run('DELETE FROM challans');
-    db.run('DELETE FROM items');
-    db.run('DELETE FROM buyers');
-    db.run('DELETE FROM suppliers');
-    db.run('DELETE FROM categories');
-    db.run('DELETE FROM audit_logs');
-    db.run("DELETE FROM sqlite_sequence WHERE name IN ('challans', 'challan_items', 'items', 'gate_passes', 'stock_transactions', 'approvals')");
+    // This maintenance wipe intentionally leaves issues/requisitions/PIs in place, so foreign
+    // keys are switched off for its duration (same result as before keys were enforced).
+    db.run('PRAGMA foreign_keys = OFF');
+    try {
+      db.run('DELETE FROM gate_passes');
+      db.run('DELETE FROM approvals');
+      db.run('DELETE FROM stock_transactions');
+      db.run('DELETE FROM challan_items');
+      db.run('DELETE FROM challans');
+      db.run('DELETE FROM items');
+      db.run('DELETE FROM buyers');
+      db.run('DELETE FROM suppliers');
+      db.run('DELETE FROM categories');
+      db.run('DELETE FROM audit_logs');
+      db.run("DELETE FROM sqlite_sequence WHERE name IN ('challans', 'challan_items', 'items', 'gate_passes', 'stock_transactions', 'approvals')");
+    } finally {
+      db.run('PRAGMA foreign_keys = ON');
+    }
     require('../connection').saveDatabase();
     return true;
   },
@@ -1037,6 +1057,7 @@ const ChallansRepo = {
     const ch = dbPrepare('SELECT pi_id FROM challans WHERE id = ?').get(id);
     const db = require('../connection').getDb();
     db.run('DELETE FROM stock_transactions WHERE challan_id = ?', [id]);
+    db.run('UPDATE proforma_invoice_items SET challan_id = NULL WHERE challan_id = ?', [id]);
     db.run('DELETE FROM challan_items WHERE challan_id = ?', [id]);
     db.run('DELETE FROM challans WHERE id = ?', [id]);
     require('../connection').saveDatabase();

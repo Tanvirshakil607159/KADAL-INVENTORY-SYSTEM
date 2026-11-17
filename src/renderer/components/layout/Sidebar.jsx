@@ -121,6 +121,8 @@ export default function Sidebar() {
         <div className="nav-section-label">Workspace</div>
         {navItems.map((item, index) => {
           const Icon = item.icon;
+          // These modules need the desktop app (not implemented in the browser build yet)
+          if (window.kadal?.isWeb && ['issue', 'gate-pass', 'production', 'backup'].includes(item.id)) return null;
           const permsObj = typeof user?.permissions === 'string' ? JSON.parse(user.permissions) : (user?.permissions || {});
           const permKey = item.id.replace(/-/g, '_');
           const hasExplicitPerm = permsObj && (

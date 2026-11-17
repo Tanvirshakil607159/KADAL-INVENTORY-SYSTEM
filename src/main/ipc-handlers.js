@@ -35,6 +35,7 @@ const WarehouseService = require('./services/warehouse-service');
 const RequisitionService = require('./services/requisition-service');
 const RequisitionsRepo = require('./database/repositories/requisitions');
 const FinanceService = require('./services/finance-service');
+const UserAccountService = require('./services/user-account-service');
 function wrapHandler(fn) {
   return async (event, ...args) => {
     try {
@@ -44,6 +45,47 @@ function wrapHandler(fn) {
       return { success: false, error: err.message };
     }
   };
+}
+
+// ---- Permission checks in the main process (the window can be scripted, so it is not trusted) ----
+const isGranted = (v) => v === 'rw' || v === true || v === 'true';
+function permsOf(user) {
+  const p = user?.permissions;
+  if (!p) return {};
+  if (typeof p === 'string') { try { return JSON.parse(p) || {}; } catch (e) { return {}; } }
+  return p;
+}
+function roleOf(user) { return user?.roleName || user?.role_name || ''; }
+const Access = {
+  usersAdmin(user) {
+    const p = permsOf(user);
+    if (['Admin', 'Super Admin'].includes(roleOf(user))) return true;
+    if (Object.prototype.hasOwnProperty.call(p, 'settings_users')) return isGranted(p.settings_users);
+    return isGranted(p.users) || isGranted(p.settings);
+  },
+  maintenance(user) { return roleOf(user) === 'Super Admin' || isGranted(permsOf(user).maintenance); },
+  backup(user) { const p = permsOf(user); return roleOf(user) === 'Super Admin' || isGranted(p.backup) || isGranted(p.maintenance); },
+  settings(user) {
+    const p = permsOf(user);
+    if (['Admin', 'Super Admin'].includes(roleOf(user)) || isGranted(p.settings)) return true;
+    return Object.keys(p).some(k => k.startsWith('settings_') && k !== 'settings_appearance' && isGranted(p[k]));
+  },
+};
+function guarded(check, fn) {
+  return wrapHandler(async (...args) => {
+    const user = AuthService.getCurrentUser();
+    if (!user) throw new Error('Please log in again.');
+    if (!check(user, ...args)) throw new Error('You do not have permission to do this.');
+    return fn(...args);
+  });
+}
+// The cloud connection keys may be set from the login / cloud-setup screens before anyone logs in
+const CONNECTION_KEYS = ['supabase_url', 'supabase_key'];
+function guardSettingsWrite(keys) {
+  const user = AuthService.getCurrentUser();
+  if (keys.every(k => CONNECTION_KEYS.includes(k)) && !user) return;
+  if (!user) throw new Error('Please log in again.');
+  if (!Access.settings(user)) throw new Error('You do not have permission to do this.');
 }
 
 function registerIpcHandlers() {
@@ -77,44 +119,13 @@ function registerIpcHandlers() {
     return UsersRepo.getAll();
   }));
 
-  ipcMain.handle('users:create', wrapHandler(async (data) => {
-    const hash = bcrypt.hashSync(data.password, 10);
-    const id = await UsersRepo.create({
-      username: data.username,
-      passwordHash: hash,
-      fullName: data.fullName,
-      roleId: data.roleId,
-      customPermissions: data.customPermissions,
-    });
-    const user = await AuthService.getCurrentUser();
-    await AuditLogsRepo.create({
-      userId: user?.id,
-      action: 'CREATE',
-      entityType: 'user',
-      entityId: id,
-      newValue: { username: data.username, fullName: data.fullName },
-    });
-    return { id };
-  }));
+  ipcMain.handle('users:create', guarded(Access.usersAdmin, (data) => UserAccountService.createUser(data)));
 
-  ipcMain.handle('users:update', wrapHandler(async (id, data) => {
-    await UsersRepo.update(id, { fullName: data.fullName, roleId: data.roleId, customPermissions: data.customPermissions });
-    if (data.password) {
-      const hash = bcrypt.hashSync(data.password, 10);
-      await UsersRepo.updatePassword(id, hash);
-    }
-    return { success: true };
-  }));
+  ipcMain.handle('users:update', guarded(Access.usersAdmin, (id, data) => UserAccountService.updateUser(id, data)));
 
-  ipcMain.handle('users:toggleActive', wrapHandler(async (id) => {
-    await UsersRepo.toggleActive(id);
-    return { success: true };
-  }));
+  ipcMain.handle('users:toggleActive', guarded(Access.usersAdmin, (id) => UserAccountService.toggleActive(id)));
 
-  ipcMain.handle('users:delete', wrapHandler(async (id) => {
-    await UsersRepo.delete(id);
-    return { success: true };
-  }));
+  ipcMain.handle('users:delete', guarded(Access.usersAdmin, (id) => UserAccountService.deleteUser(id)));
 
   ipcMain.handle('roles:getAll', wrapHandler(() => {
     return RolesRepo.getAll();
@@ -329,7 +340,7 @@ function registerIpcHandlers() {
     return ChallanService.delete(id);
   }));
 
-  ipcMain.handle('challans:clearHistory', wrapHandler(async () => {
+  ipcMain.handle('challans:clearHistory', guarded(Access.maintenance, async () => {
     return ChallansRepo.clearChallanHistory();
   }));
 
@@ -513,7 +524,7 @@ function registerIpcHandlers() {
     return PdfGenerator.generateReportPdf(getReportTitle(type), columns, data, settings, pdfOptions);
   }));
 
-  ipcMain.handle('gatePass:clearHistory', wrapHandler(async () => {
+  ipcMain.handle('gatePass:clearHistory', guarded(Access.maintenance, async () => {
     return GatePassRepo.clearGatePassHistory();
   }));
 
@@ -529,7 +540,7 @@ function registerIpcHandlers() {
     return result;
   }));
 
-  ipcMain.handle('backup:restore', wrapHandler(async (filePath) => {
+  ipcMain.handle('backup:restore', guarded(Access.backup, async (filePath) => {
     return BackupService.restore(filePath);
   }));
 
@@ -575,11 +586,13 @@ function registerIpcHandlers() {
   }));
 
   ipcMain.handle('settings:set', wrapHandler(async (key, value) => {
+    guardSettingsWrite([key]);
     await SettingsRepo.set(key, value);
     return { success: true };
   }));
 
   ipcMain.handle('settings:setBulk', wrapHandler(async (settings) => {
+    guardSettingsWrite(Object.keys(settings || {}));
     await SettingsRepo.setBulk(settings);
     return { success: true };
   }));
@@ -722,7 +735,7 @@ function registerIpcHandlers() {
     return { success: false, error: 'No main window found' };
   }));
 
-  ipcMain.handle('system:clearData', wrapHandler(() => {
+  ipcMain.handle('system:clearData', guarded(Access.maintenance, () => {
     return ChallansRepo.clearAllData();
   }));
 
@@ -735,7 +748,7 @@ function registerIpcHandlers() {
     return getDbPath();
   }));
 
-  ipcMain.handle('system:selectDatabase', wrapHandler(async () => {
+  ipcMain.handle('system:selectDatabase', guarded(Access.maintenance, async () => {
     const { dialog, app } = require('electron');
     const { setCustomDbPath } = require('./database/connection');
     const result = await dialog.showOpenDialog({
@@ -751,7 +764,7 @@ function registerIpcHandlers() {
     return { success: true };
   }));
 
-  ipcMain.handle('system:createDatabase', wrapHandler(async () => {
+  ipcMain.handle('system:createDatabase', guarded(Access.maintenance, async () => {
     const { dialog, app } = require('electron');
     const { setCustomDbPath } = require('./database/connection');
     const result = await dialog.showSaveDialog({
@@ -899,7 +912,9 @@ function registerIpcHandlers() {
   }));
 
   ipcMain.handle('finance:create', wrapHandler((data) => {
-    return FinanceService.create(data);
+    // _bypassApproval is internal only; never accept it from the window
+    const { _bypassApproval, ...clean } = data || {};
+    return FinanceService.create(clean);
   }));
 
   ipcMain.handle('finance:update', wrapHandler((id, data) => {

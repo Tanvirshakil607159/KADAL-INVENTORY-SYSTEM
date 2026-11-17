@@ -53,6 +53,8 @@ export default function StockMovementModal({ data, onSaved }) {
     setSaving(true);
     try {
       const res = await window.kadal.stock.addMovement({ 
+        // One id per Save click: a resend of this exact request is ignored, a new entry never is
+        requestId: (window.crypto?.randomUUID ? window.crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`),
         itemId: selectedItem.id, 
         itemName: selectedItem.name, 
         itemCode: selectedItem.item_code,

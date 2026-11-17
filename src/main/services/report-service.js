@@ -1,4 +1,5 @@
 const { dbPrepare, getSupabase, isCloudEnabled } = require('../database/connection');
+const { dayStartIso, dayEndIso, dayStartSql, dayEndSql, lastDayOfMonth, localDay, todayLocal, inLocalRange } = require('../utils/date-range');
 const ItemsRepo = require('../database/repositories/items');
 const StockTransactionsRepo = require('../database/repositories/stock-transactions');
 const ChallansRepo = require('../database/repositories/challans');
@@ -40,8 +41,10 @@ const ReportService = {
   // Option B: Audit report as of a cutoff date (defaults to 30.06.2026)
   // Calculates historical stock by reversing post-cutoff transactions
   async auditReport(filters = {}) {
-    const cutoffDate = filters.cutoffDate || new Date().toISOString().split('T')[0];
-    const cutoffTimestamp = cutoffDate + 'T23:59:59.999Z';
+    const cutoffDate = filters.cutoffDate || todayLocal();
+    // End of the cutoff day in local time (Bangladesh), as UTC for Supabase and SQLite
+    const cutoffTimestamp = dayEndIso(cutoffDate);
+    const cutoffSql = dayEndSql(cutoffDate);
 
     let rawMaterials = [];
     let finishedGoods = [];
@@ -123,7 +126,7 @@ const ReportService = {
           // Only include issues made on or before cutoff date
           const issueDate = r.issues?.issue_date;
           if (!issueDate) return true;
-          return issueDate <= cutoffTimestamp;
+          return inLocalRange(issueDate, null, cutoffDate);
         })
         .map(r => {
           const outstanding = (r.quantity || 0) - (r.returned_quantity || 0) - (r.damage_quantity || 0) - (r.rejected_quantity || 0) - (r.consumed_quantity || 0);
@@ -163,13 +166,13 @@ const ReportService = {
       rawMaterials = dbPrepare(`
         SELECT i.*, c.name as category_name, s.name as supplier_name,
           (i.current_stock 
-            - COALESCE((SELECT SUM(st.quantity) FROM stock_transactions st WHERE st.item_id = i.id AND st.type = 'IN' AND st.created_at > ?), 0)
-            + COALESCE((SELECT SUM(st.quantity) FROM stock_transactions st WHERE st.item_id = i.id AND st.type = 'OUT' AND st.created_at > ?), 0)
+            - COALESCE((SELECT SUM(st.quantity) FROM stock_transactions st WHERE st.item_id = i.id AND st.type = 'IN' AND datetime(st.created_at) > ?), 0)
+            + COALESCE((SELECT SUM(st.quantity) FROM stock_transactions st WHERE st.item_id = i.id AND st.type = 'OUT' AND datetime(st.created_at) > ?), 0)
           ) as current_stock,
           (
             (i.current_stock 
-              - COALESCE((SELECT SUM(st.quantity) FROM stock_transactions st WHERE st.item_id = i.id AND st.type = 'IN' AND st.created_at > ?), 0)
-              + COALESCE((SELECT SUM(st.quantity) FROM stock_transactions st WHERE st.item_id = i.id AND st.type = 'OUT' AND st.created_at > ?), 0)
+              - COALESCE((SELECT SUM(st.quantity) FROM stock_transactions st WHERE st.item_id = i.id AND st.type = 'IN' AND datetime(st.created_at) > ?), 0)
+              + COALESCE((SELECT SUM(st.quantity) FROM stock_transactions st WHERE st.item_id = i.id AND st.type = 'OUT' AND datetime(st.created_at) > ?), 0)
             ) * COALESCE(i.unit_price, 0)
           ) as total_value
         FROM items i
@@ -177,23 +180,23 @@ const ReportService = {
         LEFT JOIN suppliers s ON i.supplier_id = s.id
         WHERE i.is_active = 1 AND COALESCE(i.source_type, 'SOURCE') = 'SOURCE'
         AND (i.current_stock 
-            - COALESCE((SELECT SUM(st.quantity) FROM stock_transactions st WHERE st.item_id = i.id AND st.type = 'IN' AND st.created_at > ?), 0)
-            + COALESCE((SELECT SUM(st.quantity) FROM stock_transactions st WHERE st.item_id = i.id AND st.type = 'OUT' AND st.created_at > ?), 0)
+            - COALESCE((SELECT SUM(st.quantity) FROM stock_transactions st WHERE st.item_id = i.id AND st.type = 'IN' AND datetime(st.created_at) > ?), 0)
+            + COALESCE((SELECT SUM(st.quantity) FROM stock_transactions st WHERE st.item_id = i.id AND st.type = 'OUT' AND datetime(st.created_at) > ?), 0)
         ) > 0
         ORDER BY i.name
-      `).all(cutoffTimestamp, cutoffTimestamp, cutoffTimestamp, cutoffTimestamp, cutoffTimestamp, cutoffTimestamp);
+      `).all(cutoffSql, cutoffSql, cutoffSql, cutoffSql, cutoffSql, cutoffSql);
 
       // Finished Goods
       finishedGoods = dbPrepare(`
         SELECT i.*, c.name as category_name, s.name as supplier_name,
           (i.current_stock 
-            - COALESCE((SELECT SUM(st.quantity) FROM stock_transactions st WHERE st.item_id = i.id AND st.type = 'IN' AND st.created_at > ?), 0)
-            + COALESCE((SELECT SUM(st.quantity) FROM stock_transactions st WHERE st.item_id = i.id AND st.type = 'OUT' AND st.created_at > ?), 0)
+            - COALESCE((SELECT SUM(st.quantity) FROM stock_transactions st WHERE st.item_id = i.id AND st.type = 'IN' AND datetime(st.created_at) > ?), 0)
+            + COALESCE((SELECT SUM(st.quantity) FROM stock_transactions st WHERE st.item_id = i.id AND st.type = 'OUT' AND datetime(st.created_at) > ?), 0)
           ) as current_stock,
           (
             (i.current_stock 
-              - COALESCE((SELECT SUM(st.quantity) FROM stock_transactions st WHERE st.item_id = i.id AND st.type = 'IN' AND st.created_at > ?), 0)
-              + COALESCE((SELECT SUM(st.quantity) FROM stock_transactions st WHERE st.item_id = i.id AND st.type = 'OUT' AND st.created_at > ?), 0)
+              - COALESCE((SELECT SUM(st.quantity) FROM stock_transactions st WHERE st.item_id = i.id AND st.type = 'IN' AND datetime(st.created_at) > ?), 0)
+              + COALESCE((SELECT SUM(st.quantity) FROM stock_transactions st WHERE st.item_id = i.id AND st.type = 'OUT' AND datetime(st.created_at) > ?), 0)
             ) * COALESCE(i.unit_price, 0)
           ) as total_value
         FROM items i
@@ -201,11 +204,11 @@ const ReportService = {
         LEFT JOIN suppliers s ON i.supplier_id = s.id
         WHERE i.is_active = 1 AND i.source_type = 'PRODUCTION'
         AND (i.current_stock 
-            - COALESCE((SELECT SUM(st.quantity) FROM stock_transactions st WHERE st.item_id = i.id AND st.type = 'IN' AND st.created_at > ?), 0)
-            + COALESCE((SELECT SUM(st.quantity) FROM stock_transactions st WHERE st.item_id = i.id AND st.type = 'OUT' AND st.created_at > ?), 0)
+            - COALESCE((SELECT SUM(st.quantity) FROM stock_transactions st WHERE st.item_id = i.id AND st.type = 'IN' AND datetime(st.created_at) > ?), 0)
+            + COALESCE((SELECT SUM(st.quantity) FROM stock_transactions st WHERE st.item_id = i.id AND st.type = 'OUT' AND datetime(st.created_at) > ?), 0)
         ) > 0
         ORDER BY i.name
-      `).all(cutoffTimestamp, cutoffTimestamp, cutoffTimestamp, cutoffTimestamp, cutoffTimestamp, cutoffTimestamp);
+      `).all(cutoffSql, cutoffSql, cutoffSql, cutoffSql, cutoffSql, cutoffSql);
 
       // Working Process In Hand — only issues on or before cutoff
       workingProcess = dbPrepare(`
@@ -228,10 +231,10 @@ const ReportService = {
         JOIN issues iss ON ii.issue_id = iss.id
         JOIN items it ON ii.item_id = it.id
         WHERE iss.issue_type = 'FACTORY'
-        AND iss.issue_date <= ?
+        AND datetime(iss.issue_date) <= ?
         AND (ii.quantity - COALESCE(ii.returned_quantity,0) - COALESCE(ii.damage_quantity,0) - COALESCE(ii.rejected_quantity,0) - COALESCE(ii.consumed_quantity,0)) > 0
         ORDER BY iss.issue_date DESC
-      `).all(cutoffTimestamp);
+      `).all(cutoffSql);
     }
 
     if (filters.categoryId) {
@@ -310,8 +313,8 @@ const ReportService = {
     
     if (isCloudEnabled()) {
       const supabase = getSupabase();
-      const start = date + 'T00:00:00Z';
-      const end = date + 'T23:59:59.999Z';
+      const start = dayStartIso(date);
+      const end = dayEndIso(date);
       
       const { count } = await supabase.from('challans')
         .select('*', { count: 'exact', head: true })
@@ -331,17 +334,18 @@ const ReportService = {
         item_code: t.items?.item_code
       }));
     } else {
-      challansCreated = dbPrepare(`SELECT COUNT(*) as count FROM challans WHERE DATE(challan_date) = DATE(?)`).get(date)?.count || 0;
-      transactions = dbPrepare(`SELECT st.*, i.name as item_name, i.item_code FROM stock_transactions st JOIN items i ON st.item_id = i.id WHERE DATE(st.created_at) = DATE(?) ORDER BY st.created_at DESC`).all(date);
+      const s = dayStartSql(date), e = dayEndSql(date);
+      challansCreated = dbPrepare(`SELECT COUNT(*) as count FROM challans WHERE datetime(challan_date) >= ? AND datetime(challan_date) <= ?`).get(s, e)?.count || 0;
+      transactions = dbPrepare(`SELECT st.*, i.name as item_name, i.item_code FROM stock_transactions st JOIN items i ON st.item_id = i.id WHERE datetime(st.created_at) >= ? AND datetime(st.created_at) <= ? ORDER BY st.created_at DESC`).all(s, e);
     }
     return { date, ...stockSummary, challansCreated, transactions };
   },
   
   async monthlySummary(year, month) {
     const dateFrom = `${year}-${String(month).padStart(2,'0')}-01`;
-    const dateTo = `${year}-${String(month).padStart(2,'0')}-31`;
-    const start = dateFrom + 'T00:00:00Z';
-    const end = dateTo + 'T23:59:59.999Z';
+    const dateTo = lastDayOfMonth(year, month); // real last day (Postgres rejects e.g. 2026-11-31)
+    const start = dayStartIso(dateFrom);
+    const end = dayEndIso(dateTo);
 
     let dailyBreakdown = [];
     let totalChallans = 0;
@@ -356,16 +360,17 @@ const ReportService = {
         .lte('challan_date', end);
       totalChallans = count || 0;
 
-      const { data: txs } = await supabase.from('stock_transactions')
+      const { data: txs, error: txErr } = await supabase.from('stock_transactions')
         .select('created_at, type, quantity, item_id, items(name, item_code)')
         .gte('created_at', start)
         .lte('created_at', end);
+      if (txErr) throw txErr;
 
       const dbMap = {};
       const moversMap = {};
       
       for (const t of (txs || [])) {
-        const d = t.created_at.split('T')[0];
+        const d = localDay(t.created_at);
         if (!dbMap[d]) dbMap[d] = { date: d, total_in: 0, total_out: 0, transaction_count: 0 };
         dbMap[d].transaction_count++;
         if (t.type === 'IN') dbMap[d].total_in += t.quantity;
@@ -381,9 +386,10 @@ const ReportService = {
       dailyBreakdown = Object.values(dbMap).sort((a,b) => a.date.localeCompare(b.date));
       topMovers = Object.values(moversMap).sort((a,b) => b.total_out - a.total_out).slice(0, 10);
     } else {
-      dailyBreakdown = dbPrepare(`SELECT DATE(created_at) as date, SUM(CASE WHEN type='IN' THEN quantity ELSE 0 END) as total_in, SUM(CASE WHEN type='OUT' THEN quantity ELSE 0 END) as total_out, COUNT(*) as transaction_count FROM stock_transactions WHERE created_at >= ? AND created_at <= ? GROUP BY DATE(created_at) ORDER BY date`).all(start, end);
-      totalChallans = dbPrepare(`SELECT COUNT(*) as count FROM challans WHERE challan_date >= ? AND challan_date <= ?`).get(start, end)?.count || 0;
-      topMovers = dbPrepare(`SELECT i.name, i.item_code, SUM(CASE WHEN st.type='OUT' THEN st.quantity ELSE 0 END) as total_out FROM stock_transactions st JOIN items i ON st.item_id = i.id WHERE st.created_at >= ? AND st.created_at <= ? GROUP BY st.item_id ORDER BY total_out DESC LIMIT 10`).all(start, end);
+      const s = dayStartSql(dateFrom), e = dayEndSql(dateTo);
+      dailyBreakdown = dbPrepare(`SELECT DATE(created_at, 'localtime') as date, SUM(CASE WHEN type='IN' THEN quantity ELSE 0 END) as total_in, SUM(CASE WHEN type='OUT' THEN quantity ELSE 0 END) as total_out, COUNT(*) as transaction_count FROM stock_transactions WHERE datetime(created_at) >= ? AND datetime(created_at) <= ? GROUP BY DATE(created_at, 'localtime') ORDER BY date`).all(s, e);
+      totalChallans = dbPrepare(`SELECT COUNT(*) as count FROM challans WHERE datetime(challan_date) >= ? AND datetime(challan_date) <= ?`).get(s, e)?.count || 0;
+      topMovers = dbPrepare(`SELECT i.name, i.item_code, SUM(CASE WHEN st.type='OUT' THEN st.quantity ELSE 0 END) as total_out FROM stock_transactions st JOIN items i ON st.item_id = i.id WHERE datetime(st.created_at) >= ? AND datetime(st.created_at) <= ? GROUP BY st.item_id ORDER BY total_out DESC LIMIT 10`).all(s, e);
     }
 
     return { year, month, dailyBreakdown, totalChallans, topMovers };

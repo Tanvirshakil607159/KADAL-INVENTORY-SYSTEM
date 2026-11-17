@@ -40,6 +40,16 @@ function matchHeader(header) {
   return null;
 }
 
+// Spreadsheet numbers may be typed as text ("1,200", " 12.5 ", "৳ 1,250.50"). Keep decimals and
+// thousands separators instead of truncating them (parseInt("1,200") === 1).
+function parseSheetNumber(value) {
+  if (value === null || value === undefined) return 0;
+  if (typeof value === 'number') return isFinite(value) ? value : 0;
+  const cleaned = String(value).replace(/,/g, '').replace(/[^0-9.\-]/g, '');
+  const n = parseFloat(cleaned);
+  return isFinite(n) ? n : 0;
+}
+
 const ImportService = {
   async selectExcelFile() {
     const result = await dialog.showOpenDialog({
@@ -128,7 +138,7 @@ const ImportService = {
 
       const key = `${name.toLowerCase()}|${category.toLowerCase()}|${styleName.toLowerCase()}|${purchaseNo.toLowerCase()}|${orderNumber.toLowerCase()}|${size.toLowerCase()}|${color.toLowerCase()}`;
 
-      const openingStock = parseInt(getValue('openingStock'), 10) || 0;
+      const openingStock = parseSheetNumber(getValue('openingStock'));
 
       if (rowsMap.has(key)) {
         const existing = rowsMap.get(key);
@@ -146,11 +156,11 @@ const ImportService = {
           styleName,
           purchaseNo,
           orderNumber,
-          orderQuantity: parseInt(getValue('orderQuantity'), 10) || 0,
-          unitPrice: parseFloat(getValue('unitPrice')) || 0,
+          orderQuantity: parseSheetNumber(getValue('orderQuantity')),
+          unitPrice: parseSheetNumber(getValue('unitPrice')),
           currency: getValue('currency').toUpperCase() || '',
           openingStock,
-          minStockLevel: parseInt(getValue('minStockLevel'), 10) || 0,
+          minStockLevel: parseSheetNumber(getValue('minStockLevel')),
           notes: getValue('notes'),
         });
       }

@@ -1,7 +1,10 @@
+import { dayStartIso, dayEndIso } from '../utils/dateRange';
 import { getSupabase, isCloudEnabled } from './supabase-client';
 import bcrypt from 'bcryptjs';
 import { inventoryApi, fetchAll } from './inventory-api';
 import { challansApi } from './challans-api';
+import { syncTiersToStock } from './tier-sync';
+import { getWebUser, isAdminUser, getSettingValue, queueApproval, getTotalDelivered, desktopOnly } from './approval-policy';
 
 function parseId(id) {
   if (id === undefined || id === null || id === 'undefined' || id === 'null') return null;
@@ -78,12 +81,136 @@ function formatBridgePoStyle(it) {
   };
 }
 
+// ---- Server-side account functions (supabase_security_lockdown.sql) ----
+// Return undefined when the database does not have them yet, so the old path is used.
+async function accountRpc(name, params) {
+  const supabase = getSupabase();
+  if (!supabase) throw new Error('Supabase not configured');
+  const { data, error } = await supabase.rpc(name, params);
+  if (error && (error.code === 'PGRST202' || error.code === '42883' || /could not find the function/i.test(error.message || ''))) return undefined;
+  if (error) throw new Error(error.message || `${name} failed`);
+  return data;
+}
+const sessionToken = () => getWebUser()?.sessionToken || null;
+const USER_COLUMNS = 'id, username, full_name, role_id, is_active, last_login, created_at, custom_permissions';
+
+// ---- Approval routing (same rules as the desktop services) ----
+// Payload objects being executed by an approved request (skip the approval check for them only)
+const approvedMovements = new WeakSet();
+const webRequestIds = new Map(); // stock movement requestId -> result (idempotency per browser tab)
+const approvedRequisitions = new WeakSet();
+
+// Next requisition number, skipping numbers already shown on requests waiting for approval
+async function nextRequisitionNo(supabase, prefix) {
+  const { data: existing, error } = await supabase.from('requisitions').select('requisition_no').like('requisition_no', `${prefix}-%`);
+  if (error) throw error;
+  let max = 0;
+  (existing || []).forEach(r => {
+    const num = parseInt((r.requisition_no || '').split('-').pop(), 10);
+    if (!isNaN(num) && num > max) max = num;
+  });
+  const { data: pending } = await supabase.from('approvals').select('data').eq('type', 'CREATE_REQUISITION').eq('status', 'PENDING');
+  (pending || []).forEach(a => {
+    let d = a.data;
+    try { if (typeof d === 'string') d = JSON.parse(d); } catch (e) { d = {}; }
+    const no = d?.requisitionNo || '';
+    if (!no.startsWith(`${prefix}-`)) return;
+    const num = parseInt(no.split('-').pop(), 10);
+    if (!isNaN(num) && num > max) max = num;
+  });
+  return `${prefix}-${String(max + 1).padStart(4, '0')}`;
+}
+
+async function createChallanWithPolicy(data, { skipApproval = false } = {}) {
+  const supabase = getSupabase();
+  if (!supabase) throw new Error('Supabase not configured');
+  const user = getWebUser();
+  if (!skipApproval && !isAdminUser(user)) {
+    if (await getSettingValue(supabase, 'require_challan_approval') === 'true') {
+      return await queueApproval(supabase, 'CREATE_CHALLAN', data, user);
+    }
+    for (const item of (data.items || [])) {
+      const itemId = item.itemId || item.item_id;
+      const { data: dbItem } = await supabase.from('items').select('order_quantity').eq('id', itemId).maybeSingle();
+      const orderQty = Number(dbItem?.order_quantity) || 0;
+      if (orderQty > 0 && (await getTotalDelivered(supabase, itemId)) + Number(item.quantity) > orderQty) {
+        return await queueApproval(supabase, 'CREATE_CHALLAN', data, user);
+      }
+    }
+  }
+  return await challansApi.create(data);
+}
+
+async function stockMovementNeedsApproval(supabase, data) {
+  const user = getWebUser();
+  if (isAdminUser(user)) return null;
+  if (await getSettingValue(supabase, 'require_inventory_approval') !== 'true') return null;
+  const { data: item } = await supabase.from('items')
+    .select('name, item_code, order_number, color, size, order_quantity, current_stock, unit').eq('id', data.itemId).maybeSingle();
+  return await queueApproval(supabase, 'STOCK_MOVEMENT', {
+    ...data,
+    itemName: data.itemName || item?.name,
+    itemCode: data.itemCode || item?.item_code,
+    orderNumber: data.orderNumber || item?.order_number,
+    color: data.color || item?.color,
+    size: data.size || item?.size,
+    orderQuantity: data.orderQuantity ?? item?.order_quantity,
+    currentStock: data.currentStock ?? item?.current_stock,
+    unit: data.unit || item?.unit,
+  }, user);
+}
+
+async function createItemWithPolicy(data, { skipApproval = false } = {}) {
+  const supabase = getSupabase();
+  const user = getWebUser();
+  const role = user?.roleName || user?.role_name;
+  if (!skipApproval && role === 'Merchandiser') {
+    const payload = { ...data };
+    delete payload.itemCode; // generated on approval
+    return await queueApproval(supabase, payload.sourceType === 'PRODUCTION' ? 'CREATE_ITEM' : 'PENDING_ITEM', payload, user);
+  }
+  if (!skipApproval && !isAdminUser(user) && await getSettingValue(supabase, 'require_inventory_approval') === 'true') {
+    return await queueApproval(supabase, 'CREATE_ITEM', data, user);
+  }
+  const payload = { ...data };
+  if (!payload.itemCode) payload.itemCode = await inventoryApi.items.getNextCode();
+  return await inventoryApi.items.create(payload);
+}
+
+async function updateItemWithPolicy(id, data, { skipApproval = false } = {}) {
+  const supabase = getSupabase();
+  const user = getWebUser();
+  if (!skipApproval && !isAdminUser(user) && await getSettingValue(supabase, 'require_inventory_approval') === 'true') {
+    const { data: existing } = await supabase.from('items').select('*').eq('id', id).maybeSingle();
+    return await queueApproval(supabase, 'UPDATE_ITEM', { id, data, oldData: existing }, user);
+  }
+  return await inventoryApi.items.update(id, data);
+}
+
 export const webBridge = {
+  isWeb: true,
   // Auth
   auth: {
     login: (username, password) => wrap(async () => {
       const supabase = getSupabase();
       if (!supabase) throw new Error('Supabase not configured');
+
+      // Password checked inside the database when the lockdown is installed (no hash in the browser)
+      const rpcUser = await accountRpc('kadal_login', { p_username: username, p_password: password });
+      if (rpcUser) {
+        const currentUser = {
+          id: rpcUser.id,
+          username: rpcUser.username,
+          fullName: rpcUser.full_name,
+          roleId: rpcUser.role_id,
+          roleName: rpcUser.role_name,
+          role_name: rpcUser.role_name,
+          permissions: safeParseJSON(rpcUser.permissions || '{}'),
+          sessionToken: rpcUser.token,
+        };
+        sessionStorage.setItem('kadal_user', JSON.stringify(currentUser));
+        return currentUser;
+      }
 
       const { data: user, error } = await supabase
         .from('users')
@@ -114,6 +241,8 @@ export const webBridge = {
       return currentUser;
     }),
     logout: () => wrap(async () => {
+      const tok = sessionToken();
+      if (tok) { try { await accountRpc('kadal_logout', { p_token: tok }); } catch (e) { /* ignore */ } }
       sessionStorage.removeItem('kadal_user');
       return true;
     }),
@@ -126,6 +255,11 @@ export const webBridge = {
       return true;
     }),
     changePassword: (userId, oldPw, newPw) => wrap(async () => {
+      const me = getWebUser();
+      if (me?.sessionToken && Number(me.id) === Number(userId)) {
+        const done = await accountRpc('kadal_change_password', { p_token: me.sessionToken, p_old: oldPw, p_new: newPw });
+        if (done !== undefined) return true;
+      }
       const supabase = getSupabase();
       const { data: user, error } = await supabase.from('users').select('password_hash').eq('id', userId).single();
       if (error) throw error;
@@ -187,21 +321,85 @@ export const webBridge = {
   // Users
   users: {
     getAll: () => wrap(async () => {
-      const { data, error } = await getSupabase().from('users').select('*, roles(name)').order('full_name');
+      // Explicit columns: never fetch password hashes into the browser
+      const { data, error } = await getSupabase().from('users').select(`${USER_COLUMNS}, roles(name)`).order('full_name');
       if (error) throw error;
-      return data.map(u => ({ ...u, roleName: u.roles?.name }));
+      return data.map(u => ({ ...u, roleName: u.roles?.name, role_name: u.roles?.name }));
     }),
     create: (data) => wrap(async () => {
+      const tok = sessionToken();
+      if (tok) {
+        const id = await accountRpc('kadal_save_user', {
+          p_token: tok, p_id: null, p_username: data.username, p_password: data.password, p_full_name: data.fullName,
+          p_role_id: data.roleId, p_custom_permissions: data.customPermissions || '', p_is_active: true,
+        });
+        if (id !== undefined) return id;
+      }
       const hash = bcrypt.hashSync(data.password, 10);
       const { data: inserted, error } = await getSupabase().from('users').insert([{
         username: data.username,
         password_hash: hash,
         full_name: data.fullName,
         role_id: data.roleId,
+        custom_permissions: data.customPermissions || null,
         is_active: true
       }]).select().single();
       if (error) throw error;
       return inserted.id;
+    }),
+    update: (id, data) => wrap(async () => {
+      const tok = sessionToken();
+      if (tok) {
+        const done = await accountRpc('kadal_save_user', {
+          p_token: tok, p_id: id, p_username: null, p_password: data.password || null, p_full_name: data.fullName ?? null,
+          p_role_id: data.roleId ?? null, p_custom_permissions: data.customPermissions === undefined ? null : (data.customPermissions || ''), p_is_active: null,
+        });
+        if (done !== undefined) return true;
+      }
+      const supabase = getSupabase();
+      const { error } = await supabase.from('users').update({
+        full_name: data.fullName, role_id: data.roleId, custom_permissions: data.customPermissions || null, updated_at: new Date().toISOString(),
+      }).eq('id', id);
+      if (error) throw error;
+      if (data.password) {
+        const { error: pErr } = await supabase.from('users').update({ password_hash: bcrypt.hashSync(data.password, 10) }).eq('id', id);
+        if (pErr) throw pErr;
+      }
+      return true;
+    }),
+    toggleActive: (id) => wrap(async () => {
+      const supabase = getSupabase();
+      const { data: target, error: tErr } = await supabase.from('users').select('id, username, is_active').eq('id', id).single();
+      if (tErr) throw tErr;
+      if (['admin', 'superadmin'].includes((target.username || '').toLowerCase()) && target.is_active) {
+        throw new Error(`The ${target.username} user cannot be deactivated.`);
+      }
+      const tok = sessionToken();
+      if (tok) {
+        const done = await accountRpc('kadal_save_user', {
+          p_token: tok, p_id: id, p_username: null, p_password: null, p_full_name: null,
+          p_role_id: null, p_custom_permissions: null, p_is_active: !target.is_active,
+        });
+        if (done !== undefined) return true;
+      }
+      const { error } = await supabase.from('users').update({ is_active: !target.is_active, updated_at: new Date().toISOString() }).eq('id', id);
+      if (error) throw error;
+      return true;
+    }),
+    delete: (id) => wrap(async () => {
+      const tok = sessionToken();
+      if (tok) {
+        const done = await accountRpc('kadal_delete_user', { p_token: tok, p_id: id });
+        if (done !== undefined) return true;
+      }
+      const supabase = getSupabase();
+      const { data: target } = await supabase.from('users').select('username').eq('id', id).maybeSingle();
+      if (['admin', 'superadmin'].includes((target?.username || '').toLowerCase())) {
+        throw new Error(`The ${target.username} user cannot be deleted to prevent system lockout.`);
+      }
+      const { error } = await supabase.from('users').delete().eq('id', id);
+      if (error) throw error;
+      return true;
     }),
   },
 
@@ -237,8 +435,8 @@ export const webBridge = {
   items: {
     getAll: (filters) => wrap(() => inventoryApi.items.getAll(filters)),
     getById: (id) => wrap(() => inventoryApi.items.getById(id)),
-    create: (data) => wrap(() => inventoryApi.items.create(data)),
-    update: (id, data) => wrap(() => inventoryApi.items.update(id, data)),
+    create: (data) => wrap(() => createItemWithPolicy(data)),
+    update: (id, data) => wrap(() => updateItemWithPolicy(id, data)),
     delete: (id) => wrap(() => inventoryApi.items.delete(id)),
     getNextCode: () => wrap(inventoryApi.items.getNextCode),
     updateTier: (tierId, data) => wrap(() => inventoryApi.items.updateTier(tierId, data)),
@@ -248,13 +446,12 @@ export const webBridge = {
       const supabase = getSupabase();
       const { data: item } = await supabase.from('items').select('id, current_stock').eq('id', parsedId).single();
       if (!item) return { success: false, error: 'Item not found' };
+      // Stock is the source of truth: bring the price tiers in line with it, never the reverse.
       const { data: activeTiers } = await supabase.from('item_price_tiers').select('quantity').eq('item_id', parsedId).gt('quantity', 0);
-      if (activeTiers && activeTiers.length > 0) {
-        const tierSum = activeTiers.reduce((acc, t) => acc + Number(t.quantity || 0), 0);
-        if (Math.abs(tierSum - Number(item.current_stock)) > 0.001) {
-          await supabase.from('items').update({ current_stock: tierSum, updated_at: new Date().toISOString() }).eq('id', parsedId);
-          return { success: true, reconciled: true, oldStock: item.current_stock, newStock: tierSum };
-        }
+      const tierSum = (activeTiers || []).reduce((acc, t) => acc + Number(t.quantity || 0), 0);
+      if (Math.abs(tierSum - Number(item.current_stock)) > 0.001) {
+        await syncTiersToStock(supabase, parsedId);
+        return { success: true, reconciled: true, oldTierTotal: tierSum, newTierTotal: Number(item.current_stock), currentStock: item.current_stock };
       }
       return { success: true, reconciled: false, currentStock: item.current_stock };
     }),
@@ -263,15 +460,25 @@ export const webBridge = {
 
   // Stock
   stock: {
-    addMovement: (data) => wrap(async () => {
+    addMovement: (rawData) => wrap(async () => {
       const supabase = getSupabase();
       if (!supabase) throw new Error('Supabase not configured');
+      const data = { ...rawData, quantity: Number(rawData?.quantity) };
+      if (!(data.quantity > 0) && data.type !== 'ADJUSTMENT') throw new Error('Quantity must be greater than 0');
+      if (!approvedMovements.has(rawData)) {
+        const queued = await stockMovementNeedsApproval(supabase, data);
+        if (queued) return queued;
+      }
       const { data: item, error: itemErr } = await supabase.from('items').select('current_stock, unit_price, currency, conversion_rate').eq('id', data.itemId).single();
       if (itemErr) throw itemErr;
       const userRaw = sessionStorage.getItem('kadal_user');
       const user = userRaw ? JSON.parse(userRaw) : null;
 
-      // Duplicate prevention (Idempotency within 4s)
+      // Duplicate prevention. With a requestId (sent per Save click) only a resend of the same
+      // request is ignored; without one, fall back to the 4-second double-click heuristic.
+      if (data.requestId && webRequestIds.has(data.requestId)) {
+        return { ...webRequestIds.get(data.requestId), duplicatePrevented: true };
+      }
       const FourSecsAgo = new Date(Date.now() - 4000).toISOString();
       let dupQuery = supabase.from('stock_transactions')
         .select('id, stock_after')
@@ -281,14 +488,14 @@ export const webBridge = {
         .gte('created_at', FourSecsAgo);
       if (user?.id) dupQuery = dupQuery.eq('created_by', user.id);
       if (data.reference) dupQuery = dupQuery.eq('reference', data.reference);
-      const { data: duplicates } = await dupQuery;
+      const { data: duplicates } = data.requestId ? { data: [] } : await dupQuery;
         
       if (duplicates && duplicates.length > 0) {
         console.warn('[WebBridge] Duplicate transaction blocked for item', data.itemId);
         return { success: true, stockAfter: duplicates[0].stock_after, duplicatePrevented: true };
       }
 
-      const stockBefore = item.current_stock || 0;
+      const stockBefore = Number(item.current_stock) || 0;
       let stockAfter = stockBefore;
       const restockPrice = data.unitPrice !== undefined && data.unitPrice !== null && data.unitPrice !== '' ? Number(data.unitPrice) : Number(item.unit_price || 0);
       const curr = data.currency || item.currency || 'BDT';
@@ -360,26 +567,13 @@ export const webBridge = {
         throw new Error('Invalid movement type');
       }
 
-      // If active price tiers exist, guarantee stock matches tier total
-      try {
-        const { data: currentTiers } = await supabase.from('item_price_tiers')
-          .select('quantity')
-          .eq('item_id', data.itemId)
-          .gt('quantity', 0);
-        if (currentTiers && currentTiers.length > 0) {
-          const tierSum = currentTiers.reduce((sum, t) => sum + Number(t.quantity || 0), 0);
-          if (Math.abs(tierSum - stockAfter) > 0.001) {
-            console.warn(`[WebBridge] Synchronizing stockAfter (${stockAfter}) with price tier sum (${tierSum}) for item ${data.itemId}`);
-            stockAfter = tierSum;
-          }
-        }
-      } catch (tierSyncErr) {}
-
       const itemUpdates = { current_stock: stockAfter, updated_at: new Date().toISOString() };
       if (data.type === 'IN' && curr === 'USD' && convRate !== null && convRate !== undefined) {
         itemUpdates.conversion_rate = convRate;
       }
       await supabase.from('items').update(itemUpdates).eq('id', data.itemId);
+      // Keep FIFO price tiers in line with stock (stock is the source of truth)
+      try { await syncTiersToStock(supabase, data.itemId); } catch (e) { console.warn('[WebBridge] tier sync failed', e?.message); }
 
       const { error: txErr } = await supabase.from('stock_transactions').insert([{
         item_id: data.itemId,
@@ -396,7 +590,9 @@ export const webBridge = {
       }]);
       if (txErr) throw txErr;
 
-      return { success: true, stockAfter };
+      const movementResult = { success: true, stockAfter };
+      if (data.requestId) webRequestIds.set(data.requestId, movementResult);
+      return movementResult;
     }),
     getTransactions: (filters = {}) => wrap(async () => {
       const supabase = getSupabase();
@@ -415,8 +611,8 @@ export const webBridge = {
 
       if (filters.itemId) query = query.eq('item_id', filters.itemId);
       if (filters.type) query = query.eq('type', filters.type);
-      if (filters.dateFrom) query = query.gte('created_at', filters.dateFrom);
-      if (filters.dateTo) query = query.lte('created_at', filters.dateTo + 'T23:59:59.999Z');
+      if (filters.dateFrom) query = query.gte('created_at', dayStartIso(filters.dateFrom));
+      if (filters.dateTo) query = query.lte('created_at', dayEndIso(filters.dateTo));
 
       const { data, error } = await query.order('created_at', { ascending: false }).limit(1000);
       if (error) throw error;
@@ -445,7 +641,7 @@ export const webBridge = {
     getAll: (filters) => wrap(() => challansApi.getAll(filters)),
     getById: (id) => wrap(() => challansApi.getById(id)),
     getByNumber: (number) => wrap(() => challansApi.getByNumber(number)),
-    create: (data) => wrap(() => challansApi.create(data)),
+    create: (data) => wrap(() => createChallanWithPolicy(data)),
     getNextNumber: () => wrap(challansApi.getNextNumber),
     cancel: (id, reason) => wrap(async () => {
       const supabase = getSupabase();
@@ -458,17 +654,22 @@ export const webBridge = {
       const userRaw = sessionStorage.getItem('kadal_user');
       const user = userRaw ? JSON.parse(userRaw) : null;
 
-      const { error: updateErr } = await supabase.from('challans')
+      // Only flip ACTIVE -> CANCELLED; the rows returned tell us whether this call won a race
+      const { data: flipped, error: updateErr } = await supabase.from('challans')
         .update({ status: 'CANCELLED', cancelled_by: user?.id || null, cancel_reason: reason, updated_at: new Date().toISOString() })
-        .eq('id', id);
+        .eq('id', id)
+        .eq('status', 'ACTIVE')
+        .select('id');
       if (updateErr) throw updateErr;
+      if (!flipped || flipped.length === 0) throw new Error('Challan already cancelled or not active');
 
       for (const item of (challan.items || [])) {
         const { data: dbItem } = await supabase.from('items').select('current_stock').eq('id', item.item_id).single();
         if (dbItem) {
           const stockBefore = dbItem.current_stock || 0;
           const stockAfter = stockBefore + item.quantity;
-          await supabase.from('items').update({ current_stock: stockAfter }).eq('id', item.item_id);
+          await supabase.from('items').update({ current_stock: stockAfter }).eq('id', item.item_id);
+          try { await syncTiersToStock(supabase, item.item_id); } catch (e) { console.warn('[Web] tier sync failed', e?.message); }
 
           await supabase.from('stock_transactions').insert([{
             item_id: item.item_id,
@@ -513,7 +714,8 @@ export const webBridge = {
           if (dbItem) {
             const stockBefore = dbItem.current_stock || 0;
             const stockAfter = stockBefore + item.quantity;
-            await supabase.from('items').update({ current_stock: stockAfter }).eq('id', item.item_id);
+            await supabase.from('items').update({ current_stock: stockAfter }).eq('id', item.item_id);
+            try { await syncTiersToStock(supabase, item.item_id); } catch (e) { console.warn('[Web] tier sync failed', e?.message); }
 
             await supabase.from('stock_transactions').insert([{
               item_id: item.item_id,
@@ -780,8 +982,8 @@ export const webBridge = {
       const items = await fetchAll(itemsQuery);
 
       let txQuery = supabase.from('stock_transactions').select('item_id, type, quantity');
-      if (filters.dateFrom) txQuery = txQuery.gte('created_at', filters.dateFrom);
-      if (filters.dateTo) txQuery = txQuery.lte('created_at', filters.dateTo + 'T23:59:59.999Z');
+      if (filters.dateFrom) txQuery = txQuery.gte('created_at', dayStartIso(filters.dateFrom));
+      if (filters.dateTo) txQuery = txQuery.lte('created_at', dayEndIso(filters.dateTo));
 
       const txs = await fetchAll(txQuery);
 
@@ -1064,7 +1266,8 @@ export const webBridge = {
       const { data: itemRow } = await supabase.from('items').select('current_stock').eq('id', data.productItemId).single();
       const stockBefore = itemRow?.current_stock || 0;
       const stockAfter = stockBefore + Number(data.productionQuantity);
-      await supabase.from('items').update({ current_stock: stockAfter }).eq('id', data.productItemId);
+      await supabase.from('items').update({ current_stock: stockAfter }).eq('id', data.productItemId);
+      try { await syncTiersToStock(supabase, data.productItemId); } catch (e) { console.warn('[Web] tier sync failed', e?.message); }
 
       const userRaw = sessionStorage.getItem('kadal_user');
       const user = userRaw ? JSON.parse(userRaw) : null;
@@ -1124,7 +1327,8 @@ export const webBridge = {
           if (iErr) throw iErr;
           const stockBefore = itemRow?.current_stock || 0;
           const stockAfter = stockBefore + Number(p.productionQuantity);
-          await supabase.from('items').update({ current_stock: stockAfter, updated_at: new Date().toISOString() }).eq('id', p.productItemId);
+          await supabase.from('items').update({ current_stock: stockAfter, updated_at: new Date().toISOString() }).eq('id', p.productItemId);
+          try { await syncTiersToStock(supabase, p.productItemId); } catch (e) { console.warn('[Web] tier sync failed', e?.message); }
 
           await supabase.from('stock_transactions').insert([{
             item_id: p.productItemId,
@@ -1165,6 +1369,7 @@ export const webBridge = {
             current_stock: stockAfter, 
             updated_at: new Date().toISOString() 
           }).eq('id', issueItem.item_id);
+          try { await syncTiersToStock(supabase, issueItem.item_id); } catch (e) { console.warn('[Web] tier sync failed', e?.message); }
 
           await supabase.from('stock_transactions').insert([{
             item_id: issueItem.item_id,
@@ -1191,7 +1396,8 @@ export const webBridge = {
       const { data: itemRow } = await supabase.from('items').select('current_stock').eq('id', prod.product_item_id).single();
       const stockBefore = itemRow?.current_stock || 0;
       const stockAfter = Math.max(0, stockBefore - Number(prod.production_quantity));
-      await supabase.from('items').update({ current_stock: stockAfter }).eq('id', prod.product_item_id);
+      await supabase.from('items').update({ current_stock: stockAfter }).eq('id', prod.product_item_id);
+      try { await syncTiersToStock(supabase, prod.product_item_id); } catch (e) { console.warn('[Web] tier sync failed', e?.message); }
 
       const userRaw = sessionStorage.getItem('kadal_user');
       const user = userRaw ? JSON.parse(userRaw) : null;
@@ -1234,8 +1440,8 @@ export const webBridge = {
 
       if (filters.status) query = query.eq('status', filters.status);
       if (filters.recipientId) query = query.eq('recipient_id', filters.recipientId);
-      if (filters.dateFrom) query = query.gte('requisition_date', filters.dateFrom);
-      if (filters.dateTo) query = query.lte('requisition_date', filters.dateTo + 'T23:59:59.999Z');
+      if (filters.dateFrom) query = query.gte('requisition_date', dayStartIso(filters.dateFrom));
+      if (filters.dateTo) query = query.lte('requisition_date', dayEndIso(filters.dateTo));
       if (filters.search) {
         query = query.or(`requisition_no.ilike.%${filters.search}%,requester_name.ilike.%${filters.search}%,department.ilike.%${filters.search}%`);
       }
@@ -1289,20 +1495,19 @@ export const webBridge = {
       if (!supabase) throw new Error('Supabase not configured');
       const userRaw = sessionStorage.getItem('kadal_user');
       const user = userRaw ? JSON.parse(userRaw) : null;
+      const prefix = data.prefix || (await getSettingValue(supabase, 'requisition_prefix')) || 'REQ';
+      const isApprovedRun = approvedRequisitions.has(data);
 
-      // Get next number
-      const { data: existing, error: nErr } = await supabase.from('requisitions')
-        .select('requisition_no').like('requisition_no', `${data.prefix || 'REQ'}-%`).order('requisition_no', { ascending: false });
-      if (nErr) throw nErr;
-      let max = 0;
-      (existing || []).forEach(r => {
-        const parts = r.requisition_no.split('-');
-        const num = parseInt(parts[parts.length - 1], 10);
-        if (!isNaN(num) && num > max) max = num;
-      });
-      const requisitionNo = `${data.prefix || 'REQ'}-${(max + 1).toString().padStart(4, '0')}`;
+      if (!isApprovedRun && await getSettingValue(supabase, 'require_requisition_approval') === 'true') {
+        const provisionalNo = await nextRequisitionNo(supabase, prefix);
+        return await queueApproval(supabase, 'CREATE_REQUISITION', { ...data, requisitionNo: provisionalNo, createdBy: user?.id }, user);
+      }
 
-      const { data: req, error } = await supabase.from('requisitions').insert([{
+      // A number shown while waiting for approval is provisional; fall back if it was taken
+      let requisitionNo = (isApprovedRun && data.requisitionNo) || await nextRequisitionNo(supabase, prefix);
+      let req;
+      for (let attempt = 0; ; attempt++) {
+        const ins = await supabase.from('requisitions').insert([{
         requisition_no: requisitionNo,
         recipient_id: data.recipientId || null,
         requester_name: data.requesterName || null,
@@ -1311,9 +1516,13 @@ export const webBridge = {
         notes: data.notes || null,
         status: 'PENDING',
         requisition_date: data.requisitionDate || new Date().toISOString(),
-        created_by: user?.id,
-      }]).select().single();
-      if (error) throw error;
+        created_by: (isApprovedRun && data.createdBy) || user?.id,
+        }]).select().single();
+        if (!ins.error) { req = ins.data; break; }
+        const duplicate = ins.error.code === '23505' || /duplicate|unique/i.test(ins.error.message || '');
+        if (!duplicate || attempt >= 4) throw ins.error;
+        requisitionNo = await nextRequisitionNo(supabase, prefix);
+      }
 
       const reqItems = data.items.map(item => ({
         requisition_id: req.id,
@@ -1393,7 +1602,8 @@ export const webBridge = {
         const { data: freshItem } = await supabase.from('items').select('current_stock').eq('id', item.item_id).single();
         const stockBefore = freshItem?.current_stock || 0;
         const stockAfter = stockBefore - item.fulfillQty;
-        await supabase.from('items').update({ current_stock: stockAfter }).eq('id', item.item_id);
+        await supabase.from('items').update({ current_stock: stockAfter }).eq('id', item.item_id);
+        try { await syncTiersToStock(supabase, item.item_id); } catch (e) { console.warn('[Web] tier sync failed', e?.message); }
         await supabase.from('stock_transactions').insert([{
           item_id: item.item_id,
           type: 'OUT',
@@ -1456,8 +1666,45 @@ export const webBridge = {
   },
 
   // System
+  // Not available in the browser build yet: answer with a clear message instead of crashing
+  issues: desktopOnly('Issue'),
+  returns: desktopOnly('Returns'),
+  gatePass: desktopOnly('Gate Pass'),
+  import: desktopOnly('Excel import'),
+  backup: desktopOnly('Backup & Restore'),
+  audit: desktopOnly('Audit log'),
+
+  recipients: {
+    getAll: (filters = {}) => wrap(async () => {
+      const supabase = getSupabase();
+      if (!supabase) return [];
+      let query = supabase.from('recipients').select('*').eq('is_active', true).order('name');
+      if (filters?.type) query = query.eq('type', filters.type);
+      const { data, error } = await query;
+      if (error) throw error;
+      return data || [];
+    }),
+    create: ({ name, type, contactInfo, address }) => wrap(async () => {
+      const { data, error } = await getSupabase().from('recipients')
+        .insert([{ name, type, contact_info: contactInfo || null, receiver_address: address || null, is_active: true }]).select().single();
+      if (error) throw error;
+      return data.id;
+    }),
+    update: (id, { name, type, contactInfo, address }) => wrap(async () => {
+      const { error } = await getSupabase().from('recipients')
+        .update({ name, type, contact_info: contactInfo || null, receiver_address: address || null }).eq('id', id);
+      if (error) throw error;
+      return true;
+    }),
+    delete: (id) => wrap(async () => {
+      const { error } = await getSupabase().from('recipients').update({ is_active: false }).eq('id', id);
+      if (error) throw error;
+      return true;
+    }),
+  },
+
   system: {
-    getVersion: () => wrap(async () => '1.1.41-web'),
+    getVersion: () => wrap(async () => `${(typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_APP_VERSION) || 'unknown'}-web`),
     clearData: () => wrap(async () => { throw new Error('Not available in web version'); }),
   },
 
@@ -1505,18 +1752,53 @@ export const webBridge = {
       if (fErr) throw fErr;
       if (req.status !== 'PENDING') throw new Error('Request already processed');
       const payload = typeof req.data === 'string' ? JSON.parse(req.data) : req.data;
+      const unwrap = (res) => {
+        if (res && res.success === false) throw new Error(res.error || 'Approval action failed');
+        return res && res.data !== undefined ? res.data : res;
+      };
       let result;
-      if (req.type === 'CREATE_PI') {
-        result = await webBridge.finance.create({ ...payload, _bypassApproval: true });
-        result = result.data || result;
+      // Execute the request first; it is only marked APPROVED once the work has really been done.
+      switch (req.type) {
+        case 'CREATE_PI':
+          result = unwrap(await webBridge.finance.create({ ...payload, _bypassApproval: true }));
+          break;
+        case 'CREATE_CHALLAN':
+          result = await createChallanWithPolicy(payload, { skipApproval: true });
+          break;
+        case 'STOCK_MOVEMENT': {
+          approvedMovements.add(payload);
+          result = unwrap(await webBridge.stock.addMovement(payload));
+          break;
+        }
+        case 'CREATE_ITEM':
+          result = await createItemWithPolicy(payload, { skipApproval: true });
+          result = typeof result === 'object' ? result : { id: result };
+          break;
+        case 'PENDING_ITEM': {
+          // Inventory has filled in the opening stock: forward to Admin as a normal item request
+          const user = getWebUser();
+          result = await queueApproval(supabase, 'CREATE_ITEM', payload, user);
+          break;
+        }
+        case 'UPDATE_ITEM':
+          await updateItemWithPolicy(payload.id, payload.data, { skipApproval: true });
+          result = { id: payload.id };
+          break;
+        case 'CREATE_REQUISITION': {
+          approvedRequisitions.add(payload);
+          result = unwrap(await webBridge.requisitions.create(payload));
+          break;
+        }
+        default:
+          throw new Error(`"${req.type}" requests must be approved in the KADAL desktop app.`);
       }
       await supabase.from('approvals').update({
         status: 'APPROVED',
         notes: notes || null,
         entity_id: result?.id || null,
-        entity_number: result?.piNumber || null,
+        entity_number: result?.challanNumber || result?.piNumber || result?.requisitionNo || null,
         updated_at: new Date().toISOString()
-      }).eq('id', id);
+      }).eq('id', id).eq('status', 'PENDING');
       return { success: true, result };
     }),
     reject: (id, notes) => wrap(async () => {
@@ -1556,8 +1838,8 @@ export const webBridge = {
 
       if (filters.status) query = query.eq('status', filters.status);
       if (filters.recipientId) query = query.eq('recipient_id', filters.recipientId);
-      if (filters.dateFrom) query = query.gte('pi_date', filters.dateFrom);
-      if (filters.dateTo) query = query.lte('pi_date', filters.dateTo + 'T23:59:59.999Z');
+      if (filters.dateFrom) query = query.gte('pi_date', dayStartIso(filters.dateFrom));
+      if (filters.dateTo) query = query.lte('pi_date', dayEndIso(filters.dateTo));
 
       const { data, error } = await query;
       if (error) throw error;

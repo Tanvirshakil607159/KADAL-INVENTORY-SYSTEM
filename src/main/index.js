@@ -30,6 +30,8 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true, nodeIntegration: false, sandbox: false,
+      // No DevTools in the installed app (also blocks the default Ctrl+Shift+I menu shortcut)
+      devTools: !app.isPackaged,
     },
     show: false, backgroundColor: '#0f1117', autoHideMenuBar: true,
     icon: path.join(__dirname, '../../assets/logo.png'),
@@ -69,7 +71,9 @@ function createWindow() {
     if (input.key === 'F5' && input.type === 'keyDown') {
       mainWindow.reload();
       event.preventDefault();
-    } else if (input.key === 'F12' && input.type === 'keyDown') {
+    } else if (input.key === 'F12' && input.type === 'keyDown' && !app.isPackaged) {
+      // Developer tools only in development builds: in the installed app they would let any
+      // user script the window and bypass the screens' checks.
       mainWindow.webContents.toggleDevTools();
       event.preventDefault();
     }

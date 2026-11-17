@@ -19,7 +19,8 @@ const GatePassService = {
 
   async create(data) {
     const user = await AuthService.getCurrentUser();
-    if (user?.roleName !== 'Admin') {
+    const isAdmin = ['Admin', 'Super Admin'].includes(user?.roleName) || ['Admin', 'Super Admin'].includes(user?.role_name);
+    if (!isAdmin) {
       const SettingsRepo = require('../database/repositories/settings');
       const requireAll = await SettingsRepo.get('require_gate_pass_approval') === 'true';
       if (requireAll) {

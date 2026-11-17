@@ -10,6 +10,9 @@ let db = null;
 let dbPath = null;
 let skipSave = false;
 let supabase = null;
+// Depth of the currently open dbTransaction. While > 0 the file is not written: sql.js
+// export() closes and reopens the database, which would silently end the transaction.
+let transactionDepth = 0;
 
 function setRestoring(val) {
   skipSave = val;
@@ -286,8 +289,10 @@ function isCloudEnabled() {
 }
 
 function saveDatabase() {
-  if (db && !skipSave) {
+  if (db && !skipSave && transactionDepth === 0) {
     const data = db.export();
+    // export() closes and reopens the connection, which resets PRAGMAs to their defaults
+    db.run('PRAGMA foreign_keys = ON');
     const buffer = Buffer.from(data);
     fs.writeFileSync(getDbPath(), buffer);
   }
@@ -351,14 +356,22 @@ function dbExec(sql) {
 
 function dbTransaction(fn) {
   return async (...args) => {
+    // Nested call: join the outer transaction instead of issuing a second BEGIN
+    if (transactionDepth > 0) return await fn(...args);
+
     db.run('BEGIN TRANSACTION');
+    transactionDepth++;
     try {
       const result = await fn(...args);
       db.run('COMMIT');
+      transactionDepth--;
       saveDatabase();
       return result;
     } catch (err) {
-      db.run('ROLLBACK');
+      transactionDepth--;
+      try { db.run('ROLLBACK'); } catch (rollbackErr) {
+        console.error('[DB] Rollback failed:', rollbackErr.message);
+      }
       throw err;
     }
   };

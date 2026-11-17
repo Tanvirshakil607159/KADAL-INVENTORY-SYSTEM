@@ -293,6 +293,31 @@ const ItemPriceTiersRepo = {
   },
 
   /**
+   * Make the item's active tiers add up to items.current_stock.
+   * current_stock is the source of truth; tiers are topped up (at the newest tier's
+   * price, else the item's price) or drawn down FIFO. Never changes current_stock.
+   */
+  async syncItemToStock(itemId) {
+    const parsedId = Number(itemId);
+    if (!parsedId) return;
+    let item;
+    if (isCloudEnabled()) {
+      const { data, error } = await getSupabase().from('items').select('current_stock, unit_price, currency').eq('id', parsedId).maybeSingle();
+      if (error) throw error;
+      item = data;
+    } else {
+      item = dbPrepare('SELECT current_stock, unit_price, currency FROM items WHERE id = ?').get(parsedId);
+    }
+    if (!item) return;
+    const target = Number(item.current_stock) || 0;
+    const tiers = await this.getActiveByItem(parsedId);
+    const tierSum = tiers.reduce((sum, t) => sum + Number(t.quantity || 0), 0);
+    if (Math.abs(tierSum - target) > 0.001) {
+      await this.adjustStock(parsedId, target, item.unit_price, item.currency || 'BDT');
+    }
+  },
+
+  /**
    * Update an existing price tier directly.
    */
   async updateTier(tierId, data) {

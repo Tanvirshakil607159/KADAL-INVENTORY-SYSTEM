@@ -1327,12 +1327,12 @@ function ProductionReportsTab({ addToast }) {
     }
 
     if (dateFrom) {
-      const from = new Date(dateFrom);
+      const from = new Date(`${dateFrom}T00:00:00`); // start of the local day
       result = result.filter(r => new Date(r.created_at) >= from);
     }
 
     if (dateTo) {
-      const to = new Date(dateTo + 'T23:59:59.999Z');
+      const to = new Date(`${dateTo}T23:59:59.999`); // end of the local day
       result = result.filter(r => new Date(r.created_at) <= to);
     }
 

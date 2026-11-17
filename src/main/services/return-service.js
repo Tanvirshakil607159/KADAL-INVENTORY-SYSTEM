@@ -1,6 +1,7 @@
 const ReturnsRepo = require('../database/repositories/returns');
 const IssuesRepo = require('../database/repositories/issues');
 const ItemsRepo = require('../database/repositories/items');
+const ItemPriceTiersRepo = require('../database/repositories/item-price-tiers');
 const StockTransactionsRepo = require('../database/repositories/stock-transactions');
 const AuditLogsRepo = require('../database/repositories/audit-logs');
 const AuthService = require('./auth-service');
@@ -64,6 +65,7 @@ const ReturnService = {
         const stockBefore = dbItem.current_stock;
         const stockAfter = stockBefore + item.returnedQuantity;
         await ItemsRepo.updateStock(issueItem.item_id, stockAfter);
+        await ItemPriceTiersRepo.syncItemToStock(issueItem.item_id);
         await StockTransactionsRepo.create({
           itemId: issueItem.item_id, type: 'IN', quantity: item.returnedQuantity,
           stockBefore, stockAfter,

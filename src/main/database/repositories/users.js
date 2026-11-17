@@ -15,9 +15,10 @@ const UsersRepo = {
 
   async getById(id) {
     if (isCloudEnabled()) {
+      // Explicit columns: the password hash is never read here (and is not readable once locked down)
       const { data: user, error } = await getSupabase()
         .from('users')
-        .select(`*, roles (name, permissions)`)
+        .select(`id, username, full_name, role_id, is_active, last_login, created_at, custom_permissions, roles (name, permissions)`)
         .eq('id', id)
         .single();
       if (error) throw error;
@@ -30,6 +31,16 @@ const UsersRepo = {
     const user = dbPrepare(`SELECT u.id, u.username, u.full_name, u.role_id, r.name as role_name, r.permissions, u.custom_permissions, u.is_active, u.last_login, u.created_at FROM users u JOIN roles r ON u.role_id = r.id WHERE u.id = ?`).get(id);
     if (user && user.custom_permissions) user.permissions = user.custom_permissions;
     return user;
+  },
+
+  // Only used by the legacy password check on databases without supabase_security_lockdown.sql
+  async getPasswordHash(id) {
+    if (isCloudEnabled()) {
+      const { data, error } = await getSupabase().from('users').select('password_hash').eq('id', id).single();
+      if (error) throw error;
+      return data?.password_hash;
+    }
+    return dbPrepare('SELECT password_hash FROM users WHERE id = ?').get(id)?.password_hash;
   },
 
   async getByUsername(username, activeOnly = true) {

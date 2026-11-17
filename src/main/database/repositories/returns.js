@@ -1,4 +1,5 @@
 const { dbPrepare, getSupabase, isCloudEnabled } = require('../connection');
+const { dayStartIso, dayEndIso, dayStartSql, dayEndSql, inLocalRange } = require('../../utils/date-range');
 
 const ReturnsRepo = {
   async getAll(filters = {}) {
@@ -12,8 +13,8 @@ const ReturnsRepo = {
       `).order('return_date', { ascending: false });
 
       if (filters.issueId) query = query.eq('issue_id', filters.issueId);
-      if (filters.dateFrom) query = query.gte('return_date', filters.dateFrom);
-      if (filters.dateTo) query = query.lte('return_date', filters.dateTo + 'T23:59:59.999Z');
+      if (filters.dateFrom) query = query.gte('return_date', dayStartIso(filters.dateFrom));
+      if (filters.dateTo) query = query.lte('return_date', dayEndIso(filters.dateTo));
 
       const { data, error } = await query;
       if (error) throw error;
@@ -29,8 +30,8 @@ const ReturnsRepo = {
 
     let where = []; let params = [];
     if (filters.issueId) { where.push('r.issue_id = ?'); params.push(filters.issueId); }
-    if (filters.dateFrom) { where.push('r.return_date >= ?'); params.push(filters.dateFrom); }
-    if (filters.dateTo) { where.push('r.return_date <= ?'); params.push(filters.dateTo + 'T23:59:59.999Z'); }
+    if (filters.dateFrom) { where.push('datetime(r.return_date) >= ?'); params.push(dayStartSql(filters.dateFrom)); }
+    if (filters.dateTo) { where.push('datetime(r.return_date) <= ?'); params.push(dayEndSql(filters.dateTo)); }
 
     const w = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
     return dbPrepare(`

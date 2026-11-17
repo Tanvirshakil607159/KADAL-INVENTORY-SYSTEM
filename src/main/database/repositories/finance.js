@@ -1,4 +1,5 @@
 const { dbPrepare, dbTransaction, getSupabase, isCloudEnabled } = require('../connection');
+const { dayStartIso, dayEndIso, dayStartSql, dayEndSql, inLocalRange } = require('../../utils/date-range');
 
 function extractPrefix(name) {
   if (!name) return 'KADAL';
@@ -312,8 +313,8 @@ const FinanceRepo = {
 
         if (filters.status) query = query.eq('status', filters.status);
         if (filters.recipientId) query = query.eq('recipient_id', filters.recipientId);
-        if (filters.dateFrom) query = query.gte('pi_date', filters.dateFrom);
-        if (filters.dateTo) query = query.lte('pi_date', filters.dateTo + 'T23:59:59.999Z');
+        if (filters.dateFrom) query = query.gte('pi_date', dayStartIso(filters.dateFrom));
+        if (filters.dateTo) query = query.lte('pi_date', dayEndIso(filters.dateTo));
 
         const { data, error } = await query;
         if (error) throw error;
@@ -402,8 +403,8 @@ const FinanceRepo = {
       where.push("pi.bill_number IS NOT NULL");
     }
     if (filters.recipientId) { where.push('pi.recipient_id = ?'); params.push(filters.recipientId); }
-    if (filters.dateFrom && filters.dateFrom.trim()) { where.push('pi.pi_date >= ?'); params.push(filters.dateFrom); }
-    if (filters.dateTo && filters.dateTo.trim()) { where.push('pi.pi_date <= ?'); params.push(filters.dateTo + 'T23:59:59.999Z'); }
+    if (filters.dateFrom && filters.dateFrom.trim()) { where.push('datetime(pi.pi_date) >= ?'); params.push(dayStartSql(filters.dateFrom)); }
+    if (filters.dateTo && filters.dateTo.trim()) { where.push('datetime(pi.pi_date) <= ?'); params.push(dayEndSql(filters.dateTo)); }
     if (filters.search && filters.search.trim()) {
       where.push('(pi.pi_number LIKE ? OR pi.bill_number LIKE ? OR pi.applicant_name LIKE ? OR pi.buyer LIKE ? OR pi.challan_numbers LIKE ?)');
       const s = `%${filters.search.trim()}%`;

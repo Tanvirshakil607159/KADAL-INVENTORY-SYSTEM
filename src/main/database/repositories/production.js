@@ -645,4 +645,58 @@ const ProductionRepo = {
   }
 };
 
+// Production changes items.current_stock directly (finished goods in, raw-material returns in/out).
+// Keep the FIFO price tiers of every touched item in line so later stock movements don't erase it.
+const ItemPriceTiersRepo = require('./item-price-tiers');
+
+async function itemIdsForIssueItems(issueItems) {
+  const ids = [];
+  for (const it of (issueItems || [])) {
+    if (!it || !it.issueItemId) continue;
+    try {
+      if (isCloudEnabled()) {
+        const { data } = await getSupabase().from('issue_items').select('item_id').eq('id', it.issueItemId).maybeSingle();
+        if (data?.item_id) ids.push(data.item_id);
+      } else {
+        const row = dbPrepare('SELECT item_id FROM issue_items WHERE id = ?').get(it.issueItemId);
+        if (row?.item_id) ids.push(row.item_id);
+      }
+    } catch (e) { /* best effort */ }
+  }
+  return ids;
+}
+
+async function syncTiers(itemIds) {
+  for (const id of new Set(itemIds.filter(Boolean).map(Number))) {
+    try { await ItemPriceTiersRepo.syncItemToStock(id); }
+    catch (e) { console.warn('[ProductionRepo] Price tier sync failed for item', id, e.message); }
+  }
+}
+
+const _create = ProductionRepo.create;
+ProductionRepo.create = async function (args) {
+  const result = await _create.call(this, args);
+  await syncTiers([args.productItemId, ...(await itemIdsForIssueItems(args.items))]);
+  return result;
+};
+
+const _createBatch = ProductionRepo.createBatch;
+ProductionRepo.createBatch = async function (args) {
+  const result = await _createBatch.call(this, args);
+  const produced = (args.producedProducts || []).map(p => p.productItemId);
+  await syncTiers([...produced, ...(await itemIdsForIssueItems(args.items))]);
+  return result;
+};
+
+const _delete = ProductionRepo.delete;
+ProductionRepo.delete = async function (id) {
+  const prod = await this.getById(id);
+  let consumed = [];
+  try { consumed = prod?.consumed_items ? JSON.parse(prod.consumed_items) : []; } catch (e) { consumed = []; }
+  const rawIds = await itemIdsForIssueItems(consumed);
+  const result = await _delete.call(this, id);
+  await syncTiers([prod?.product_item_id, ...rawIds]);
+  return result;
+};
+
 module.exports = ProductionRepo;

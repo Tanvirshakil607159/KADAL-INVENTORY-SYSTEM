@@ -1,4 +1,5 @@
 const { dbPrepare, getSupabase, isCloudEnabled } = require('../connection');
+const { dayStartIso, dayEndIso, dayStartSql, dayEndSql, inLocalRange } = require('../../utils/date-range');
 
 const StockTransactionsRepo = {
   async create(data) {
@@ -79,8 +80,8 @@ const StockTransactionsRepo = {
 
       if (filters.itemId) query = query.eq('item_id', filters.itemId);
       if (filters.type) query = query.eq('type', filters.type);
-      if (filters.dateFrom) query = query.gte('created_at', filters.dateFrom);
-      if (filters.dateTo) query = query.lte('created_at', filters.dateTo + 'T23:59:59.999Z');
+      if (filters.dateFrom) query = query.gte('created_at', dayStartIso(filters.dateFrom));
+      if (filters.dateTo) query = query.lte('created_at', dayEndIso(filters.dateTo));
 
       const { data, error } = await query.order('created_at', { ascending: false }).limit(1000);
       if (error) throw error;
@@ -107,8 +108,8 @@ const StockTransactionsRepo = {
     let where = []; let params = [];
     if (filters.itemId) { where.push('st.item_id = ?'); params.push(filters.itemId); }
     if (filters.type) { where.push('st.type = ?'); params.push(filters.type); }
-    if (filters.dateFrom) { where.push('st.created_at >= ?'); params.push(filters.dateFrom); }
-    if (filters.dateTo) { where.push("st.created_at <= ?"); params.push(filters.dateTo + 'T23:59:59.999Z'); }
+    if (filters.dateFrom) { where.push('datetime(st.created_at) >= ?'); params.push(dayStartSql(filters.dateFrom)); }
+    if (filters.dateTo) { where.push("datetime(st.created_at) <= ?"); params.push(dayEndSql(filters.dateTo)); }
     const w = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
     return dbPrepare(`SELECT st.*, i.name as item_name, i.item_code, i.unit as item_unit, COALESCE(st.unit_price, i.unit_price) as unit_price, COALESCE(st.currency, i.currency) as currency, COALESCE(st.conversion_rate, i.conversion_rate) as conversion_rate, i.style_name, i.purchase_no, i.order_number, i.size, i.color, i.buyer_name, u.full_name as created_by_name, ch.challan_number FROM stock_transactions st JOIN items i ON st.item_id = i.id LEFT JOIN users u ON st.created_by = u.id LEFT JOIN challans ch ON st.challan_id = ch.id ${w} ORDER BY st.created_at DESC LIMIT 1000`).all(...params);
   },
@@ -149,8 +150,8 @@ const StockTransactionsRepo = {
 
       // Fetch transactions for these items within date range
       let txQuery = supabase.from('stock_transactions').select('item_id, type, quantity');
-      if (filters.dateFrom) txQuery = txQuery.gte('created_at', filters.dateFrom);
-      if (filters.dateTo) txQuery = txQuery.lte('created_at', filters.dateTo + 'T23:59:59.999Z');
+      if (filters.dateFrom) txQuery = txQuery.gte('created_at', dayStartIso(filters.dateFrom));
+      if (filters.dateTo) txQuery = txQuery.lte('created_at', dayEndIso(filters.dateTo));
 
       txQuery = txQuery.order('id');
       const txs = await fetchAll(txQuery);
@@ -174,8 +175,8 @@ const StockTransactionsRepo = {
     let joinParams = [];
     let whereParams = [];
 
-    if (dateFrom) { joinConditions += ' AND st.created_at >= ?'; joinParams.push(dateFrom); }
-    if (dateTo) { joinConditions += ' AND st.created_at <= ?'; joinParams.push(dateTo + 'T23:59:59.999Z'); }
+    if (dateFrom) { joinConditions += ' AND datetime(st.created_at) >= ?'; joinParams.push(dayStartSql(dateFrom)); }
+    if (dateTo) { joinConditions += ' AND datetime(st.created_at) <= ?'; joinParams.push(dayEndSql(dateTo)); }
 
     if (search) {
       whereConditions += ' AND (i.name LIKE ? OR i.item_code LIKE ? OR i.style_name LIKE ? OR i.order_number LIKE ? OR i.purchase_no LIKE ?)';
@@ -195,8 +196,8 @@ const StockTransactionsRepo = {
 
   async getDailySummary(date) {
     if (isCloudEnabled()) {
-      const start = date + 'T00:00:00Z';
-      const end = date + 'T23:59:59.999Z';
+      const start = dayStartIso(date);
+      const end = dayEndIso(date);
       const { data, error } = await getSupabase()
         .from('stock_transactions')
         .select('id, type, quantity')
@@ -211,7 +212,7 @@ const StockTransactionsRepo = {
         total_out_qty: data.filter(t => t.type === 'OUT').reduce((sum, t) => sum + t.quantity, 0)
       };
     }
-    return dbPrepare(`SELECT COUNT(DISTINCT CASE WHEN type = 'IN' THEN id END) as in_transactions, COUNT(DISTINCT CASE WHEN type = 'OUT' THEN id END) as out_transactions, COALESCE(SUM(CASE WHEN type = 'IN' THEN quantity ELSE 0 END), 0) as total_in_qty, COALESCE(SUM(CASE WHEN type = 'OUT' THEN quantity ELSE 0 END), 0) as total_out_qty FROM stock_transactions WHERE DATE(created_at) = DATE(?)`).get(date);
+    return dbPrepare(`SELECT COUNT(DISTINCT CASE WHEN type = 'IN' THEN id END) as in_transactions, COUNT(DISTINCT CASE WHEN type = 'OUT' THEN id END) as out_transactions, COALESCE(SUM(CASE WHEN type = 'IN' THEN quantity ELSE 0 END), 0) as total_in_qty, COALESCE(SUM(CASE WHEN type = 'OUT' THEN quantity ELSE 0 END), 0) as total_out_qty FROM stock_transactions WHERE datetime(created_at) >= ? AND datetime(created_at) <= ?`).get(dayStartSql(date), dayEndSql(date));
   },
 
   async getFieldSuggestions(field, query = '') {

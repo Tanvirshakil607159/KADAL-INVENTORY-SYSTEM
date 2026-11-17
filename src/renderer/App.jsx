@@ -32,7 +32,7 @@ import LandingPage from './pages/LandingPage';
 
 // Show the landing page by default for both web and electron
 export default function App() {
-  const { currentPage, isLoggedIn, setUser, showLanding, setShowLanding } = useStore();
+  const { currentPage, isLoggedIn, user, setUser, showLanding, setShowLanding } = useStore();
   const [hasCloudConfig, setHasCloudConfig] = React.useState(null);
 
   // Parse verification challan number from path or hash
