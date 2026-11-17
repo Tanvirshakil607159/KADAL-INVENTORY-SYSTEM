@@ -145,7 +145,7 @@ export default function ApprovalReviewModal({ data, onSaved }) {
 
   return (
     <div className={`modal-overlay ${isMinimized ? 'minimized-mode' : ''}`}>
-      <div className={`modal ${isMinimized ? 'minimized' : ''}`} style={{ maxWidth: isPi ? 960 : 650, width: isPi ? '96vw' : undefined }} onClick={e => e.stopPropagation()}>
+      <div className={`modal ${isMinimized ? 'minimized' : ''}`} style={{ maxWidth: isPi ? (editingPi ? 1120 : 960) : 650, width: isPi ? '96vw' : undefined }} onClick={e => e.stopPropagation()}>
         <div className="modal-header">
           <div className="modal-title flex items-center gap-2">
             <Clock size={18} className="text-warning" />

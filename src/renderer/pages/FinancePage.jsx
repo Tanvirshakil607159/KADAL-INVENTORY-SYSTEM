@@ -10,6 +10,9 @@ import {
 import { numberToCurrencyWords } from '../utils/numberToWords';
 import ProformaInvoicePrintView from '../components/finance/ProformaInvoicePrintView';
 import PiEditModal from '../components/finance/PiEditModal';
+import PiOrderLoaderModal from '../components/finance/PiOrderLoaderModal';
+import PiItemPickerModal from '../components/finance/PiItemPickerModal';
+import { formatPoStyle } from '../components/finance/piApprovalUtils';
 
 export default function FinancePage() {
   const { addToast, user, showConfirm } = useStore();
@@ -118,49 +121,9 @@ export default function FinancePage() {
   // ==================== ORDER / PURCHASE ORDER MODAL STATE ====================
   const [orderModalOpen, setOrderModalOpen] = useState(false);
   const [orderModalMode, setOrderModalMode] = useState('order'); // 'order' or 'purchase'
-  const [selectedOrderNo, setSelectedOrderNo] = useState('');
-  const [selectedPurchaseNo, setSelectedPurchaseNo] = useState('');
-  const [orderFilterQuery, setOrderFilterQuery] = useState('');
-  const [orderItems, setOrderItems] = useState([]);
-  const [loadingOrderItems, setLoadingOrderItems] = useState(false);
-  const [selectedItemsFromOrder, setSelectedItemsFromOrder] = useState(new Set());
 
   // ==================== ITEM PICKER MODAL (FOR MANUAL LINE ITEMS) ====================
   const [itemPickerIndex, setItemPickerIndex] = useState(null);
-  const [itemSearchQuery, setItemSearchQuery] = useState('');
-  const [itemSearchResults, setItemSearchResults] = useState([]);
-  const [loadingItemSearch, setLoadingItemSearch] = useState(false);
-
-  const visibleList = useMemo(() => {
-    const list = orderModalMode === 'order' ? orderNumbers : purchaseNumbers;
-    if (!orderFilterQuery.trim()) return list;
-    const q = orderFilterQuery.toLowerCase().trim();
-    return list.filter(o => o && o.toLowerCase().includes(q));
-  }, [orderModalMode, orderNumbers, purchaseNumbers, orderFilterQuery]);
-
-  // Helper to format Order and Style (PO == Order Number) for dedicated column
-  const formatPoStyle = (it) => {
-    if (!it) return '';
-    let val = it.po_style_no || it.poStyleNo || '';
-    const po = it.order_number || it.orderNumber || '';
-    const style = it.style_name || it.styleName || '';
-
-    if (val && val !== '-') {
-      // Remove any Purchase No from this value
-      let cleanVal = val.replace(/\s*\/\s*Purchase(?:\s*No)?\s*[:=]\s*[^\n;]+/i, '').trim();
-      if (po && !cleanVal.toLowerCase().includes('order:') && !cleanVal.toLowerCase().includes('po:') && !cleanVal.includes(po)) {
-        cleanVal = `Order: ${po} / ` + cleanVal.replace(/^Style:\s*/i, 'Style: ');
-      }
-      cleanVal = cleanVal.replace(/^PO:\s*/i, 'Order: ').replace(/\s*\/\s*PO:\s*/gi, ' / Order: ');
-      return cleanVal || '-';
-    }
-
-    const parts = [];
-    if (po) parts.push(`Order: ${po}`);
-    if (style) parts.push(`Style: ${style}`);
-
-    return parts.length > 0 ? parts.join(' / ') : '-';
-  };
 
   // Safe helper to extract purchase number from PI or its notes/items
   const getPiPurchaseNo = (pi) => {
@@ -178,68 +141,31 @@ export default function FinancePage() {
     return '';
   };
 
-  // Load items for the selected order or purchase order on demand
-  useEffect(() => {
-    const activeVal = orderModalMode === 'order' ? selectedOrderNo : selectedPurchaseNo;
-    if (!activeVal) {
-      setOrderItems([]);
-      return;
-    }
-    let isCurrent = true;
-    setLoadingOrderItems(true);
-    const filter = orderModalMode === 'order' 
-      ? { orderNumber: activeVal } 
-      : { purchaseNo: activeVal };
-
-    window.kadal.items.getAll(filter).then(res => {
-      if (isCurrent) {
-        const items = res?.success ? (res.data || []) : (Array.isArray(res) ? res : []);
-        setOrderItems(items);
-        setLoadingOrderItems(false);
-      }
-    }).catch(err => {
-      console.error('Failed to load items:', err);
-      if (isCurrent) setLoadingOrderItems(false);
-    });
-    return () => { isCurrent = false; };
-  }, [orderModalMode, selectedOrderNo, selectedPurchaseNo]);
-
   const addedItemIds = useMemo(() => {
     return new Set(piItems.map(it => it.itemId).filter(Boolean));
   }, [piItems]);
 
-  const handleCloseOrderModal = () => {
-    setOrderModalOpen(false);
-    setSelectedOrderNo('');
-    setSelectedPurchaseNo('');
-    setOrderFilterQuery('');
-    setSelectedItemsFromOrder(new Set());
-  };
-
-  const handleAddSelectedFromOrder = () => {
-    const activeVal = orderModalMode === 'order' ? selectedOrderNo : selectedPurchaseNo;
-    const newItems = orderItems
-      .filter(it => selectedItemsFromOrder.has(it.id))
-      .map(it => {
-        const rate = Number(it.unit_price) || 0;
-        const qty = Number(it.order_quantity) || Number(it.current_stock) || 1000;
-        const itPurch = it.purchase_no || it.purchaseNo || (orderModalMode === 'purchase' ? selectedPurchaseNo : '') || purchaseNumber || '';
-        return {
-          uid: 'pi-' + Math.random().toString(36).slice(2) + '-' + Date.now(),
-          itemId: it.id,
-          itemCode: it.item_code || '',
-          itemDescription: it.name || '',
-          purchaseNo: itPurch,
-          orderNumber: it.order_number || it.orderNumber || (orderModalMode === 'order' ? selectedOrderNo : ''),
-          styleName: it.style_name || it.styleName || '',
-          poStyleNo: formatPoStyle(it),
-          quantity: qty,
-          unit: (it.unit || 'PCS').toUpperCase(),
-          unitPrice: rate,
-          totalAmount: Number((qty * rate).toFixed(2)),
-          isReadOnly: true
-        };
-      });
+  const handleAddSelectedFromOrder = (chosenItems, { mode, activeVal, selectedOrderNo, selectedPurchaseNo }) => {
+    const newItems = chosenItems.map(it => {
+      const rate = Number(it.unit_price) || 0;
+      const qty = Number(it.order_quantity) || Number(it.current_stock) || 1000;
+      const itPurch = it.purchase_no || it.purchaseNo || (mode === 'purchase' ? selectedPurchaseNo : '') || purchaseNumber || '';
+      return {
+        uid: 'pi-' + Math.random().toString(36).slice(2) + '-' + Date.now(),
+        itemId: it.id,
+        itemCode: it.item_code || '',
+        itemDescription: it.name || '',
+        purchaseNo: itPurch,
+        orderNumber: it.order_number || it.orderNumber || (mode === 'order' ? selectedOrderNo : ''),
+        styleName: it.style_name || it.styleName || '',
+        poStyleNo: formatPoStyle(it),
+        quantity: qty,
+        unit: (it.unit || 'PCS').toUpperCase(),
+        unitPrice: rate,
+        totalAmount: Number((qty * rate).toFixed(2)),
+        isReadOnly: true
+      };
+    });
 
     let addedCount = 0;
     setPiItems(prev => {
@@ -249,50 +175,20 @@ export default function FinancePage() {
       return [...prev, ...itemsToAdd].map((item, idx) => ({ ...item, slNo: idx + 1 }));
     });
 
-    setSelectedItemsFromOrder(new Set());
     if (!purchaseNumber) {
-      if (orderModalMode === 'purchase' && selectedPurchaseNo) {
+      if (mode === 'purchase' && selectedPurchaseNo) {
         setPurchaseNumber(selectedPurchaseNo);
       } else {
-        const firstPurch = orderItems.find(it => selectedItemsFromOrder.has(it.id) && it.purchase_no);
+        const firstPurch = chosenItems.find(it => it.purchase_no);
         if (firstPurch?.purchase_no) setPurchaseNumber(firstPurch.purchase_no);
       }
     }
     if (addedCount > 0) {
-      addToast('success', `Linked & added ${addedCount} item(s) from ${orderModalMode === 'order' ? 'Order' : 'Purchase Order'} ${activeVal} to PI`);
+      addToast('success', `Linked & added ${addedCount} item(s) from ${mode === 'order' ? 'Order' : 'Purchase Order'} ${activeVal} to PI`);
     } else if (newItems.length > 0) {
       addToast('info', `Selected item(s) are already linked in this PI`);
     }
   };
-
-  // Debounced search for manual item picker
-  useEffect(() => {
-    if (itemPickerIndex === null) {
-      setItemSearchResults([]);
-      setItemSearchQuery('');
-      return;
-    }
-    let isCurrent = true;
-    const timer = setTimeout(async () => {
-      setLoadingItemSearch(true);
-      try {
-        const res = await window.kadal.items.getAll({ search: itemSearchQuery.trim() || undefined });
-        if (isCurrent) {
-          const list = res?.success ? (res.data || []) : (Array.isArray(res) ? res : []);
-          setItemSearchResults(list.slice(0, 30));
-        }
-      } catch (e) {
-        console.error('Failed to search items:', e);
-      } finally {
-        if (isCurrent) setLoadingItemSearch(false);
-      }
-    }, 200);
-
-    return () => {
-      isCurrent = false;
-      clearTimeout(timer);
-    };
-  }, [itemPickerIndex, itemSearchQuery]);
 
   // Auto-generate next PI number
   const generateNextPiNumber = useCallback(async (applicant = '', force = false) => {
@@ -427,7 +323,6 @@ export default function FinancePage() {
       setPurchaseNumber(itPurch);
     }
     setItemPickerIndex(null);
-    setItemSearchQuery('');
   };
 
   const handleClearItemLink = (index) => {
@@ -1564,10 +1459,7 @@ export default function FinancePage() {
                                 <button
                                   type="button"
                                   className="btn btn-outline btn-sm"
-                                  onClick={() => {
-                                    setItemPickerIndex(idx);
-                                    setItemSearchQuery('');
-                                  }}
+                                  onClick={() => setItemPickerIndex(idx)}
                                   style={{
                                     display: 'inline-flex',
                                     alignItems: 'center',
@@ -2201,449 +2093,30 @@ export default function FinancePage() {
       )}
 
       {/* ========================================================================= */}
-      {/* ORDER ITEMS MODAL (SOLID BG & MULTI-ORDER ADD) */}
+      {/* ORDER ITEMS MODAL (SHARED) */}
       {/* ========================================================================= */}
-      {orderModalOpen && (
-        <div className="modal-backdrop" style={{ 
-          position: 'fixed', 
-          inset: 0, 
-          background: 'rgba(0, 0, 0, 0.75)', 
-          backdropFilter: 'blur(4px)',
-          WebkitBackdropFilter: 'blur(4px)',
-          zIndex: 1000, 
-          display: 'flex', 
-          alignItems: 'center', 
-          justifyContent: 'center', 
-          padding: 20 
-        }}>
-          <div style={{ 
-            background: 'var(--bg-surface-solid, #181d28)', 
-            border: '1px solid var(--border)',
-            borderRadius: 12, 
-            width: '100%', 
-            maxWidth: 760, 
-            maxHeight: '90vh', 
-            display: 'flex', 
-            flexDirection: 'column', 
-            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.06)',
-            opacity: 1
-          }}>
-            <div style={{ 
-              padding: '16px 20px', 
-              borderBottom: '1px solid var(--border)', 
-              display: 'flex', 
-              justifyContent: 'space-between', 
-              alignItems: 'center',
-              background: 'var(--bg-surface-solid, #181d28)'
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <PackageCheck color="var(--primary)" size={20} />
-                  Load Items from Order
-                </h3>
-                {piItems.length > 0 && (
-                  <span style={{ 
-                    fontSize: 12, 
-                    fontWeight: 600, 
-                    padding: '2px 8px', 
-                    borderRadius: 12, 
-                    background: 'rgba(59, 130, 246, 0.15)', 
-                    color: '#3b82f6',
-                    border: '1px solid rgba(59, 130, 246, 0.3)'
-                  }}>
-                    {piItems.length} item(s) in PI
-                  </span>
-                )}
-              </div>
-              <button 
-                type="button"
-                className="btn btn-ghost btn-icon btn-sm" 
-                onClick={handleCloseOrderModal}
-                title="Close"
-              >
-                <X size={18} />
-              </button>
-            </div>
-            
-            <div style={{ padding: 20, overflowY: 'auto', flex: 1, background: 'var(--bg-surface-solid, #181d28)' }}>
-              {/* Mode Switcher */}
-              <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-                <button
-                  type="button"
-                  className={`btn btn-sm ${orderModalMode === 'order' ? 'btn-primary' : 'btn-outline'}`}
-                  onClick={() => {
-                    setOrderModalMode('order');
-                    setOrderFilterQuery('');
-                    setSelectedItemsFromOrder(new Set());
-                  }}
-                  style={{ display: 'flex', alignItems: 'center', gap: 6 }}
-                >
-                  <PackageCheck size={14} /> By Order Number ({orderNumbers.length})
-                </button>
-                <button
-                  type="button"
-                  className={`btn btn-sm ${orderModalMode === 'purchase' ? 'btn-primary' : 'btn-outline'}`}
-                  onClick={() => {
-                    setOrderModalMode('purchase');
-                    setOrderFilterQuery('');
-                    setSelectedItemsFromOrder(new Set());
-                  }}
-                  style={{ display: 'flex', alignItems: 'center', gap: 6 }}
-                >
-                  <FileText size={14} /> By Purchase Order ({purchaseNumbers.length})
-                </button>
-              </div>
-
-              <div style={{ marginBottom: 16 }}>
-                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
-                  {orderModalMode === 'order' ? 'Select Order Number (PO)' : 'Select Purchase Order (PO Number)'}
-                </label>
-                <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-                  <div style={{ position: 'relative', flex: 1 }}>
-                    <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-                    <input
-                      type="text"
-                      placeholder={orderModalMode === 'order' ? 'Type to filter or enter order number (e.g. 00034689)...' : 'Type to filter or enter purchase order (e.g. KAD#01849/2026)...'}
-                      value={orderFilterQuery}
-                      onChange={e => setOrderFilterQuery(e.target.value)}
-                      onKeyDown={e => {
-                        if (e.key === 'Enter' && orderFilterQuery.trim()) {
-                          e.preventDefault();
-                          if (orderModalMode === 'order') {
-                            setSelectedOrderNo(orderFilterQuery.trim());
-                          } else {
-                            setSelectedPurchaseNo(orderFilterQuery.trim());
-                          }
-                          setSelectedItemsFromOrder(new Set());
-                        }
-                      }}
-                      style={{ width: '100%', padding: '7px 10px 7px 32px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 12, background: 'var(--bg-base)', color: 'inherit' }}
-                    />
-                  </div>
-                  {orderFilterQuery.trim() && orderFilterQuery.trim() !== (orderModalMode === 'order' ? selectedOrderNo : selectedPurchaseNo) && (
-                    <button 
-                      type="button"
-                      className="btn btn-outline btn-sm" 
-                      onClick={() => {
-                        if (orderModalMode === 'order') {
-                          setSelectedOrderNo(orderFilterQuery.trim());
-                        } else {
-                          setSelectedPurchaseNo(orderFilterQuery.trim());
-                        }
-                        setSelectedItemsFromOrder(new Set());
-                      }}
-                      style={{ fontSize: 12, padding: '4px 10px', whiteSpace: 'nowrap' }}
-                      title="Select this directly"
-                    >
-                      Select "{orderFilterQuery.trim()}"
-                    </button>
-                  )}
-                  {orderFilterQuery && (
-                    <button 
-                      type="button"
-                      className="btn btn-ghost btn-sm" 
-                      onClick={() => setOrderFilterQuery('')}
-                      style={{ fontSize: 12, padding: '4px 8px' }}
-                    >
-                      Clear
-                    </button>
-                  )}
-                </div>
-
-                <select
-                  value={orderModalMode === 'order' ? selectedOrderNo : selectedPurchaseNo}
-                  onChange={e => {
-                    if (orderModalMode === 'order') {
-                      setSelectedOrderNo(e.target.value);
-                    } else {
-                      setSelectedPurchaseNo(e.target.value);
-                    }
-                    setSelectedItemsFromOrder(new Set());
-                  }}
-                  style={{ width: '100%', padding: '9px 12px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 13, background: 'var(--bg-base)', color: 'inherit' }}
-                >
-                  <option value="">-- Choose {orderModalMode === 'order' ? 'an Order Number' : 'a Purchase Order'} ({visibleList.length} available) --</option>
-                  {(orderModalMode === 'order' ? selectedOrderNo : selectedPurchaseNo) && !visibleList.includes(orderModalMode === 'order' ? selectedOrderNo : selectedPurchaseNo) && (
-                    <option value={orderModalMode === 'order' ? selectedOrderNo : selectedPurchaseNo}>
-                      {orderModalMode === 'order' ? selectedOrderNo : selectedPurchaseNo}
-                    </option>
-                  )}
-                  {visibleList.map(o => (
-                    <option key={o} value={o}>{o}</option>
-                  ))}
-                </select>
-              </div>
-
-              {loadingOrderItems ? (
-                <div style={{ padding: 36, textAlign: 'center', color: 'var(--text-muted)' }}>
-                  <RefreshCw size={22} className="spin" style={{ marginBottom: 8 }} />
-                  <div style={{ fontSize: 13 }}>
-                    Loading accessories for {orderModalMode === 'order' ? 'Order' : 'Purchase Order'} {orderModalMode === 'order' ? selectedOrderNo : selectedPurchaseNo}...
-                  </div>
-                </div>
-              ) : (orderModalMode === 'order' ? selectedOrderNo : selectedPurchaseNo) ? (
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600 }}>
-                      Items in {orderModalMode === 'order' ? 'Order' : 'Purchase Order'}: <span style={{ color: 'var(--primary)' }}>{orderModalMode === 'order' ? selectedOrderNo : selectedPurchaseNo}</span> ({orderItems.length})
-                    </div>
-                    {orderItems.length > 0 && (
-                      <button 
-                        type="button"
-                        className="btn btn-ghost btn-sm"
-                        onClick={() => {
-                          if (selectedItemsFromOrder.size === orderItems.length) {
-                            setSelectedItemsFromOrder(new Set());
-                          } else {
-                            setSelectedItemsFromOrder(new Set(orderItems.map(it => it.id)));
-                          }
-                        }}
-                        style={{ fontSize: 12 }}
-                      >
-                        {selectedItemsFromOrder.size === orderItems.length ? 'Deselect All' : 'Select All'}
-                      </button>
-                    )}
-                  </div>
-                  
-                  <div style={{ border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden', background: 'var(--bg-surface-solid, #181d28)' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                      <thead>
-                        <tr style={{ background: 'var(--bg-base, rgba(0,0,0,0.15))', borderBottom: '1px solid var(--border)', color: 'var(--text-muted)' }}>
-                          <th style={{ padding: '8px 10px', width: 40, textAlign: 'center' }}>
-                            <CheckSquare size={14} />
-                          </th>
-                          <th style={{ padding: '8px 10px', textAlign: 'left' }}>ITEM DESCRIPTION</th>
-                          <th style={{ padding: '8px 10px', textAlign: 'left', width: 110 }}>PO (ORDER NO)</th>
-                          <th style={{ padding: '8px 10px', textAlign: 'left', width: 110 }}>STYLE NAME</th>
-                          <th style={{ padding: '8px 10px', textAlign: 'left', width: 120 }}>PURCHASE NO</th>
-                          <th style={{ padding: '8px 10px', textAlign: 'right', width: 85 }}>ORDER QTY</th>
-                          <th style={{ padding: '8px 10px', textAlign: 'right', width: 85 }}>UNIT PRICE</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {orderItems.length === 0 ? (
-                          <tr>
-                            <td colSpan={7} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>
-                              No items found for {orderModalMode === 'order' ? 'order' : 'purchase order'} "{orderModalMode === 'order' ? selectedOrderNo : selectedPurchaseNo}".
-                            </td>
-                          </tr>
-                        ) : (
-                          orderItems.map(it => {
-                            const isAlreadyAdded = addedItemIds.has(it.id);
-                            return (
-                              <tr key={it.id} style={{ borderBottom: '1px solid var(--border)', background: isAlreadyAdded ? 'rgba(16, 185, 129, 0.05)' : 'var(--bg-surface-solid, #181d28)' }}>
-                                <td style={{ padding: '8px 10px', textAlign: 'center' }}>
-                                  <input
-                                    type="checkbox"
-                                    checked={selectedItemsFromOrder.has(it.id)}
-                                    onChange={e => {
-                                      const next = new Set(selectedItemsFromOrder);
-                                      if (e.target.checked) next.add(it.id);
-                                      else next.delete(it.id);
-                                      setSelectedItemsFromOrder(next);
-                                    }}
-                                    style={{ cursor: 'pointer', width: 16, height: 16 }}
-                                  />
-                                </td>
-                                <td style={{ padding: '8px 10px', fontWeight: 600 }}>
-                                  {it.name}
-                                  {it.item_code && (
-                                    <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 6, fontWeight: 400 }}>
-                                      ({it.item_code})
-                                    </span>
-                                  )}
-                                  {isAlreadyAdded && (
-                                    <span style={{ 
-                                      fontSize: 10, 
-                                      fontWeight: 700, 
-                                      padding: '1px 6px', 
-                                      borderRadius: 4, 
-                                      background: 'rgba(16, 185, 129, 0.15)', 
-                                      color: '#10b981',
-                                      border: '1px solid rgba(16, 185, 129, 0.3)',
-                                      marginLeft: 8 
-                                    }}>
-                                      Added
-                                    </span>
-                                  )}
-                                </td>
-                                <td style={{ padding: '8px 10px', color: 'var(--text-primary)', fontWeight: 600 }}>
-                                  {it.order_number || '-'}
-                                </td>
-                                <td style={{ padding: '8px 10px', color: 'var(--text-muted)' }}>
-                                  {it.style_name || '-'}
-                                </td>
-                                <td style={{ padding: '8px 10px', color: 'var(--text-muted)', fontSize: 11 }}>
-                                  {it.purchase_no || '-'}
-                                </td>
-                                <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600 }}>
-                                  {Number(it.order_quantity || it.current_stock || 0).toLocaleString()} {it.unit || 'PCS'}
-                                </td>
-                                <td style={{ padding: '8px 10px', textAlign: 'right', color: 'var(--primary)', fontWeight: 600 }}>
-                                  ${Number(it.unit_price || 0).toFixed(4)}
-                                </td>
-                              </tr>
-                            );
-                          })
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              ) : (
-                <div style={{ padding: 30, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
-                  Please choose an order number above to view and select accessories.
-                </div>
-              )}
-            </div>
-
-            <div style={{ 
-              padding: '14px 20px', 
-              borderTop: '1px solid var(--border)', 
-              display: 'flex', 
-              justifyContent: 'space-between', 
-              alignItems: 'center',
-              background: 'var(--bg-surface-solid, #181d28)' 
-            }}>
-              <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-                {piItems.length > 0 ? (
-                  <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
-                    {piItems.length} item(s) in PI list
-                  </span>
-                ) : (
-                  <span>Select items from an order and click "Add to PI"</span>
-                )}
-              </div>
-              <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                <button 
-                  type="button"
-                  className="btn btn-primary" 
-                  onClick={handleAddSelectedFromOrder}
-                  disabled={selectedItemsFromOrder.size === 0}
-                  style={{ display: 'flex', alignItems: 'center', gap: 6 }}
-                >
-                  <Plus size={16} /> Add to PI ({selectedItemsFromOrder.size})
-                </button>
-                <button 
-                  type="button"
-                  className="btn btn-outline" 
-                  onClick={handleCloseOrderModal}
-                  style={{ display: 'flex', alignItems: 'center', gap: 6 }}
-                >
-                  <X size={16} /> Close Modal
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      <PiOrderLoaderModal
+        isOpen={orderModalOpen}
+        mode={orderModalMode}
+        onModeChange={setOrderModalMode}
+        orderNumbers={orderNumbers}
+        purchaseNumbers={purchaseNumbers}
+        existingItemIds={addedItemIds}
+        totalPiItemsCount={piItems.length}
+        onAddItems={handleAddSelectedFromOrder}
+        onClose={() => setOrderModalOpen(false)}
+        zIndex={1000}
+      />
 
       {/* ========================================================================= */}
       {/* ITEM PICKER MODAL (FOR MANUAL LINE ITEMS) */}
       {/* ========================================================================= */}
-      {itemPickerIndex !== null && (
-        <div className="modal-backdrop" style={{ 
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 1100, 
-          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 
-        }}>
-          <div style={{ 
-            background: 'var(--bg-card, #ffffff)', borderRadius: 12, width: '100%', maxWidth: 680, 
-            maxHeight: '85vh', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.25)' 
-          }}>
-            <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Search color="var(--primary)" size={18} />
-                Link Inventory Item to Line #{itemPickerIndex + 1}
-              </h3>
-              <button 
-                className="btn btn-ghost btn-icon btn-sm" 
-                onClick={() => { setItemPickerIndex(null); setItemSearchQuery(''); }}
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)' }}>
-              <div style={{ position: 'relative' }}>
-                <Search size={16} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-                <input
-                  type="text"
-                  autoFocus
-                  placeholder="Search item by name, code, order or style..."
-                  value={itemSearchQuery}
-                  onChange={e => setItemSearchQuery(e.target.value)}
-                  style={{ width: '100%', padding: '10px 14px 10px 36px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 13, background: 'var(--bg-base)', color: 'inherit' }}
-                />
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
-                Type at least 2 characters to search inventory items quickly.
-              </div>
-            </div>
-
-            <div style={{ padding: 16, overflowY: 'auto', flex: 1, maxHeight: 400 }}>
-              {loadingItemSearch ? (
-                <div style={{ padding: 30, textAlign: 'center', color: 'var(--text-muted)' }}>
-                  <RefreshCw size={20} className="spin" style={{ marginBottom: 6 }} />
-                  <div>Searching items...</div>
-                </div>
-              ) : itemSearchResults.length === 0 ? (
-                <div style={{ padding: 30, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
-                  {itemSearchQuery.trim().length < 2 ? 'Start typing above to search inventory items...' : 'No matching items found.'}
-                </div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {itemSearchResults.map(it => (
-                    <div
-                      key={it.id}
-                      onClick={() => handleSelectInventoryItem(itemPickerIndex, it)}
-                      style={{
-                        padding: '10px 14px',
-                        borderRadius: 6,
-                        border: '1px solid var(--border)',
-                        background: 'var(--bg-base)',
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        cursor: 'pointer',
-                        transition: 'border-color 0.15s'
-                      }}
-                      onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--primary)'; }}
-                      onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; }}
-                    >
-                      <div style={{ minWidth: 0, flex: 1, marginRight: 12 }}>
-                        <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-main)', marginBottom: 2 }}>
-                          {it.name}
-                        </div>
-                        <div style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-                          <span><strong>Code:</strong> {it.item_code || '-'}</span>
-                          {it.order_number && <span><strong>PO (Order):</strong> {it.order_number}</span>}
-                          {it.purchase_no && <span><strong>Purchase No:</strong> {it.purchase_no}</span>}
-                          {it.style_name && <span><strong>Style:</strong> {it.style_name}</span>}
-                          <span><strong>Stock:</strong> {it.current_stock || 0} {it.unit || 'PCS'}</span>
-                        </div>
-                      </div>
-                      <div style={{ textAlign: 'right', display: 'flex', alignItems: 'center', gap: 12 }}>
-                        <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--primary)' }}>
-                          ${Number(it.unit_price || 0).toFixed(4)}
-                        </div>
-                        <button className="btn btn-primary btn-sm" style={{ padding: '4px 10px', fontSize: 11 }}>
-                          Select
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div style={{ padding: '12px 20px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end' }}>
-              <button className="btn btn-outline btn-sm" onClick={() => { setItemPickerIndex(null); setItemSearchQuery(''); }}>
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <PiItemPickerModal
+        lineIndex={itemPickerIndex}
+        onSelectItem={handleSelectInventoryItem}
+        onClose={() => setItemPickerIndex(null)}
+        zIndex={1100}
+      />
 
       {/* ========================================================================= */}
       {/* TRANSFER TO COMMERCIAL BILL MODAL (USER DEFINED BILL NUMBER) */}
@@ -2750,6 +2223,8 @@ export default function FinancePage() {
           key={fullEditPi.id}
           pi={fullEditPi}
           existingPiNumbers={new Set(records.filter(r => r.id !== fullEditPi.id && r.pi_number).map(r => r.pi_number))}
+          orderNumbers={orderNumbers}
+          purchaseNumbers={purchaseNumbers}
           onClose={() => setFullEditPi(null)}
           onSaved={loadInitialData}
         />

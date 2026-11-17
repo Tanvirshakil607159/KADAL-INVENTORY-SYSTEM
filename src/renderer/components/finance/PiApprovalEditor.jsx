@@ -1,6 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Plus, Trash2, Save, X } from 'lucide-react';
-import { CURRENCY_SYMBOLS, calcTotals } from './piApprovalUtils';
+import { Plus, Trash2, Save, X, PackageCheck, FileText, Search } from 'lucide-react';
+import useStore from '../../store/useStore';
+import { CURRENCY_SYMBOLS, calcTotals, formatPoStyle } from './piApprovalUtils';
+import PiOrderLoaderModal from './PiOrderLoaderModal';
+import PiItemPickerModal from './PiItemPickerModal';
 
 const grid2 = { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 };
 const grid3 = { display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12 };
@@ -19,9 +22,22 @@ const DEFAULT_NOTICE = 'Editing this Proforma Invoice. Changes apply to the pend
  * `form` is produced by toEditForm(); onSave receives the edited form.
  * Optional: `notice` overrides the banner text, `onFormChange` reports live edits.
  */
-export default function PiApprovalEditor({ initialForm, saving, onSave, onCancel, notice = DEFAULT_NOTICE, onFormChange }) {
+export default function PiApprovalEditor({
+  initialForm,
+  saving,
+  onSave,
+  onCancel,
+  notice = DEFAULT_NOTICE,
+  onFormChange,
+  orderNumbers,
+  purchaseNumbers
+}) {
+  const { addToast } = useStore();
   const [form, setForm] = useState(initialForm);
   const [error, setError] = useState('');
+  const [orderModalOpen, setOrderModalOpen] = useState(false);
+  const [orderModalMode, setOrderModalMode] = useState('order');
+  const [itemPickerIndex, setItemPickerIndex] = useState(null);
 
   useEffect(() => {
     if (onFormChange) onFormChange(form);
@@ -48,7 +64,7 @@ export default function PiApprovalEditor({ initialForm, saving, onSave, onCancel
     setForm(prev => ({
       ...prev,
       items: [...prev.items, {
-        itemId: null, itemDescription: '', purchaseNo: prev.purchaseNumber || '',
+        itemId: null, itemCode: '', itemDescription: '', purchaseNo: prev.purchaseNumber || '',
         poStyleNo: '', quantity: '', unit: 'PCS', unitPrice: ''
       }]
     }));
@@ -56,6 +72,84 @@ export default function PiApprovalEditor({ initialForm, saving, onSave, onCancel
 
   const removeItem = (idx) => {
     setForm(prev => ({ ...prev, items: prev.items.filter((_, i) => i !== idx) }));
+  };
+
+  const existingItemIds = useMemo(
+    () => new Set((form.items || []).map(it => it.itemId).filter(Boolean)),
+    [form.items]
+  );
+
+  const handleAddFromOrderModal = (chosenItems, { mode, activeVal, selectedPurchaseNo }) => {
+    const mapped = chosenItems.map(it => {
+      const rate = Number(it.unit_price) || 0;
+      const qty = Number(it.order_quantity) || Number(it.current_stock) || 1000;
+      const itPurch = it.purchase_no || it.purchaseNo || (mode === 'purchase' ? selectedPurchaseNo : '') || form.purchaseNumber || '';
+      return {
+        itemId: it.id,
+        itemCode: it.item_code || '',
+        itemDescription: it.name || '',
+        purchaseNo: itPurch,
+        poStyleNo: formatPoStyle(it),
+        quantity: qty,
+        unit: (it.unit || 'PCS').toUpperCase(),
+        unitPrice: rate
+      };
+    });
+
+    let addedCount = 0;
+    setForm(prev => {
+      const existingIds = new Set(prev.items.map(it => it.itemId).filter(Boolean));
+      const toAdd = mapped.filter(it => !existingIds.has(it.itemId));
+      addedCount = toAdd.length;
+      const nextPurchaseNumber = prev.purchaseNumber
+        || (mode === 'purchase' ? selectedPurchaseNo : '')
+        || chosenItems.find(it => it.purchase_no)?.purchase_no
+        || '';
+      return {
+        ...prev,
+        purchaseNumber: nextPurchaseNumber,
+        items: [...prev.items, ...toAdd]
+      };
+    });
+
+    if (addedCount > 0) {
+      addToast('success', `Linked & added ${addedCount} item(s) from ${mode === 'order' ? 'Order' : 'Purchase Order'} ${activeVal} to PI`);
+    } else if (mapped.length > 0) {
+      addToast('info', 'Selected item(s) are already linked in this PI');
+    }
+  };
+
+  const handleSelectInventoryItem = (index, it) => {
+    if (!it) return;
+    const itPurch = it.purchase_no || it.purchaseNo || it.purchase_number || it.purchaseNumber || form.purchaseNumber || '';
+    setForm(prev => ({
+      ...prev,
+      purchaseNumber: prev.purchaseNumber || itPurch || '',
+      items: prev.items.map((item, idx) => {
+        if (idx !== index) return item;
+        const rate = Number(it.unit_price) || 0;
+        const qty = Number(item.quantity) || Number(it.order_quantity) || 1000;
+        return {
+          ...item,
+          itemId: it.id,
+          itemCode: it.item_code || '',
+          itemDescription: it.name || item.itemDescription || '',
+          purchaseNo: itPurch || item.purchaseNo || '',
+          poStyleNo: formatPoStyle(it) || item.poStyleNo || '',
+          unit: (it.unit || 'PCS').toUpperCase(),
+          quantity: qty,
+          unitPrice: rate
+        };
+      })
+    }));
+    setItemPickerIndex(null);
+  };
+
+  const handleClearItemLink = (index) => {
+    setForm(prev => ({
+      ...prev,
+      items: prev.items.map((item, idx) => (idx === index ? { ...item, itemId: null, itemCode: '' } : item))
+    }));
   };
 
   const totals = useMemo(() => calcTotals(form.items, form.currency), [form.items, form.currency]);
@@ -145,23 +239,44 @@ export default function PiApprovalEditor({ initialForm, saving, onSave, onCancel
         </div>
       </div>
 
-      <div style={{ ...sectionTitle, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div style={{ ...sectionTitle, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
         <span>Items ({form.items.length})</span>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={addItem}><Plus size={14} /> Add Item</button>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            className="btn btn-outline btn-sm"
+            onClick={() => { setOrderModalMode('order'); setOrderModalOpen(true); }}
+            style={{ display: 'flex', alignItems: 'center', gap: 5, borderColor: 'var(--primary)', color: 'var(--primary)' }}
+          >
+            <PackageCheck size={14} /> Load from Order
+          </button>
+          <button
+            type="button"
+            className="btn btn-outline btn-sm"
+            onClick={() => { setOrderModalMode('purchase'); setOrderModalOpen(true); }}
+            style={{ display: 'flex', alignItems: 'center', gap: 5, borderColor: 'var(--primary)', color: 'var(--primary)' }}
+          >
+            <FileText size={14} /> Load from Purchase Order
+          </button>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={addItem}>
+            <Plus size={14} /> Add Item
+          </button>
+        </div>
       </div>
       <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
-        <table className="data-table table-sm" style={{ minWidth: 860, tableLayout: 'fixed' }}>
+        <table className="data-table table-sm" style={{ minWidth: 960, tableLayout: 'fixed' }}>
           <thead>
             <tr>
-              <th style={{ width: 36 }}>#</th>
-              <th style={{ width: '24%' }}>Description</th>
-              <th style={{ width: '14%' }}>Purchase No</th>
-              <th style={{ width: '18%' }}>PO / Style</th>
-              <th style={{ width: 80 }}>Qty</th>
-              <th style={{ width: 70 }}>Unit</th>
-              <th style={{ width: 90 }}>Rate</th>
-              <th style={{ width: 100, textAlign: 'right' }}>Total</th>
-              <th style={{ width: 40 }}></th>
+              <th style={{ width: 34 }}>#</th>
+              <th style={{ width: 120 }}>Inventory Link</th>
+              <th style={{ width: '21%' }}>Description</th>
+              <th style={{ width: '13%' }}>Purchase No</th>
+              <th style={{ width: '17%' }}>PO / Style</th>
+              <th style={{ width: 78 }}>Qty</th>
+              <th style={{ width: 65 }}>Unit</th>
+              <th style={{ width: 85 }}>Rate</th>
+              <th style={{ width: 95, textAlign: 'right' }}>Total</th>
+              <th style={{ width: 38 }}></th>
             </tr>
           </thead>
           <tbody>
@@ -170,6 +285,66 @@ export default function PiApprovalEditor({ initialForm, saving, onSave, onCancel
               return (
                 <tr key={idx}>
                   <td>{idx + 1}</td>
+                  <td>
+                    {it.itemId ? (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <span
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            padding: '2px 6px',
+                            borderRadius: 4,
+                            fontSize: 10,
+                            fontWeight: 600,
+                            background: 'rgba(16, 185, 129, 0.12)',
+                            color: '#10b981',
+                            border: '1px solid rgba(16, 185, 129, 0.25)',
+                            whiteSpace: 'nowrap',
+                            maxWidth: 88,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis'
+                          }}
+                          title={it.itemCode || `Linked (#${it.itemId})`}
+                        >
+                          {it.itemCode || 'Linked'}
+                        </span>
+                        <button
+                          type="button"
+                          title="Unlink inventory item"
+                          onClick={() => handleClearItemLink(idx)}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            cursor: 'pointer',
+                            padding: '2px 3px',
+                            color: 'var(--text-muted)',
+                            fontSize: 11,
+                            lineHeight: 1
+                          }}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn btn-outline btn-sm"
+                        onClick={() => setItemPickerIndex(idx)}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 4,
+                          fontSize: 10,
+                          padding: '2px 7px',
+                          borderRadius: 4,
+                          color: 'var(--text-muted)',
+                          border: '1px dashed var(--border)'
+                        }}
+                      >
+                        <Search size={10} /> Link Item
+                      </button>
+                    )}
+                  </td>
                   <td><input className="form-input" style={cellInput} value={it.itemDescription} onChange={e => setItem(idx, 'itemDescription', e.target.value)} /></td>
                   <td><input className="form-input" style={cellInput} value={it.purchaseNo} onChange={e => setItem(idx, 'purchaseNo', e.target.value)} /></td>
                   <td><input className="form-input" style={cellInput} value={it.poStyleNo} onChange={e => setItem(idx, 'poStyleNo', e.target.value)} /></td>
@@ -186,7 +361,7 @@ export default function PiApprovalEditor({ initialForm, saving, onSave, onCancel
               );
             })}
             {form.items.length === 0 && (
-              <tr><td colSpan={9} style={{ textAlign: 'center', padding: 16, color: 'var(--text-muted)' }}>No items. Click “Add Item”.</td></tr>
+              <tr><td colSpan={10} style={{ textAlign: 'center', padding: 16, color: 'var(--text-muted)' }}>No items. Click “Load from Order”, “Load from Purchase Order”, or “Add Item”.</td></tr>
             )}
           </tbody>
         </table>
@@ -232,6 +407,26 @@ export default function PiApprovalEditor({ initialForm, saving, onSave, onCancel
           <Save size={14} /> {saving ? 'Saving...' : 'Save Changes'}
         </button>
       </div>
+
+      <PiOrderLoaderModal
+        isOpen={orderModalOpen}
+        mode={orderModalMode}
+        onModeChange={setOrderModalMode}
+        orderNumbers={orderNumbers}
+        purchaseNumbers={purchaseNumbers}
+        existingItemIds={existingItemIds}
+        totalPiItemsCount={form.items.length}
+        onAddItems={handleAddFromOrderModal}
+        onClose={() => setOrderModalOpen(false)}
+        zIndex={1350}
+      />
+
+      <PiItemPickerModal
+        lineIndex={itemPickerIndex}
+        onSelectItem={handleSelectInventoryItem}
+        onClose={() => setItemPickerIndex(null)}
+        zIndex={1350}
+      />
     </div>
   );
 }

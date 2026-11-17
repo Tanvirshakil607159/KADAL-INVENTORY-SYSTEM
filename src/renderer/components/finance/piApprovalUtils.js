@@ -8,6 +8,29 @@ import { numberToCurrencyWords } from '../../utils/numberToWords';
 
 export const CURRENCY_SYMBOLS = { USD: '$', BDT: '৳', EUR: '€' };
 
+/** Format Order Number and Style Name into clean "Order: ... / Style: ..." string. */
+export const formatPoStyle = (it) => {
+  if (!it) return '';
+  const val = it.po_style_no || it.poStyleNo || '';
+  const po = it.order_number || it.orderNumber || '';
+  const style = it.style_name || it.styleName || '';
+
+  if (val && val !== '-') {
+    let cleanVal = val.replace(/\s*\/\s*Purchase(?:\s*No)?\s*[:=]\s*[^\n;]+/i, '').trim();
+    if (po && !cleanVal.toLowerCase().includes('order:') && !cleanVal.toLowerCase().includes('po:') && !cleanVal.includes(po)) {
+      cleanVal = `Order: ${po} / ` + cleanVal.replace(/^Style:\s*/i, 'Style: ');
+    }
+    cleanVal = cleanVal.replace(/^PO:\s*/i, 'Order: ').replace(/\s*\/\s*PO:\s*/gi, ' / Order: ');
+    return cleanVal || '-';
+  }
+
+  const parts = [];
+  if (po) parts.push(`Order: ${po}`);
+  if (style) parts.push(`Style: ${style}`);
+
+  return parts.length > 0 ? parts.join(' / ') : '-';
+};
+
 export const parseApprovalData = (raw) => {
   if (!raw) return {};
   if (typeof raw === 'string') {
@@ -123,6 +146,7 @@ export const toEditForm = (raw) => {
     items: items.map((it) => ({
       ...it,
       itemId: it.itemId || it.item_id || null,
+      itemCode: str(it.itemCode || it.item_code),
       itemDescription: str(it.itemDescription || it.item_description),
       purchaseNo: str(it.purchaseNo || it.purchase_no),
       poStyleNo: str(it.poStyleNo || it.po_style_no),

@@ -15,7 +15,7 @@ import { buildPrintPi, toEditForm, buildApprovalPayload, buildPiUpdatePayload } 
  *  - onClose(): close modal
  *  - onSaved(): called after a successful save (parent reloads data)
  */
-export default function PiEditModal({ pi: rawPi, existingPiNumbers, onClose, onSaved }) {
+export default function PiEditModal({ pi: rawPi, existingPiNumbers, orderNumbers, purchaseNumbers, onClose, onSaved }) {
   const { addToast } = useStore();
   const [tab, setTab] = useState('edit');
   const [saving, setSaving] = useState(false);
@@ -111,7 +111,7 @@ export default function PiEditModal({ pi: rawPi, existingPiNumbers, onClose, onS
       <div
         id="pi-edit-modal"
         style={{
-          background: 'var(--bg-card, #ffffff)', borderRadius: 12, width: '96vw', maxWidth: 1000,
+          background: 'var(--bg-card, #ffffff)', borderRadius: 12, width: '96vw', maxWidth: 1120,
           maxHeight: '94vh', display: 'flex', flexDirection: 'column',
           boxShadow: '0 25px 50px -12px rgba(0,0,0,0.3)', border: '1px solid var(--border)'
         }}
@@ -190,6 +190,8 @@ export default function PiEditModal({ pi: rawPi, existingPiNumbers, onClose, onS
               onSave={handleSave}
               onCancel={onClose}
               onFormChange={handleFormChange}
+              orderNumbers={orderNumbers}
+              purchaseNumbers={purchaseNumbers}
               notice="Editing a saved Proforma Invoice. Changes apply immediately upon clicking Save Changes. Switch to PDF Preview to verify before saving."
             />
           </div>
