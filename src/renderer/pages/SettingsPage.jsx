@@ -187,9 +187,9 @@ function CompanySettings() {
             <input type="checkbox" checked={settings.require_reissue_approval !== 'false'} onChange={e => set('require_reissue_approval', e.target.checked ? 'true' : 'false')} disabled={!canEdit} />
             Require Admin Approval for Reissues (Non-Admins)
           </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontSize: 13 }}>
-            <input type="checkbox" checked={settings.require_pi_approval !== 'false'} onChange={e => set('require_pi_approval', e.target.checked ? 'true' : 'false')} disabled={!canEdit} />
-            Require Admin Approval for Proforma Invoices (Non-Admins)
+          <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'default', fontSize: 13 }}>
+            <input type="checkbox" checked={true} disabled readOnly />
+            Require Admin or Super Admin Approval for Creating New Proforma Invoices (Mandatory for Non-Admins)
           </label>
         </div>
       </div>

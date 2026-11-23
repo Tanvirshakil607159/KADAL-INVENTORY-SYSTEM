@@ -110,12 +110,16 @@ const FinanceService = {
 
   async create(data) {
     const user = await AuthService.getCurrentUser();
-    const isAdmin = ['Admin', 'Super Admin'].includes(user?.roleName) || ['Admin', 'Super Admin'].includes(user?.role_name);
-    const requireApproval = (await SettingsRepo.get('require_pi_approval')) !== 'false';
+    if (!user || !user.id) {
+      throw new Error('Session expired or user not found. Please log in again.');
+    }
+    const roleName = user?.roleName || user?.role_name || '';
+    const isAdmin = roleName === 'Admin' || roleName === 'Super Admin';
 
     const sanitized = this._sanitizePayload(data, user?.id);
 
-    if (!isAdmin && requireApproval && !data._bypassApproval) {
+    // Non-admins always require Admin or Super Admin approval to create a new PI
+    if (!isAdmin && !data._bypassApproval) {
       let piNumber = sanitized.piNumber;
       if (!piNumber || !piNumber.trim()) {
         piNumber = await FinanceRepo.getNextNumber(sanitized.applicantName);

@@ -1183,7 +1183,7 @@ export default function FinancePage() {
                   gap: 8
                 }}>
                   <Clock size={15} color="var(--primary)" />
-                  <span>As a non-admin, your Proforma Invoice will be submitted for Admin approval before being activated.</span>
+                  <span>As a non-admin, your Proforma Invoice will be submitted for Admin or Super Admin approval before being activated.</span>
                 </div>
               )}
 
@@ -1644,7 +1644,7 @@ export default function FinancePage() {
                   disabled={savingPi} 
                   style={{ display: 'flex', alignItems: 'center', gap: 6 }}
                 >
-                  <CheckCircle size={16} /> {savingPi ? 'Submitting...' : (isAdmin ? 'Confirm & Approve Proforma Invoice' : 'Submit for Admin Approval')}
+                  <CheckCircle size={16} /> {savingPi ? 'Submitting...' : (isAdmin ? 'Confirm & Approve Proforma Invoice' : 'Submit for Admin / Super Admin Approval')}
                 </button>
               </div>
 
@@ -2070,7 +2070,7 @@ export default function FinancePage() {
                 setPreviewPi(null);
                 await handleSavePi('APPROVED');
               } : null}
-              confirmLabel="Confirm & Approve PI"
+              confirmLabel={isAdmin ? 'Confirm & Approve PI' : 'Submit for Admin / Super Admin Approval'}
               onExportPdf={async (exportData) => {
                 try {
                   const base = typeof previewPi === 'object' ? previewPi : { id: previewPi };

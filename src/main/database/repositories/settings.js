@@ -6,6 +6,7 @@ const GLOBAL_KEYS = [
   'require_challan_approval', 'require_inventory_approval', 'require_gate_pass_approval',
   'allow_challan_to_issue', 'allow_inventory_to_produce', 'public_web_url', 'barcode_format',
   'requisition_prefix', 'require_requisition_approval', 'require_issue_approval', 'require_reissue_approval',
+  'require_pi_approval',
 ];
 
 const SettingsRepo = {

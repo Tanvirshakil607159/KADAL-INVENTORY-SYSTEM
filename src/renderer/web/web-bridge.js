@@ -97,6 +97,7 @@ const USER_COLUMNS = 'id, username, full_name, role_id, is_active, last_login, c
 // ---- Approval routing (same rules as the desktop services) ----
 // Payload objects being executed by an approved request (skip the approval check for them only)
 const approvedMovements = new WeakSet();
+const approvedPis = new WeakSet();
 const webRequestIds = new Map(); // stock movement requestId -> result (idempotency per browser tab)
 const approvedRequisitions = new WeakSet();
 
@@ -1759,9 +1760,14 @@ export const webBridge = {
       let result;
       // Execute the request first; it is only marked APPROVED once the work has really been done.
       switch (req.type) {
-        case 'CREATE_PI':
-          result = unwrap(await webBridge.finance.create({ ...payload, _bypassApproval: true }));
+        case 'CREATE_PI': {
+          if (!isAdminUser(getWebUser())) {
+            throw new Error('Only Admin or Super Admin can approve Proforma Invoice requests.');
+          }
+          approvedPis.add(payload);
+          result = unwrap(await webBridge.finance.create(payload));
           break;
+        }
         case 'CREATE_CHALLAN':
           result = await createChallanWithPolicy(payload, { skipApproval: true });
           break;
@@ -1804,6 +1810,10 @@ export const webBridge = {
     reject: (id, notes) => wrap(async () => {
       const supabase = getSupabase();
       if (!supabase) throw new Error('Supabase not configured');
+      const { data: req } = await supabase.from('approvals').select('type').eq('id', id).maybeSingle();
+      if (req?.type === 'CREATE_PI' && !isAdminUser(getWebUser())) {
+        throw new Error('Only Admin or Super Admin can reject Proforma Invoice requests.');
+      }
       const { error } = await supabase.from('approvals').update({
         status: 'REJECTED',
         notes: notes || null,
@@ -1981,7 +1991,8 @@ export const webBridge = {
     create: (data) => wrap(async () => {
       const supabase = getSupabase();
       if (!supabase) throw new Error('Database not connected');
-      const currentUser = JSON.parse(sessionStorage.getItem('kadal_user') || '{}');
+      const currentUser = getWebUser();
+      if (!currentUser?.id) throw new Error('Session expired or user not found. Please log in again.');
 
       let finalNotes = data.notes || '';
       const pNum = (data.purchaseNumber || data.purchaseNo || '').trim();
@@ -1989,33 +2000,29 @@ export const webBridge = {
         finalNotes = finalNotes ? `${finalNotes} | Purchase No: ${pNum}` : `Purchase No: ${pNum}`;
       }
 
-      const isAdmin = currentUser.roleName === 'Admin' || currentUser.roleName === 'Super Admin';
-      if (!isAdmin && !data._bypassApproval) {
-        const { data: settingRow } = await supabase.from('settings').select('value').eq('key', 'require_pi_approval').maybeSingle();
-        const requireApproval = settingRow ? settingRow.value !== 'false' : true;
-
-        if (requireApproval) {
-          let piNumber = data.piNumber;
-          if (!piNumber || !piNumber.trim()) {
-            const next = await webBridge.finance.getNextNumber(data.applicantName);
-            piNumber = next?.data || next;
-          }
-          const approvalData = {
-            ...data,
-            piNumber,
-            createdBy: currentUser.id || null,
-            requesterName: currentUser.fullName || currentUser.username || 'User'
-          };
-          const { data: insertedApproval, error: appErr } = await supabase.from('approvals').insert([{
-            type: 'CREATE_PI',
-            data: JSON.stringify(approvalData),
-            requested_by: currentUser.id || null,
-            status: 'PENDING'
-          }]).select().single();
-          if (appErr) throw appErr;
-
-          return { success: true, pendingApproval: true, requestId: insertedApproval.id, piNumber };
+      const isAdmin = isAdminUser(currentUser);
+      const isApprovedExecution = approvedPis.has(data);
+      if (!isAdmin && !isApprovedExecution) {
+        let piNumber = data.piNumber;
+        if (!piNumber || !piNumber.trim()) {
+          const next = await webBridge.finance.getNextNumber(data.applicantName);
+          piNumber = next?.data || next;
         }
+        const approvalData = {
+          ...data,
+          piNumber,
+          createdBy: currentUser.id || null,
+          requesterName: currentUser.fullName || currentUser.username || 'User'
+        };
+        const { data: insertedApproval, error: appErr } = await supabase.from('approvals').insert([{
+          type: 'CREATE_PI',
+          data: JSON.stringify(approvalData),
+          requested_by: currentUser.id || null,
+          status: 'PENDING'
+        }]).select().single();
+        if (appErr) throw appErr;
+
+        return { success: true, pendingApproval: true, requestId: insertedApproval.id, piNumber };
       }
 
       const { data: inserted, error: piErr } = await supabase.from('proforma_invoices').insert([{
@@ -2046,7 +2053,7 @@ export const webBridge = {
         accepted_by: data.acceptedBy || null,
         status: data.status || 'ACTIVE',
         notes: finalNotes || null,
-        created_by: currentUser.id || null
+        created_by: data.createdBy || data.created_by || currentUser.id || null
       }]).select().single();
 
       if (piErr) throw piErr;

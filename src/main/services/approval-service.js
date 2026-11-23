@@ -63,6 +63,11 @@ const ApprovalService = {
           break;
         }
         case 'CREATE_PI': {
+          const approver = await AuthService.getCurrentUser();
+          const role = approver?.roleName || approver?.role_name || '';
+          if (role !== 'Admin' && role !== 'Super Admin') {
+            throw new Error('Only Admin or Super Admin can approve Proforma Invoice requests.');
+          }
           const FinanceService = require('./finance-service');
           result = await FinanceService._executeCreate(data);
           break;
@@ -92,6 +97,13 @@ const ApprovalService = {
 
     const data = typeof request.data === 'string' ? JSON.parse(request.data) : request.data;
     const user = await AuthService.getCurrentUser();
+
+    if (request.type === 'CREATE_PI') {
+      const role = user?.roleName || user?.role_name || '';
+      if (role !== 'Admin' && role !== 'Super Admin') {
+        throw new Error('Only Admin or Super Admin can reject Proforma Invoice requests.');
+      }
+    }
 
     // Store rejected challans in challan history with CANCELLED status
     if (request.type === 'CREATE_CHALLAN') {
