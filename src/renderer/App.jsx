@@ -11,6 +11,7 @@ import ReportsPage from './pages/ReportsPage';
 import SettingsPage from './pages/SettingsPage';
 import BackupPage from './pages/BackupPage';
 import Sidebar from './components/layout/Sidebar';
+import TabBar from './components/layout/TabBar';
 import TopBar from './components/layout/TopBar';
 import DesktopBar from './components/layout/DesktopBar';
 import ToastContainer from './components/common/ToastContainer';
@@ -29,10 +30,11 @@ import UpdateProgress from './components/common/UpdateProgress';
 import GlobalModalManager from './components/modals/GlobalModalManager';
 import ChallanVerificationPage from './pages/ChallanVerificationPage';
 import LandingPage from './pages/LandingPage';
+import NewTabPage from './pages/NewTabPage';
 
 // Show the landing page by default for both web and electron
 export default function App() {
-  const { currentPage, isLoggedIn, user, setUser, showLanding, setShowLanding } = useStore();
+  const { tabs, activeTabId, isLoggedIn, user, setUser, showLanding, setShowLanding } = useStore();
   const [hasCloudConfig, setHasCloudConfig] = React.useState(null);
 
   // Parse verification challan number from path or hash
@@ -176,8 +178,8 @@ export default function App() {
     );
   }
 
-  const renderPage = () => {
-    switch (currentPage) {
+  const renderPage = (moduleId) => {
+    switch (moduleId) {
       case 'dashboard': return <DashboardPage />;
       case 'inventory': return <InventoryPage />;
       case 'stock-in-out': return <StockInOutPage />;
@@ -195,6 +197,7 @@ export default function App() {
       case 'requisition': return <RequisitionPage />;
       case 'settings': return <SettingsPage />;
       case 'backup': return <BackupPage />;
+      case 'new-tab': return <NewTabPage />;
       default: return <DashboardPage />;
     }
   };
@@ -205,10 +208,21 @@ export default function App() {
       <div className="app-layout">
         <Sidebar />
         <div className="main-content">
+          <TabBar />
           <TopBar />
           <NotificationManager />
           <UpdateProgress />
-          <div className="page-content">{renderPage()}</div>
+          <div className="page-content">
+            {tabs.map((tab) => (
+              <div
+                key={`${tab.id}-${tab.refreshKey || 0}`}
+                className={`tab-pane ${tab.id === activeTabId ? 'active' : 'hidden'}`}
+                aria-hidden={tab.id !== activeTabId}
+              >
+                {renderPage(tab.moduleId)}
+              </div>
+            ))}
+          </div>
         </div>
         <ToastContainer />
         <GlobalModalManager />

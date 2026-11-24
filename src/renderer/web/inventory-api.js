@@ -1,4 +1,6 @@
 import { getSupabase } from './supabase-client';
+import { syncItemToSupabasePis } from '../../shared/pi-item-sync.mjs';
+import { numberToCurrencyWords } from '../utils/numberToWords';
 
 // Canonical buyer names — the "correct" format for each known buyer
 const CANONICAL_BUYERS = [
@@ -230,6 +232,13 @@ export const inventoryApi = {
       return insertedId;
     },
     update: async (id, data) => {
+      const supabase = getSupabase();
+      const { data: existingItem } = await supabase
+        .from('items')
+        .select('*')
+        .eq('id', id)
+        .maybeSingle();
+
       const mapped = {
         name: data.name,
         category_id: data.categoryId || null,
@@ -249,8 +258,9 @@ export const inventoryApi = {
         conversion_rate: data.currency === 'USD' ? (Number(data.conversionRate) || null) : null,
         source_type: data.sourceType || 'SOURCE'
       };
-      const { error } = await getSupabase().from('items').update(mapped).eq('id', id);
+      const { error } = await supabase.from('items').update(mapped).eq('id', id);
       if (error) throw error;
+      await syncItemToSupabasePis(supabase, id, data, existingItem, numberToCurrencyWords);
       return true;
     },
     delete: async (id) => {

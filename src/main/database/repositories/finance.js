@@ -1,5 +1,6 @@
 const { dbPrepare, dbTransaction, getSupabase, isCloudEnabled } = require('../connection');
 const { dayStartIso, dayEndIso, dayStartSql, dayEndSql, inLocalRange } = require('../../utils/date-range');
+const { numberToCurrencyWords } = require('../../utils/number-to-words');
 
 function extractPrefix(name) {
   if (!name) return 'KADAL';
@@ -1373,6 +1374,96 @@ const FinanceRepo = {
       billDate,
       challanNumbers
     };
+  },
+
+  /** Propagate edited inventory item fields to linked non-BILLED PIs and pending CREATE_PI approvals. */
+  async syncItemUpdates(itemId, updatedItem, oldItem = null) {
+    if (!itemId || !updatedItem) return;
+
+    const {
+      isPiLockedForItemSync,
+      buildPiLineFieldsFromItem,
+      computePiHeaderTotals,
+      updateNotesPurchaseNo,
+      syncPendingCreatePiPayload,
+      syncItemToSupabasePis,
+    } = await import('../../../shared/pi-item-sync.mjs');
+
+    if (isCloudEnabled()) {
+      try {
+        await syncItemToSupabasePis(getSupabase(), itemId, updatedItem, oldItem, numberToCurrencyWords);
+      } catch (cloudErr) {
+        console.warn('[FinanceRepo] Cloud syncItemUpdates failed:', cloudErr.message);
+      }
+    }
+
+    // Always keep local SQLite PIs and pending approvals in sync when present locally
+    try {
+      const oldPurchaseNo = oldItem ? String(oldItem.purchaseNo ?? oldItem.purchase_no ?? '').trim() : '';
+      const newPurchaseNo = updatedItem.purchaseNo !== undefined || updatedItem.purchase_no !== undefined
+        ? String(updatedItem.purchaseNo ?? updatedItem.purchase_no ?? '').trim()
+        : oldPurchaseNo;
+
+      let localChanged = false;
+      const matchedPiRows = dbPrepare('SELECT DISTINCT pi_id FROM proforma_invoice_items WHERE item_id = ?').all(itemId);
+      const piIds = matchedPiRows.map(r => r.pi_id).filter(Boolean);
+      let activeChallanPiIds = new Set();
+      if (piIds.length > 0) {
+        const placeholders = piIds.map(() => '?').join(',');
+        const chRows = dbPrepare(
+          `SELECT DISTINCT pi_id FROM challans WHERE pi_id IN (${placeholders}) AND status = 'ACTIVE'`
+        ).all(...piIds);
+        activeChallanPiIds = new Set(chRows.map(r => String(r.pi_id)));
+      }
+
+      for (const piId of piIds) {
+        const pi = dbPrepare('SELECT id, status, bill_number, challan_ids, currency, notes FROM proforma_invoices WHERE id = ?').get(piId);
+        const allLines = dbPrepare('SELECT * FROM proforma_invoice_items WHERE pi_id = ? ORDER BY sl_no ASC, id ASC').all(piId);
+        if (isPiLockedForItemSync({ ...pi, items: allLines }, activeChallanPiIds)) continue;
+        const updatedLines = allLines.map((line) => {
+          if (String(line.item_id) !== String(itemId)) return line;
+          const synced = buildPiLineFieldsFromItem(updatedItem, line, oldItem);
+          dbPrepare(`
+            UPDATE proforma_invoice_items SET
+              item_description = ?, po_style_no = ?, quantity = ?, unit = ?, unit_price = ?, total_amount = ?
+            WHERE id = ?
+          `).run(
+            synced.item_description, synced.po_style_no, synced.quantity,
+            synced.unit, synced.unit_price, synced.total_amount, line.id
+          );
+          localChanged = true;
+          return { ...line, ...synced };
+        });
+
+        const headerTotals = computePiHeaderTotals(updatedLines, pi.currency || 'USD', numberToCurrencyWords);
+        const nextNotes = updateNotesPurchaseNo(pi.notes, oldPurchaseNo, newPurchaseNo);
+        dbPrepare(`
+          UPDATE proforma_invoices SET
+            total_quantity = ?, total_amount = ?, amount_in_words = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `).run(headerTotals.total_quantity, headerTotals.total_amount, headerTotals.amount_in_words, nextNotes, piId);
+        localChanged = true;
+      }
+
+      const pendingApprovals = dbPrepare(
+        "SELECT id, data FROM approvals WHERE type = 'CREATE_PI' AND status = 'PENDING'"
+      ).all();
+      for (const app of pendingApprovals) {
+        let parsed;
+        try { parsed = JSON.parse(app.data); } catch { continue; }
+        const { changed, payload } = syncPendingCreatePiPayload(parsed, itemId, updatedItem, oldItem, numberToCurrencyWords);
+        if (!changed) continue;
+        dbPrepare('UPDATE approvals SET data = ? WHERE id = ?').run(JSON.stringify(payload), app.id);
+        localChanged = true;
+      }
+
+      if (localChanged) {
+        const { saveDatabase } = require('../connection');
+        if (typeof saveDatabase === 'function') saveDatabase();
+      }
+    } catch (sqliteErr) {
+      console.warn('[FinanceRepo] Local syncItemUpdates warning:', sqliteErr.message);
+    }
   }
 };
 

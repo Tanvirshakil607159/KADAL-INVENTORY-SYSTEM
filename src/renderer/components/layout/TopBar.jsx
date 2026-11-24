@@ -1,21 +1,17 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import useStore from '../../store/useStore';
+import { PAGE_TITLES } from '../../utils/moduleNavigation';
 import { RotateCw, Home, PanelLeft, Pause, Play, Sun, Moon } from 'lucide-react';
-
-const pageTitles = {
-  dashboard: 'Dashboard', inventory: 'Inventory Management',
-  'stock-in-out': 'Stock In & Out', challan: 'Create Delivery Challan',
-  'challan-history': 'Challan History', 'challan-receipt': 'Challan Receipt',
-  finance: 'Finance', reports: 'Reports', settings: 'Settings',
-  backup: 'Backup & Restore', approvals: 'Approvals',
-  'gate-pass': 'Gate Pass Management', issue: 'Inventory Issue',
-  production: 'Production', requisition: 'Requisition',
-  'pending-items': 'Pending Items', warehouses: 'Warehouses',
-};
 
 export default function TopBar() {
   const { currentPage, user, setShowLanding, sidebarOpen, setSidebarOpen,
-    motionEnabled, setMotionEnabled, theme, setTheme } = useStore();
+    motionEnabled, setMotionEnabled, theme, setTheme, refreshTab } = useStore();
+
+  const currentTitle = PAGE_TITLES[currentPage] || 'KADAL';
+
+  useEffect(() => {
+    document.title = `KADAL Inventory — ${currentTitle}`;
+  }, [currentTitle]);
 
   return (
     <header className="topbar">
@@ -25,7 +21,7 @@ export default function TopBar() {
           onClick={() => setSidebarOpen(!sidebarOpen)}><PanelLeft size={19} /></button>
         <div>
           <span className="workspace-eyebrow">KADAL / WORKSPACE</span>
-          <h2 className="topbar-title">{pageTitles[currentPage] || 'KADAL'}</h2>
+          <h2 className="topbar-title">{currentTitle}</h2>
         </div>
       </div>
       <div className="topbar-tools">
@@ -40,8 +36,8 @@ export default function TopBar() {
         </div>
         <button className="btn-icon topbar-home" onClick={() => setShowLanding(true)}
           title="Home / Showcase" aria-label="Home / Showcase"><Home size={17} /></button>
-        <button className="btn-icon topbar-refresh" onClick={() => window.location.reload()}
-          title="Refresh Application" aria-label="Refresh Application"><RotateCw size={17} /></button>
+        <button className="btn-icon topbar-refresh" onClick={(e) => e.shiftKey ? window.location.reload() : refreshTab()}
+          title="Refresh Current Tab (Shift+Click for full reload)" aria-label="Refresh Current Tab"><RotateCw size={17} /></button>
         <div className="topbar-user">
           <div className="topbar-user-avatar" aria-hidden="true">{user?.fullName?.charAt(0) || 'U'}</div>
           <div className="user-info"><strong>{user?.fullName}</strong><span>{user?.roleName}</span></div>

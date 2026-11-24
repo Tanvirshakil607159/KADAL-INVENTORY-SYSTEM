@@ -2,6 +2,7 @@ const ItemsRepo = require('../database/repositories/items');
 const StockTransactionsRepo = require('../database/repositories/stock-transactions');
 const ItemPriceTiersRepo = require('../database/repositories/item-price-tiers');
 const AuditLogsRepo = require('../database/repositories/audit-logs');
+const FinanceRepo = require('../database/repositories/finance');
 const SettingsRepo = require('../database/repositories/settings');
 const AuthService = require('./auth-service');
 const WarehousesRepo = require('../database/repositories/warehouses');
@@ -184,6 +185,7 @@ const InventoryService = {
     if (!existing) throw new Error('Item not found');
     if (!data.name) throw new Error('Item name is required');
     await ItemsRepo.update(id, data);
+    await FinanceRepo.syncItemUpdates(id, data, existing);
     AuditLogsRepo.create({ userId: AuthService.getCurrentUser()?.id, action: 'UPDATE', entityType: 'item', entityId: id, oldValue: { name: existing.name }, newValue: data });
     return { success: true };
   },

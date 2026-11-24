@@ -1,28 +1,10 @@
 import React from 'react';
 import useStore from '../../store/useStore';
-import { Home, LayoutDashboard, Package, PackageOpen, Warehouse, ClipboardList, Truck, BarChart3, Settings, HardDrive, LogOut, CheckCircle, Send, Factory, ChevronRight, ArrowDownUp, Landmark, PackageCheck, Hourglass, X } from 'lucide-react';
-
-const navItems = [
-  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { id: 'inventory', label: 'Inventory', icon: Package },
-  { id: 'stock-in-out', label: 'Stock In & Out', icon: ArrowDownUp },
-  { id: 'pending-items', label: 'Pending Items', icon: Hourglass },
-  { id: 'warehouses', label: 'Warehouses', icon: Warehouse },
-  { id: 'challan', label: 'Create Challan', icon: ClipboardList },
-  { id: 'challan-receipt', label: 'Challan Receipt', icon: PackageCheck },
-  { id: 'finance', label: 'Finance', icon: Landmark },
-  { id: 'approvals', label: 'Approvals', icon: CheckCircle },
-  { id: 'gate-pass', label: 'Gate Pass', icon: Truck },
-  { id: 'requisition', label: 'Requisition', icon: Send },
-  { id: 'issue', label: 'Issue', icon: PackageOpen },
-  { id: 'production', label: 'Production', icon: Factory },
-  { id: 'reports', label: 'Reports', icon: BarChart3 },
-  { id: 'settings', label: 'Settings', icon: Settings },
-  { id: 'backup', label: 'Backup & Restore', icon: HardDrive },
-];
+import { getVisibleNavItems } from '../../utils/moduleNavigation';
+import { Home, PackageOpen, LogOut, ChevronRight, X, Plus } from 'lucide-react';
 
 export default function Sidebar() {
-  const { currentPage, setPage, user, logout, addToast, notificationDots, clearNotificationDot, setShowLanding, sidebarOpen, setSidebarOpen } = useStore();
+  const { currentPage, setPage, openTab, user, logout, addToast, notificationDots, clearNotificationDot, setShowLanding, sidebarOpen, setSidebarOpen } = useStore();
   const sidebarRef = React.useRef(null);
   const [isMobile, setIsMobile] = React.useState(() => window.matchMedia('(max-width: 768px)').matches);
   const closeNavigation = () => {
@@ -119,81 +101,51 @@ export default function Sidebar() {
           <ChevronRight size={12} style={{ opacity: 0.6 }} />
         </button>
         <div className="nav-section-label">Workspace</div>
-        {navItems.map((item, index) => {
+        {getVisibleNavItems(user, settings).map((item, index) => {
           const Icon = item.icon;
-          // These modules need the desktop app (not implemented in the browser build yet)
-          if (window.kadal?.isWeb && ['issue', 'gate-pass', 'production', 'backup'].includes(item.id)) return null;
-          const permsObj = typeof user?.permissions === 'string' ? JSON.parse(user.permissions) : (user?.permissions || {});
-          const permKey = item.id.replace(/-/g, '_');
-          const hasExplicitPerm = permsObj && (
-            Object.prototype.hasOwnProperty.call(permsObj, item.id) ||
-            Object.prototype.hasOwnProperty.call(permsObj, permKey)
-          );
-          
-          // Restrict Challan Receipt to Super Admin and Recipient / Challan Receipt User only
-          if (item.id === 'challan-receipt') {
-            const userRole = user?.roleName || user?.role_name || '';
-            const isSuperAdmin = userRole === 'Super Admin';
-            const isRecipientRole = ['Challan Receipt User', 'Recipient', 'Recipient Portal'].includes(userRole);
-            if (!isSuperAdmin && !isRecipientRole) return null;
-          }
-
-          if (hasExplicitPerm) {
-            const val = permsObj[item.id] !== undefined ? permsObj[item.id] : permsObj[permKey];
-            if (val !== 'rw' && val !== true && val !== 'r') return null;
-          } else {
-            // Hide tabs based on roles (fallback logic)
-            if (item.id === 'stock-in-out' && permsObj.inventory !== 'rw' && permsObj.inventory !== true) return null;
-            if (user?.roleName === 'Merchandiser') {
-              const allowed = ['dashboard', 'inventory', 'stock-in-out', 'warehouses', 'requisition', 'reports', 'settings'];
-              if (!allowed.includes(item.id)) return null;
-            }
-            if (user?.roleName === 'Inventory') {
-              const allowed = ['dashboard', 'inventory', 'stock-in-out', 'pending-items', 'warehouses', 'requisition', 'reports', 'approvals', 'settings'];
-              if (settings.allow_inventory_to_produce === 'true') {
-                allowed.push('production');
-              }
-              if (!allowed.includes(item.id)) return null;
-            }
-            if (user?.roleName === 'Challan') {
-              const allowed = ['dashboard', 'challan', 'finance', 'gate-pass', 'reports', 'approvals', 'settings'];
-              if (settings.allow_challan_to_issue === 'true') {
-                allowed.push('issue');
-              }
-              if (!allowed.includes(item.id)) return null;
-            }
-            if (item.id === 'requisition') {
-              if (permsObj.requisition === 'none' && !['Admin', 'Super Admin'].includes(user?.roleName)) return null;
-            }
-            if (item.id === 'production' && !['Admin', 'Super Admin'].includes(user?.roleName)) {
-              if (!(user?.roleName === 'Inventory' && settings.allow_inventory_to_produce === 'true')) {
-                return null;
-              }
-            }
-            if (item.id === 'backup' && user?.roleName === 'Operator') return null;
-            
-            // Hide Backup/Restore if no maintenance permission
-            if (item.id === 'backup') {
-              if (user?.roleName !== 'Super Admin' && permsObj.maintenance !== 'rw' && permsObj.backup !== 'rw') return null;
-            }
-          }
           const hasDot = notificationDots[item.id];
+          const openTabLabel = `Open ${item.label} in new tab`;
           return (
-            <button
-              key={item.id}
-              className={`sidebar-nav-item ${currentPage === item.id ? 'active' : ''}`}
-              onClick={() => handleNavClick(item.id)}
-              aria-current={currentPage === item.id ? 'page' : undefined}
-              style={{ '--icon-delay': `${index * -0.47}s` }}
-              data-tone={['violet', 'mint', 'peach', 'rose'][index % 4]}
-            >
-              <span className="nav-icon"><Icon size={17} /></span>
-              <span style={{ flex: 1 }}>{item.label}</span>
-              {hasDot && (
-                <span className="nav-dot" aria-label="New activity" />
-              )}
-              <ChevronRight size={12} style={{ opacity: 0.4 }} />
-            </button>
+            <div key={item.id} className={`sidebar-nav-row ${currentPage === item.id ? 'active' : ''}`}>
+              <button
+                className={`sidebar-nav-item ${currentPage === item.id ? 'active' : ''}`}
+                onClick={(e) => {
+                  if (e.ctrlKey || e.metaKey) {
+                    openTab(item.id);
+                    return;
+                  }
+                  handleNavClick(item.id);
+                }}
+                onAuxClick={(e) => {
+                  if (e.button === 1) {
+                    e.preventDefault();
+                    openTab(item.id);
+                  }
+                }}
+                aria-current={currentPage === item.id ? 'page' : undefined}
+                style={{ '--icon-delay': `${index * -0.47}s` }}
+                data-tone={['violet', 'mint', 'peach', 'rose'][index % 4]}
+              >
+                <span className="nav-icon"><Icon size={17} /></span>
+                <span style={{ flex: 1 }}>{item.label}</span>
+                {hasDot && (
+                  <span className="nav-dot" aria-label="New activity" />
+                )}
+                <ChevronRight size={12} style={{ opacity: 0.4 }} />
+              </button>
+              <button
+                type="button"
+                className="sidebar-nav-newtab"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openTab(item.id);
+                }}
+                title={openTabLabel}
+                aria-label={openTabLabel}
+              >
+                <Plus size={13} />
+              </button>
+            </div>
           );
         })}
       </nav>

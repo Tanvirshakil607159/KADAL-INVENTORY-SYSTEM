@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Plus, Trash2, Save, X, PackageCheck, FileText, Search } from 'lucide-react';
 import useStore from '../../store/useStore';
 import { CURRENCY_SYMBOLS, calcTotals, formatPoStyle } from './piApprovalUtils';
+import { formatItemDescriptionWithColor } from '../../../shared/pi-item-sync.mjs';
 import PiOrderLoaderModal from './PiOrderLoaderModal';
 import PiItemPickerModal from './PiItemPickerModal';
 
@@ -87,7 +88,7 @@ export default function PiApprovalEditor({
       return {
         itemId: it.id,
         itemCode: it.item_code || '',
-        itemDescription: it.name || '',
+        itemDescription: formatItemDescriptionWithColor(it.name, it.color),
         purchaseNo: itPurch,
         poStyleNo: formatPoStyle(it),
         quantity: qty,
@@ -133,7 +134,7 @@ export default function PiApprovalEditor({
           ...item,
           itemId: it.id,
           itemCode: it.item_code || '',
-          itemDescription: it.name || item.itemDescription || '',
+          itemDescription: it.name ? formatItemDescriptionWithColor(it.name, it.color) : (item.itemDescription || ''),
           purchaseNo: itPurch || item.purchaseNo || '',
           poStyleNo: formatPoStyle(it) || item.poStyleNo || '',
           unit: (it.unit || 'PCS').toUpperCase(),

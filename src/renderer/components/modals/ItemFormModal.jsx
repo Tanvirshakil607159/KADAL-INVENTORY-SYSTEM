@@ -126,6 +126,9 @@ export default function ItemFormModal({ data, onSaved }) {
           addToast('success', 'Changes submitted for Admin approval');
         } else {
           addToast('success', item ? 'Item updated' : 'Item created');
+          if (item) {
+            window.dispatchEvent(new CustomEvent('kadal:item-updated', { detail: { id: item.id } }));
+          }
         }
         if (onSaved) onSaved();
         closeModal();

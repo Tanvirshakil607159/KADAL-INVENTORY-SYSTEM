@@ -13,9 +13,10 @@ import PiEditModal from '../components/finance/PiEditModal';
 import PiOrderLoaderModal from '../components/finance/PiOrderLoaderModal';
 import PiItemPickerModal from '../components/finance/PiItemPickerModal';
 import { formatPoStyle } from '../components/finance/piApprovalUtils';
+import { formatItemDescriptionWithColor } from '../../shared/pi-item-sync.mjs';
 
 export default function FinancePage() {
-  const { addToast, user, showConfirm } = useStore();
+  const { addToast, user, showConfirm, currentPage, activeTabId } = useStore();
 
   const userPerms = useMemo(() => {
     return typeof user?.permissions === 'string' ? JSON.parse(user.permissions) : (user?.permissions || {});
@@ -154,7 +155,7 @@ export default function FinancePage() {
         uid: 'pi-' + Math.random().toString(36).slice(2) + '-' + Date.now(),
         itemId: it.id,
         itemCode: it.item_code || '',
-        itemDescription: it.name || '',
+        itemDescription: formatItemDescriptionWithColor(it.name, it.color),
         purchaseNo: itPurch,
         orderNumber: it.order_number || it.orderNumber || (mode === 'order' ? selectedOrderNo : ''),
         styleName: it.style_name || it.styleName || '',
@@ -250,6 +251,35 @@ export default function FinancePage() {
     loadInitialData();
   }, [loadInitialData]);
 
+  // Keep open Finance tabs in sync when items are edited or user switches back to Finance tab
+  useEffect(() => {
+    const refreshRecordsOnly = async () => {
+      try {
+        const finRes = await window.kadal.finance.getAll().catch(() => null);
+        if (finRes?.success) setRecords(finRes.data || []);
+        else if (Array.isArray(finRes)) setRecords(finRes);
+      } catch (e) {}
+    };
+    window.addEventListener('kadal:item-updated', refreshRecordsOnly);
+    return () => window.removeEventListener('kadal:item-updated', refreshRecordsOnly);
+  }, []);
+
+  const hasMountedFinanceRef = React.useRef(false);
+  useEffect(() => {
+    if (!hasMountedFinanceRef.current) {
+      hasMountedFinanceRef.current = true;
+      return;
+    }
+    if (currentPage === 'finance') {
+      window.kadal.finance.getAll()
+        .then((finRes) => {
+          if (finRes?.success) setRecords(finRes.data || []);
+          else if (Array.isArray(finRes)) setRecords(finRes);
+        })
+        .catch(() => {});
+    }
+  }, [currentPage, activeTabId]);
+
   // Auto-generate PI number when opening Create tab if not already defined
   useEffect(() => {
     if (piSubTab === 'create' && !piNumber && !isPiNumberCustom) {
@@ -311,7 +341,7 @@ export default function FinancePage() {
         ...item,
         itemId: it.id,
         itemCode: it.item_code || '',
-        itemDescription: it.name || item.itemDescription || '',
+        itemDescription: it.name ? formatItemDescriptionWithColor(it.name, it.color) : (item.itemDescription || ''),
         purchaseNo: itPurch || item.purchaseNo || '',
         poStyleNo: formatPoStyle(it) || item.poStyleNo || '',
         unit: (it.unit || 'PCS').toUpperCase(),

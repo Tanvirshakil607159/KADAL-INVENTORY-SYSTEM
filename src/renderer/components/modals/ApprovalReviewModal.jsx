@@ -79,6 +79,9 @@ export default function ApprovalReviewModal({ data, onSaved }) {
       const res = await window.kadal.approvals.approve(selectedRequest.id, notes);
       if (res.success) {
         addToast('success', 'Request approved');
+        if (selectedRequest?.type === 'UPDATE_ITEM') {
+          window.dispatchEvent(new CustomEvent('kadal:item-updated', { detail: { id: selectedRequest.data?.id } }));
+        }
         if (onSaved) onSaved();
         closeModal();
       } else addToast('error', res.error);

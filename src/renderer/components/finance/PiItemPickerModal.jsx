@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { RefreshCw, Search, X } from 'lucide-react';
+import { normalizeColorValue } from '../../../shared/pi-item-sync.mjs';
 
 /**
  * Shared modal to search and link an Inventory item to a manual Proforma Invoice line item.
@@ -141,6 +142,7 @@ export default function PiItemPickerModal({
                     </div>
                     <div style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', gap: 12, flexWrap: 'wrap' }}>
                       <span><strong>Code:</strong> {it.item_code || '-'}</span>
+                      {normalizeColorValue(it.color) && <span><strong>Color:</strong> {normalizeColorValue(it.color)}</span>}
                       {it.order_number && <span><strong>PO (Order):</strong> {it.order_number}</span>}
                       {it.purchase_no && <span><strong>Purchase No:</strong> {it.purchase_no}</span>}
                       {it.style_name && <span><strong>Style:</strong> {it.style_name}</span>}

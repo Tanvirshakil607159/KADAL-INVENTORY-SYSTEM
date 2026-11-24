@@ -92,11 +92,15 @@ body::before, #root::before, #root::after { display: none; }
 .sidebar-home-item { border: 0 !important; background: transparent; margin-bottom: 17px; font-weight: 400; color: var(--text-secondary); }
 .sidebar-home-item:hover { box-shadow: none; }
 .nav-section-label { font-size: 10px; font-weight: 600; color: var(--text-secondary); padding: 0 9px; margin-bottom: 7px; }
-.sidebar .nav-dot { right: 9px; width: 5px; height: 5px; background: var(--primary); box-shadow: none; }
+.sidebar-nav-row { margin-bottom: 3px; }
+.sidebar-nav-row .sidebar-nav-item { margin-bottom: 0; padding-right: 28px; }
+.sidebar .nav-dot { right: 30px; width: 5px; height: 5px; background: var(--primary); box-shadow: none; }
 .sidebar-footer { padding: 10px 11px 12px; border-color: var(--border-light); }
 .sidebar-footer .nav-icon { background: transparent; color: var(--text-secondary); box-shadow: none; }
 .app-version { display: flex; justify-content: space-between; padding: 6px 9px 0; font-size: 9px; color: var(--text-muted); }
 .sidebar-close, .sidebar-backdrop { display: none; }
+.browser-tabbar { background: var(--surface-topbar); padding: 6px 25px 0; }
+@media (max-width: 768px) { .browser-tabbar { padding: 6px 13px 0; } }
 .topbar { padding: 0 25px; gap: 12px; background: var(--surface-topbar); border-color: var(--border); box-shadow: 0 1px 0 #ffffff04; }
 .topbar-heading, .topbar-tools { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .workspace-eyebrow { display: block; font-size: 8px; color: var(--text-muted); letter-spacing: 1px; margin-bottom: 3px; }
@@ -243,6 +247,7 @@ button:focus-visible, [role='button']:focus-visible, .tab:focus-visible { outlin
 @media (min-width: 769px) and (max-width: 1024px) {
   :root { --sidebar-width: 200px; }
   .sidebar-nav-item { justify-content: flex-start; }
+  .sidebar-nav-newtab { display: inline-flex; }
   .sidebar-brand { padding-left: 16px; }
   .overview-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .welcome-card { padding: 22px; }
@@ -259,6 +264,7 @@ button:focus-visible, [role='button']:focus-visible, .tab:focus-visible { outlin
   .sidebar { position: fixed; inset: 0 auto 0 0; height: 100dvh; z-index: 1001; transform: translateX(-100%); transition: transform .25s ease; background: var(--bg-surface-solid); }
   .sidebar.active { transform: translateX(0); }
   .sidebar-nav-item { justify-content: flex-start; height: 40px; }
+  .sidebar-nav-newtab { display: inline-flex; opacity: 0.72; }
   .sidebar-backdrop { display: block; position: fixed; inset: 0; z-index: 1000; background: #10101d80; backdrop-filter: blur(3px); border: 0; }
   .sidebar-close { display: inline-flex; margin-left: auto; }
   .sidebar-brand { padding: 20px 14px; }

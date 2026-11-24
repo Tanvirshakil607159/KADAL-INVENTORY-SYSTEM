@@ -5,6 +5,38 @@ import { applyMotion, readMotion } from '../motion';
 const savedUser = sessionStorage.getItem('kadal_user');
 const initialUser = savedUser ? JSON.parse(savedUser) : null;
 
+const createTabId = () => `tab-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+
+function readInitialTabState() {
+  const fallbackPage = sessionStorage.getItem('kadal_currentPage') || 'dashboard';
+  try {
+    const rawTabs = sessionStorage.getItem('kadal_tabs');
+    const savedActiveId = sessionStorage.getItem('kadal_activeTabId');
+    const parsedTabs = rawTabs ? JSON.parse(rawTabs) : null;
+    if (Array.isArray(parsedTabs) && parsedTabs.length > 0) {
+      const cleaned = parsedTabs
+        .filter((t) => t && t.id && t.moduleId)
+        .map((t) => ({ id: String(t.id), moduleId: String(t.moduleId), refreshKey: 0 }));
+      if (cleaned.length > 0) {
+        const active = cleaned.find((t) => t.id === savedActiveId) || cleaned[0];
+        return { tabs: cleaned, activeTabId: active.id, currentPage: active.moduleId };
+      }
+    }
+  } catch (e) {}
+  const initialTab = { id: 'tab-1', moduleId: fallbackPage, refreshKey: 0 };
+  return { tabs: [initialTab], activeTabId: initialTab.id, currentPage: initialTab.moduleId };
+}
+
+function persistTabs(tabs, activeTabId, currentPage) {
+  try {
+    sessionStorage.setItem('kadal_tabs', JSON.stringify(tabs.map(({ id, moduleId }) => ({ id, moduleId }))));
+    sessionStorage.setItem('kadal_activeTabId', activeTabId);
+    sessionStorage.setItem('kadal_currentPage', currentPage);
+  } catch (e) {}
+}
+
+const initialTabState = readInitialTabState();
+
 const useStore = create((set, get) => ({
   // Appearance is a preference on this device, independent of company settings.
   theme: applyTheme(readTheme(), false),
@@ -22,7 +54,18 @@ const useStore = create((set, get) => ({
   },
   logout: () => {
     sessionStorage.removeItem('kadal_user');
-    set({ user: null, isLoggedIn: false, sidebarOpen: false });
+    sessionStorage.removeItem('kadal_tabs');
+    sessionStorage.removeItem('kadal_activeTabId');
+    sessionStorage.removeItem('kadal_currentPage');
+    const resetTab = { id: 'tab-1', moduleId: 'dashboard', refreshKey: 0 };
+    set({
+      user: null,
+      isLoggedIn: false,
+      sidebarOpen: false,
+      tabs: [resetTab],
+      activeTabId: resetTab.id,
+      currentPage: resetTab.moduleId,
+    });
   },
 
   // Navigation & Landing
@@ -39,11 +82,68 @@ const useStore = create((set, get) => ({
     sessionStorage.setItem('kadal_showLanding', 'false');
     set({ showLanding: false, sidebarOpen: false });
   },
-  currentPage: sessionStorage.getItem('kadal_currentPage') || 'dashboard',
+
+  // Browser-style tabs
+  tabs: initialTabState.tabs,
+  activeTabId: initialTabState.activeTabId,
+  currentPage: initialTabState.currentPage,
+
   setPage: (page) => {
-    sessionStorage.setItem('kadal_currentPage', page);
-    set({ currentPage: page, sidebarOpen: false });
+    const { tabs, activeTabId } = get();
+    const nextTabs = tabs.map((t) => (t.id === activeTabId ? { ...t, moduleId: page } : t));
+    persistTabs(nextTabs, activeTabId, page);
+    set({ tabs: nextTabs, currentPage: page, sidebarOpen: false });
   },
+
+  openTab: (moduleId = 'new-tab', { activate = true } = {}) => {
+    const { tabs, activeTabId, currentPage } = get();
+    const newTab = { id: createTabId(), moduleId: moduleId || 'new-tab', refreshKey: 0 };
+    const nextTabs = [...tabs, newTab];
+    const nextActiveId = activate ? newTab.id : activeTabId;
+    const nextPage = activate ? newTab.moduleId : currentPage;
+    persistTabs(nextTabs, nextActiveId, nextPage);
+    set({ tabs: nextTabs, activeTabId: nextActiveId, currentPage: nextPage, sidebarOpen: false });
+    return newTab.id;
+  },
+
+  switchTab: (tabId) => {
+    const { tabs } = get();
+    const target = tabs.find((t) => t.id === tabId);
+    if (!target) return;
+    persistTabs(tabs, target.id, target.moduleId);
+    set({ activeTabId: target.id, currentPage: target.moduleId, sidebarOpen: false });
+  },
+
+  closeTab: (tabId) => {
+    const { tabs, activeTabId } = get();
+    if (tabs.length <= 1) {
+      const reset = [{ id: tabs[0]?.id || 'tab-1', moduleId: 'dashboard', refreshKey: 0 }];
+      persistTabs(reset, reset[0].id, reset[0].moduleId);
+      set({ tabs: reset, activeTabId: reset[0].id, currentPage: reset[0].moduleId });
+      return;
+    }
+
+    const idx = tabs.findIndex((t) => t.id === tabId);
+    if (idx === -1) return;
+    const nextTabs = tabs.filter((t) => t.id !== tabId);
+
+    let nextActiveId = activeTabId;
+    if (activeTabId === tabId) {
+      const fallback = nextTabs[Math.min(idx, nextTabs.length - 1)] || nextTabs[0];
+      nextActiveId = fallback.id;
+    }
+    const activeTab = nextTabs.find((t) => t.id === nextActiveId) || nextTabs[0];
+    persistTabs(nextTabs, activeTab.id, activeTab.moduleId);
+    set({ tabs: nextTabs, activeTabId: activeTab.id, currentPage: activeTab.moduleId, sidebarOpen: false });
+  },
+
+  refreshTab: (tabId = null) => {
+    const { tabs, activeTabId } = get();
+    const targetId = tabId || activeTabId;
+    const nextTabs = tabs.map((t) => (t.id === targetId ? { ...t, refreshKey: (t.refreshKey || 0) + 1 } : t));
+    set({ tabs: nextTabs });
+  },
+
   sidebarOpen: false,
   setSidebarOpen: (sidebarOpen) => set({ sidebarOpen }),
 
