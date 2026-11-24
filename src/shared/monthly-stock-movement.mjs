@@ -37,6 +37,48 @@ export function getMonthWindow(monthFilter) {
     month,
     yearMonth: `${year}-${mm}`,
     monthName,
+    periodLabel: monthName,
+    dateFrom,
+    dateTo,
+    startIso: toDate(dateFrom, false).toISOString(),
+    endIso: toDate(dateTo, true).toISOString(),
+  };
+}
+
+export function getReportPeriodWindow(filters = {}) {
+  const isYmd = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || '').trim());
+  const rawFrom = isYmd(filters.dateFrom) ? String(filters.dateFrom).trim() : '';
+  const rawTo = isYmd(filters.dateTo) ? String(filters.dateTo).trim() : '';
+
+  if (!rawFrom && !rawTo) {
+    return getMonthWindow(filters.month);
+  }
+
+  const anchorMonth = (rawFrom || rawTo).slice(0, 7);
+  const monthWin = getMonthWindow(filters.month || anchorMonth);
+
+  let dateFrom = rawFrom || `${rawTo.slice(0, 7)}-01`;
+  let dateTo = rawTo || getMonthWindow(rawFrom.slice(0, 7)).dateTo;
+
+  if (dateFrom > dateTo) {
+    const tmp = dateFrom;
+    dateFrom = dateTo;
+    dateTo = tmp;
+  }
+
+  // Show clean month name when the selected range matches an exact full calendar month
+  const fromMonthWin = getMonthWindow(dateFrom.slice(0, 7));
+  const isFullCalendarMonth = dateFrom === fromMonthWin.dateFrom && dateTo === fromMonthWin.dateTo;
+  const periodLabel = isFullCalendarMonth
+    ? fromMonthWin.monthName
+    : `${formatReportDate(dateFrom + 'T00:00:00')} to ${formatReportDate(dateTo + 'T00:00:00')}`;
+
+  return {
+    year: isFullCalendarMonth ? fromMonthWin.year : monthWin.year,
+    month: isFullCalendarMonth ? fromMonthWin.month : monthWin.month,
+    yearMonth: isFullCalendarMonth ? fromMonthWin.yearMonth : monthWin.yearMonth,
+    monthName: isFullCalendarMonth ? fromMonthWin.monthName : periodLabel,
+    periodLabel,
     dateFrom,
     dateTo,
     startIso: toDate(dateFrom, false).toISOString(),
@@ -136,7 +178,7 @@ export function aggregateMonthlyMovementRows(items, monthTxs, afterEndTxs, prior
 }
 
 export async function fetchMonthlyStockMovementSupabase(supabase, filters = {}, fetchAllFn) {
-  const win = getMonthWindow(filters.month);
+  const win = getReportPeriodWindow(filters);
 
   let itemsQuery = supabase
     .from('items')

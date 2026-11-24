@@ -397,7 +397,7 @@ const ReportService = {
 
   async monthlyStockMovementReport(filters = {}) {
     const {
-      getMonthWindow,
+      getReportPeriodWindow,
       aggregateMonthlyMovementRows,
       fetchMonthlyStockMovementSupabase,
     } = await import('../../shared/monthly-stock-movement.mjs');
@@ -406,7 +406,7 @@ const ReportService = {
       return await fetchMonthlyStockMovementSupabase(getSupabase(), filters, fetchAllSupabase);
     }
 
-    const win = getMonthWindow(filters.month);
+    const win = getReportPeriodWindow(filters);
     const startSql = dayStartSql(win.dateFrom);
     const endSql = dayEndSql(win.dateTo);
 

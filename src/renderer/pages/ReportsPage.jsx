@@ -1,7 +1,7 @@
 import SearchableSelect from '../components/ui/SearchableSelect';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import useStore from '../store/useStore';
-import { formatReportDate, getMonthWindow } from '../../shared/monthly-stock-movement.mjs';
+import { formatReportDate, getMonthWindow, getReportPeriodWindow } from '../../shared/monthly-stock-movement.mjs';
 import { Download, FileSpreadsheet, FileText, Eye, ArrowLeft, XCircle, Trash2, ArrowUpDown, ArrowUp, ArrowDown, ClipboardList } from 'lucide-react';
 
 const TABS = [
@@ -273,11 +273,11 @@ export default function ReportsPage() {
   const getExportOptions = useCallback(() => {
     const options = {};
     if (activeTab === 'monthlyStockMovement') {
-      const win = getMonthWindow(selectedMonth);
-      options.reportTitle = `Stock Movement Report (${win.monthName})`;
+      const win = getReportPeriodWindow({ month: selectedMonth, dateFrom, dateTo });
+      options.reportTitle = `Stock Movement Report (${win.periodLabel})`;
       options.subtitles = [
         companyInfo.address || 'Tek, Kathora, Shalna, Gazipur',
-        `Period: ${win.monthName} ${win.year} (${win.dateFrom} to ${win.dateTo})`,
+        `Period: ${win.dateFrom} to ${win.dateTo}`,
       ];
     } else if (activeTab === 'monthlyReport' || activeTab === 'dailyDelivery' || activeTab === 'itemDeliverySummary' || activeTab === 'categoryDeliverySummary' || activeTab === 'movement' || activeTab === 'challan' || activeTab === 'itemChallan') {
       if (dateFrom || dateTo) {
@@ -782,7 +782,7 @@ export default function ReportsPage() {
           </table>
         );
         case 'monthlyStockMovement': {
-          const win = getMonthWindow(selectedMonth);
+          const win = getReportPeriodWindow({ month: selectedMonth, dateFrom, dateTo });
           const sumOpening = sortedData.reduce((s, r) => s + (Number(r.opening_stock) || 0), 0);
           const sumIn = sortedData.reduce((s, r) => s + (Number(r.total_in) || 0), 0);
           const sumIssue = sortedData.reduce((s, r) => s + (Number(r.total_issue) || 0), 0);
@@ -792,7 +792,7 @@ export default function ReportsPage() {
               <div style={{ textAlign: 'center', padding: '14px 12px 10px', borderBottom: '1px solid var(--border)' }}>
                 <div style={{ fontSize: 18, fontWeight: 700, letterSpacing: 0.4 }}>{companyInfo.name}</div>
                 <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>{companyInfo.address}</div>
-                <div style={{ fontSize: 14, fontWeight: 700, marginTop: 4 }}>Stock Movement Report ({win.monthName})</div>
+                <div style={{ fontSize: 14, fontWeight: 700, marginTop: 4 }}>Stock Movement Report ({win.periodLabel})</div>
               </div>
               <table className="data-table">
                 <thead>
@@ -1657,13 +1657,21 @@ export default function ReportsPage() {
                 type="month"
                 className="form-input"
                 value={selectedMonth}
-                onChange={e => setSelectedMonth(e.target.value)}
+                onChange={e => {
+                  const val = e.target.value;
+                  setSelectedMonth(val);
+                  if (val) {
+                    const win = getMonthWindow(val);
+                    setDateFrom(win.dateFrom);
+                    setDateTo(win.dateTo);
+                  }
+                }}
                 style={{ width: 155, padding: '7px 10px', fontSize: 13 }}
               />
             </div>
           )}
 
-          {(activeTab === 'movement' || activeTab === 'challan' || activeTab === 'itemChallan' || activeTab === 'dailyDelivery' || activeTab === 'itemDeliverySummary' || activeTab === 'categoryDeliverySummary' || activeTab === 'monthlyReport') && (
+          {(activeTab === 'movement' || activeTab === 'monthlyStockMovement' || activeTab === 'challan' || activeTab === 'itemChallan' || activeTab === 'dailyDelivery' || activeTab === 'itemDeliverySummary' || activeTab === 'categoryDeliverySummary' || activeTab === 'monthlyReport') && (
             <div className="filter-group">
               <input type="date" className="form-input" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={{ width: 130, padding: '8px 12px', fontSize: 13 }} />
               <span className="text-muted">to</span>
