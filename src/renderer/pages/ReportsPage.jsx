@@ -1,11 +1,13 @@
 import SearchableSelect from '../components/ui/SearchableSelect';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import useStore from '../store/useStore';
+import { formatReportDate, getMonthWindow } from '../../shared/monthly-stock-movement.mjs';
 import { Download, FileSpreadsheet, FileText, Eye, ArrowLeft, XCircle, Trash2, ArrowUpDown, ArrowUp, ArrowDown, ClipboardList } from 'lucide-react';
 
 const TABS = [
   { id: 'stock', label: 'Current Stock' },
   { id: 'movement', label: 'Stock Movement' },
+  { id: 'monthlyStockMovement', label: 'Stockmovement Report (Month)' },
   { id: 'lowStock', label: 'Low Stock' },
   { id: 'challan', label: 'Challan History' },
   { id: 'itemChallan', label: 'Item Wise Challan Report' },
@@ -21,7 +23,8 @@ const PAGE_SIZE = 100;
 // Moved outside component — never recreated
 const NUMERIC_FIELDS = new Set([
   'current_stock', 'order_quantity', 'min_stock_level', 'unit_price', 'conversion_rate',
-  'total_in', 'total_out', 'shipped_quantity', 'total_shipped', 'balance'
+  'total_in', 'total_out', 'shipped_quantity', 'total_shipped', 'balance',
+  'opening_stock', 'total_issue', 'closing_stock'
 ]);
 
 // Pagination bar component
@@ -105,6 +108,11 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(false);
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const [selectedMonth, setSelectedMonth] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  });
+  const [companyInfo, setCompanyInfo] = useState({ name: 'K.A. DESIGN ACCESSORIES LIMITED', address: 'Tek, Kathora, Shalna, Gazipur' });
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [styleName, setStyleName] = useState('');
@@ -177,13 +185,22 @@ export default function ReportsPage() {
   useEffect(() => {
     let cancelled = false;
     const fetchAll = async () => {
-      const [dvRes, recRes, catRes] = await Promise.allSettled([
+      const [dvRes, recRes, catRes, settingsRes] = await Promise.allSettled([
         window.kadal.items.getDistinctValues(),
         window.kadal.recipients.getAll(),
         window.kadal.categories.getAll(),
+        window.kadal.settings.getAll(),
       ]);
 
       if (cancelled) return;
+
+      if (settingsRes.status === 'fulfilled' && settingsRes.value?.success) {
+        const s = settingsRes.value.data || {};
+        setCompanyInfo({
+          name: (s.company_name || 'K.A. DESIGN ACCESSORIES LIMITED').toUpperCase(),
+          address: s.company_address || 'Tek, Kathora, Shalna, Gazipur',
+        });
+      }
 
       if (dvRes.status === 'fulfilled' && dvRes.value?.success) {
         setDistinctValues(dvRes.value.data);
@@ -219,6 +236,9 @@ export default function ReportsPage() {
             res.data = res.data.map(d => ({ ...d, balance: (Number(d.order_quantity) || 0) - (Number(d.total_out) || 0) }));
           }
           break;
+        case 'monthlyStockMovement':
+          res = await window.kadal.reports.monthlyStockMovementReport({ ...filters, month: selectedMonth });
+          break;
         case 'lowStock': res = await window.kadal.reports.lowStockReport(filters); break;
         case 'challan': res = await window.kadal.reports.challanHistory(filters); break;
         case 'itemChallan': res = await window.kadal.reports.challanHistory(filters); break;
@@ -239,7 +259,7 @@ export default function ReportsPage() {
       if (res?.success) setData(res.data || []);
     } catch (e) { addToast('error', 'Failed to load report'); }
     setLoading(false);
-  }, [activeTab, dateFrom, dateTo, debouncedSearch, styleName, orderNumber, purchaseNo, buyerName, categoryId, auditCutoffDate, status, receiverName, addToast]);
+  }, [activeTab, dateFrom, dateTo, selectedMonth, debouncedSearch, styleName, orderNumber, purchaseNo, buyerName, categoryId, auditCutoffDate, status, receiverName, addToast]);
 
   // Store latest loadReport ref for external callers (cancel/delete)
   loadReportRef.current = loadReport;
@@ -252,7 +272,14 @@ export default function ReportsPage() {
   // Memoize export options
   const getExportOptions = useCallback(() => {
     const options = {};
-    if (activeTab === 'monthlyReport' || activeTab === 'dailyDelivery' || activeTab === 'itemDeliverySummary' || activeTab === 'categoryDeliverySummary' || activeTab === 'movement' || activeTab === 'challan' || activeTab === 'itemChallan') {
+    if (activeTab === 'monthlyStockMovement') {
+      const win = getMonthWindow(selectedMonth);
+      options.reportTitle = `Stock Movement Report (${win.monthName})`;
+      options.subtitles = [
+        companyInfo.address || 'Tek, Kathora, Shalna, Gazipur',
+        `Period: ${win.monthName} ${win.year} (${win.dateFrom} to ${win.dateTo})`,
+      ];
+    } else if (activeTab === 'monthlyReport' || activeTab === 'dailyDelivery' || activeTab === 'itemDeliverySummary' || activeTab === 'categoryDeliverySummary' || activeTab === 'movement' || activeTab === 'challan' || activeTab === 'itemChallan') {
       if (dateFrom || dateTo) {
         let dateStr = 'Date Range: ';
         if (dateFrom && dateTo) {
@@ -282,7 +309,7 @@ export default function ReportsPage() {
       }
     }
     return options;
-  }, [activeTab, dateFrom, dateTo, categoryId, categoriesList]);
+  }, [activeTab, dateFrom, dateTo, selectedMonth, companyInfo.address, categoryId, categoriesList]);
 
   // Memoize aggregated export data for item/category delivery summaries
   const getExportData = useCallback(() => {
@@ -754,6 +781,72 @@ export default function ReportsPage() {
             ))}</tbody>
           </table>
         );
+        case 'monthlyStockMovement': {
+          const win = getMonthWindow(selectedMonth);
+          const sumOpening = sortedData.reduce((s, r) => s + (Number(r.opening_stock) || 0), 0);
+          const sumIn = sortedData.reduce((s, r) => s + (Number(r.total_in) || 0), 0);
+          const sumIssue = sortedData.reduce((s, r) => s + (Number(r.total_issue) || 0), 0);
+          const sumCurrent = sortedData.reduce((s, r) => s + (Number(r.closing_stock) || 0), 0);
+          return (
+            <div>
+              <div style={{ textAlign: 'center', padding: '14px 12px 10px', borderBottom: '1px solid var(--border)' }}>
+                <div style={{ fontSize: 18, fontWeight: 700, letterSpacing: 0.4 }}>{companyInfo.name}</div>
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>{companyInfo.address}</div>
+                <div style={{ fontSize: 14, fontWeight: 700, marginTop: 4 }}>Stock Movement Report ({win.monthName})</div>
+              </div>
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th className="text-center" style={{ width: 52 }}>SI/NO</th>
+                    <SortHeader label="KADAL" field="item_code" sortConfig={sortConfig} onSort={handleSort} />
+                    <SortHeader label="CATEGORIES" field="category_name" sortConfig={sortConfig} onSort={handleSort} />
+                    <SortHeader label="ITEM NAME" field="item_name" sortConfig={sortConfig} onSort={handleSort} />
+                    <SortHeader label="SIZE / COLOR" field="size_color" sortConfig={sortConfig} onSort={handleSort} />
+                    <SortHeader label="UNIT" field="unit" className="text-center" sortConfig={sortConfig} onSort={handleSort} />
+                    <SortHeader label="Opening Stock Qty" field="opening_stock" className="text-right" sortConfig={sortConfig} onSort={handleSort} />
+                    <SortHeader label="Total In Qty" field="total_in" className="text-right" sortConfig={sortConfig} onSort={handleSort} />
+                    <SortHeader label="Total Issue Qty" field="total_issue" className="text-right" sortConfig={sortConfig} onSort={handleSort} />
+                    <SortHeader label="Current Stock Qty" field="closing_stock" className="text-right" sortConfig={sortConfig} onSort={handleSort} />
+                    <SortHeader label="Last Purchase Date" field="last_in_date" className="text-center" sortConfig={sortConfig} onSort={handleSort} />
+                    <SortHeader label="Supplier Name" field="supplier_name" sortConfig={sortConfig} onSort={handleSort} />
+                    <th>Remarks</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginatedData.map((r, i) => (
+                    <tr key={r.id || i}>
+                      <td className="text-center text-mono">{(currentPage * PAGE_SIZE) + i + 1}</td>
+                      <td className="text-mono">{r.item_code || '-'}</td>
+                      <td>{r.category_name || '-'}</td>
+                      <td style={{ fontWeight: 600 }}>{r.item_name}</td>
+                      <td>{r.size_color || ''}</td>
+                      <td className="text-center">{r.unit}</td>
+                      <td className="text-right text-mono">{Number(r.opening_stock || 0).toLocaleString()}</td>
+                      <td className="text-right text-mono text-success">{Number(r.total_in || 0).toLocaleString()}</td>
+                      <td className="text-right text-mono text-warning">{Number(r.total_issue || 0).toLocaleString()}</td>
+                      <td className="text-right text-mono fw-bold">{Number(r.closing_stock || 0).toLocaleString()}</td>
+                      <td className="text-center text-mono">{formatReportDate(r.last_in_date)}</td>
+                      <td>{r.supplier_name || '-'}</td>
+                      <td className="text-muted" style={{ fontSize: 12 }}>{r.remarks || ''}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr style={{ fontWeight: 700, background: 'var(--bg-secondary, rgba(128,128,128,0.08))' }}>
+                    <td colSpan={6} style={{ textAlign: 'center', letterSpacing: 0.5 }}>TOTAL</td>
+                    <td className="text-right text-mono">{sumOpening.toLocaleString()}</td>
+                    <td className="text-right text-mono text-success">{sumIn.toLocaleString()}</td>
+                    <td className="text-right text-mono text-warning">{sumIssue.toLocaleString()}</td>
+                    <td className="text-right text-mono">{sumCurrent.toLocaleString()}</td>
+                    <td className="text-center">-</td>
+                    <td></td>
+                    <td></td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          );
+        }
       case 'lowStock':
         return (
           <table className="data-table">
@@ -1517,7 +1610,7 @@ export default function ReportsPage() {
 
       <div className="toolbar" style={{ flexWrap: 'wrap', gap: 10 }}>
         <div className="toolbar-left" style={{ flexWrap: 'wrap', gap: 10 }}>
-          {(activeTab === 'stock' || activeTab === 'movement' || activeTab === 'challan' || activeTab === 'itemChallan' || activeTab === 'dailyDelivery' || activeTab === 'itemDeliverySummary' || activeTab === 'categoryDeliverySummary' || activeTab === 'monthlyReport') && (
+          {(activeTab === 'stock' || activeTab === 'movement' || activeTab === 'monthlyStockMovement' || activeTab === 'challan' || activeTab === 'itemChallan' || activeTab === 'dailyDelivery' || activeTab === 'itemDeliverySummary' || activeTab === 'categoryDeliverySummary' || activeTab === 'monthlyReport') && (
             <input className="form-input" placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)} style={{ width: 180, padding: '8px 12px', fontSize: 13 }} />
           )}
 
@@ -1556,6 +1649,19 @@ export default function ReportsPage() {
               </>
             )}
           </div>
+
+          {activeTab === 'monthlyStockMovement' && (
+            <div className="filter-group">
+              <label style={{ fontSize: 12, color: 'var(--text-muted)', marginRight: 6 }}>Month:</label>
+              <input
+                type="month"
+                className="form-input"
+                value={selectedMonth}
+                onChange={e => setSelectedMonth(e.target.value)}
+                style={{ width: 155, padding: '7px 10px', fontSize: 13 }}
+              />
+            </div>
+          )}
 
           {(activeTab === 'movement' || activeTab === 'challan' || activeTab === 'itemChallan' || activeTab === 'dailyDelivery' || activeTab === 'itemDeliverySummary' || activeTab === 'categoryDeliverySummary' || activeTab === 'monthlyReport') && (
             <div className="filter-group">

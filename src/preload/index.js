@@ -102,6 +102,7 @@ contextBridge.exposeInMainWorld('kadal', {
   reports: {
     stockReport: (filters) => ipcRenderer.invoke('reports:stockReport', filters),
     movementReport: (filters) => ipcRenderer.invoke('reports:movementReport', filters),
+    monthlyStockMovementReport: (filters) => ipcRenderer.invoke('reports:monthlyStockMovementReport', filters),
     lowStockReport: () => ipcRenderer.invoke('reports:lowStockReport'),
     challanHistory: (filters) => ipcRenderer.invoke('reports:challanHistory', filters),
     detailedChallanHistory: (filters) => ipcRenderer.invoke('reports:detailedChallanHistory', filters),

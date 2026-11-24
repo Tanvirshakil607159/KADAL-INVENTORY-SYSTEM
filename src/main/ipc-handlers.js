@@ -395,7 +395,7 @@ function registerIpcHandlers() {
   // ==================== REPORTS ====================
   console.log('[IPC] Registering Report Handlers...');
   const reportChannels = [
-    'reports:stockReport', 'reports:movementReport', 'reports:lowStockReport',
+    'reports:stockReport', 'reports:movementReport', 'reports:monthlyStockMovementReport', 'reports:lowStockReport',
     'reports:challanHistory', 'reports:detailedChallanHistory',
     'reports:dailySummary', 'reports:monthlySummary', 'reports:exportExcel', 'reports:exportPdf',
     'reports:auditReport'
@@ -405,6 +405,7 @@ function registerIpcHandlers() {
 
   ipcMain.handle('reports:stockReport', wrapHandler((filters) => ReportService.stockReport(filters)));
   ipcMain.handle('reports:movementReport', wrapHandler((filters) => ReportService.movementReport(filters)));
+  ipcMain.handle('reports:monthlyStockMovementReport', wrapHandler((filters) => ReportService.monthlyStockMovementReport(filters)));
   ipcMain.handle('reports:lowStockReport', wrapHandler((filters) => ReportService.lowStockReport(filters)));
   ipcMain.handle('reports:challanHistory', wrapHandler((filters) => ReportService.challanHistory(filters)));
   ipcMain.handle('reports:detailedChallanHistory', wrapHandler((filters) => ReportService.detailedChallanHistory(filters)));
@@ -472,10 +473,36 @@ function registerIpcHandlers() {
     return { subtitles, totalQty, totalBDT, totalUSD, buyerMap: buyerEntries };
   }
 
+  function buildMonthlyMovementExportOptions(type, data, baseOptions) {
+    const opts = { ...baseOptions };
+    if (type !== 'monthlyStockMovement') return opts;
+
+    const rows = Array.isArray(data) ? data : [];
+    const sumOpening = rows.reduce((s, r) => s + (Number(r.opening_stock) || 0), 0);
+    const sumIn = rows.reduce((s, r) => s + (Number(r.total_in) || 0), 0);
+    const sumIssue = rows.reduce((s, r) => s + (Number(r.total_issue) || 0), 0);
+    const sumCurrent = rows.reduce((s, r) => s + (Number(r.closing_stock) || 0), 0);
+
+    opts.orientation = 'landscape';
+    opts.footerRow = [
+      { text: 'TOTAL', colSpan: 6, alignment: 'center', bold: true, fillColor: '#f0f0f0' },
+      {}, {}, {}, {}, {},
+      { text: sumOpening.toLocaleString(), alignment: 'right', bold: true, fillColor: '#f0f0f0' },
+      { text: sumIn.toLocaleString(), alignment: 'right', bold: true, fillColor: '#f0f0f0' },
+      { text: sumIssue.toLocaleString(), alignment: 'right', bold: true, fillColor: '#f0f0f0' },
+      { text: sumCurrent.toLocaleString(), alignment: 'right', bold: true, fillColor: '#f0f0f0' },
+      { text: '-', alignment: 'center', bold: true, fillColor: '#f0f0f0' },
+      { text: '', fillColor: '#f0f0f0' },
+      { text: '', fillColor: '#f0f0f0' },
+    ];
+    return opts;
+  }
+
   ipcMain.handle('reports:exportExcel', wrapHandler(async (type, data, options) => {
     const settings = SettingsRepo.getAll();
     const columns = getReportColumns(type);
-    const excelOptions = { ...options };
+    const excelOptions = buildMonthlyMovementExportOptions(type, data, options);
+    const reportTitle = options?.reportTitle || getReportTitle(type);
     if (type === 'dailyDelivery' || type === 'monthlyReport' || type === 'itemDeliverySummary' || type === 'categoryDeliverySummary') {
       const summary = buildDeliverySummary(data, type);
       excelOptions.subtitles = [...(excelOptions.subtitles || []), ...summary.subtitles];
@@ -494,13 +521,14 @@ function registerIpcHandlers() {
         ];
       }
     }
-    return ExcelGenerator.generateReport(getReportTitle(type), columns, data, settings, excelOptions);
+    return ExcelGenerator.generateReport(reportTitle, columns, data, settings, excelOptions);
   }));
 
   ipcMain.handle('reports:exportPdf', wrapHandler(async (type, data, options) => {
     const settings = SettingsRepo.getAll();
     const columns = getReportColumns(type);
-    const pdfOptions = { ...options };
+    const pdfOptions = buildMonthlyMovementExportOptions(type, data, options);
+    const reportTitle = options?.reportTitle || getReportTitle(type);
     if (type === 'dailyDelivery' || type === 'monthlyReport' || type === 'itemDeliverySummary' || type === 'categoryDeliverySummary') {
       pdfOptions.orientation = 'portrait';
       const summary = buildDeliverySummary(data, type);
@@ -521,7 +549,7 @@ function registerIpcHandlers() {
         ];
       }
     }
-    return PdfGenerator.generateReportPdf(getReportTitle(type), columns, data, settings, pdfOptions);
+    return PdfGenerator.generateReportPdf(reportTitle, columns, data, settings, pdfOptions);
   }));
 
   ipcMain.handle('gatePass:clearHistory', guarded(Access.maintenance, async () => {
@@ -1176,6 +1204,29 @@ function getReportColumns(type) {
         { key: 'total_requested', label: 'Total Requested', width: 65, align: 'right' },
         { key: 'status', label: 'Status', width: 55 },
       ];
+    case 'monthlyStockMovement': {
+      const fmtDate = (v) => {
+        if (!v) return '-';
+        const d = new Date(v);
+        if (isNaN(d.getTime())) return '-';
+        return `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}-${d.getFullYear()}`;
+      };
+      return [
+        { key: 'sl_no', label: 'SI/NO', width: 28, align: 'center', format: (v, r, i) => i + 1 },
+        { key: 'item_code', label: 'KADAL', width: 48 },
+        { key: 'category_name', label: 'CATEGORIES', width: 58, format: (v) => v || '-' },
+        { key: 'item_name', label: 'ITEM NAME', width: '*' },
+        { key: 'size_color', label: 'SIZE / COLOR', width: 52, format: (v) => v || '' },
+        { key: 'unit', label: 'UNIT', width: 32, align: 'center' },
+        { key: 'opening_stock', label: 'Opening Stock Qty', width: 48, align: 'right', format: (v) => Number(v || 0).toLocaleString() },
+        { key: 'total_in', label: 'Total In Qty', width: 44, align: 'right', format: (v) => Number(v || 0).toLocaleString() },
+        { key: 'total_issue', label: 'Total Issue Qty', width: 44, align: 'right', format: (v) => Number(v || 0).toLocaleString() },
+        { key: 'closing_stock', label: 'Current Stock Qty', width: 48, align: 'right', format: (v) => Number(v || 0).toLocaleString() },
+        { key: 'last_in_date', label: 'Last Purchase Date', width: 52, align: 'center', format: fmtDate },
+        { key: 'supplier_name', label: 'Supplier Name', width: 65, format: (v) => v || '-' },
+        { key: 'remarks', label: 'Remarks', width: 55, format: (v) => v || '' },
+      ];
+    }
     case 'auditRawMaterial':
       return [
         { key: 'item_code', label: 'Item Code', width: 65 },
@@ -1228,6 +1279,7 @@ function getReportTitle(type) {
   switch (type) {
     case 'stock': return 'Current Stock Report';
     case 'movement': return 'Stock Movement Report';
+    case 'monthlyStockMovement': return 'Stock Movement Report (Month)';
     case 'lowStock': return 'Low Stock Alert Report';
     case 'challan': return 'Challan History Report';
     case 'itemChallan': return 'Item Wise Challan Report';

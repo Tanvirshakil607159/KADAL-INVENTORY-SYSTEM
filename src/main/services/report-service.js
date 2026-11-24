@@ -394,5 +394,70 @@ const ReportService = {
 
     return { year, month, dailyBreakdown, totalChallans, topMovers };
   },
+
+  async monthlyStockMovementReport(filters = {}) {
+    const {
+      getMonthWindow,
+      aggregateMonthlyMovementRows,
+      fetchMonthlyStockMovementSupabase,
+    } = await import('../../shared/monthly-stock-movement.mjs');
+
+    if (isCloudEnabled()) {
+      return await fetchMonthlyStockMovementSupabase(getSupabase(), filters, fetchAllSupabase);
+    }
+
+    const win = getMonthWindow(filters.month);
+    const startSql = dayStartSql(win.dateFrom);
+    const endSql = dayEndSql(win.dateTo);
+
+    let where = ['i.is_active = 1'];
+    let params = [];
+    if (filters.search) {
+      where.push('(i.name LIKE ? OR i.item_code LIKE ? OR i.style_name LIKE ? OR i.order_number LIKE ? OR i.purchase_no LIKE ?)');
+      const s = `%${filters.search}%`;
+      params.push(s, s, s, s, s);
+    }
+    if (filters.styleName) { where.push('i.style_name = ?'); params.push(filters.styleName); }
+    if (filters.orderNumber) { where.push('i.order_number = ?'); params.push(filters.orderNumber); }
+    if (filters.purchaseNo) { where.push('i.purchase_no = ?'); params.push(filters.purchaseNo); }
+    if (filters.buyerName) { where.push('i.buyer_name = ?'); params.push(filters.buyerName); }
+    if (filters.categoryId) { where.push('i.category_id = ?'); params.push(filters.categoryId); }
+
+    const items = dbPrepare(`
+      SELECT i.*, c.name as category_name, s.name as supplier_name
+      FROM items i
+      LEFT JOIN categories c ON i.category_id = c.id
+      LEFT JOIN suppliers s ON i.supplier_id = s.id
+      WHERE ${where.join(' AND ')}
+      ORDER BY i.name ASC, i.id ASC
+    `).all(...params);
+
+    const monthTxs = dbPrepare(`
+      SELECT item_id, type, quantity, created_at, notes
+      FROM stock_transactions
+      WHERE datetime(created_at) >= ? AND datetime(created_at) <= ?
+      ORDER BY datetime(created_at) ASC
+    `).all(startSql, endSql);
+
+    const afterEndTxs = dbPrepare(`
+      SELECT item_id, type, quantity
+      FROM stock_transactions
+      WHERE datetime(created_at) > ?
+    `).all(endSql);
+
+    const lastInRows = dbPrepare(`
+      SELECT item_id, MAX(created_at) as last_in_date
+      FROM stock_transactions
+      WHERE type = 'IN' AND datetime(created_at) < ?
+      GROUP BY item_id
+    `).all(startSql);
+
+    const priorLastInMap = {};
+    for (const r of lastInRows) {
+      priorLastInMap[Number(r.item_id)] = r.last_in_date;
+    }
+
+    return aggregateMonthlyMovementRows(items, monthTxs, afterEndTxs, priorLastInMap);
+  },
 };
 module.exports = ReportService;

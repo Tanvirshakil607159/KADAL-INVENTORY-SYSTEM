@@ -1,5 +1,6 @@
 import { dayStartIso, dayEndIso } from '../utils/dateRange';
 import { getSupabase, isCloudEnabled } from './supabase-client';
+import { fetchMonthlyStockMovementSupabase } from '../../shared/monthly-stock-movement.mjs';
 import bcrypt from 'bcryptjs';
 import { inventoryApi, fetchAll } from './inventory-api';
 import { challansApi } from './challans-api';
@@ -999,6 +1000,11 @@ export const webBridge = {
           total_out
         };
       });
+    }),
+    monthlyStockMovementReport: (filters = {}) => wrap(async () => {
+      const supabase = getSupabase();
+      if (!supabase) return [];
+      return await fetchMonthlyStockMovementSupabase(supabase, filters, fetchAll);
     }),
     lowStockReport: (filters = {}) => wrap(async () => {
       const supabase = getSupabase();
