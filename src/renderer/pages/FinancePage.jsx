@@ -13,7 +13,7 @@ import PiEditModal from '../components/finance/PiEditModal';
 import PiOrderLoaderModal from '../components/finance/PiOrderLoaderModal';
 import PiItemPickerModal from '../components/finance/PiItemPickerModal';
 import { formatPoStyle } from '../components/finance/piApprovalUtils';
-import { formatItemDescriptionWithColor } from '../../shared/pi-item-sync.mjs';
+import { stripColorFromDescription } from '../../shared/pi-item-sync.mjs';
 
 export default function FinancePage() {
   const { addToast, user, showConfirm, currentPage, activeTabId } = useStore();
@@ -155,7 +155,7 @@ export default function FinancePage() {
         uid: 'pi-' + Math.random().toString(36).slice(2) + '-' + Date.now(),
         itemId: it.id,
         itemCode: it.item_code || '',
-        itemDescription: formatItemDescriptionWithColor(it.name, it.color),
+        itemDescription: stripColorFromDescription(it.name),
         purchaseNo: itPurch,
         orderNumber: it.order_number || it.orderNumber || (mode === 'order' ? selectedOrderNo : ''),
         styleName: it.style_name || it.styleName || '',
@@ -341,7 +341,7 @@ export default function FinancePage() {
         ...item,
         itemId: it.id,
         itemCode: it.item_code || '',
-        itemDescription: it.name ? formatItemDescriptionWithColor(it.name, it.color) : (item.itemDescription || ''),
+        itemDescription: it.name ? stripColorFromDescription(it.name) : stripColorFromDescription(item.itemDescription),
         purchaseNo: itPurch || item.purchaseNo || '',
         poStyleNo: formatPoStyle(it) || item.poStyleNo || '',
         unit: (it.unit || 'PCS').toUpperCase(),

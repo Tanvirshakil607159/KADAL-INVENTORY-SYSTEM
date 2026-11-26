@@ -73,7 +73,8 @@ function ensureProformaInvoicesSchema() {
 function normalizePiItem(it, idx) {
   const slNo = it.sl_no !== undefined ? it.sl_no : (it.slNo !== undefined ? it.slNo : idx + 1);
   const qty = Number(it.quantity !== undefined ? it.quantity : (it.order_quantity || 0));
-  const desc = it.item_description || it.itemDescription || it.description || it.name || 'Custom Accessory Item';
+  const rawDesc = it.item_description || it.itemDescription || it.description || it.name || 'Custom Accessory Item';
+  const desc = String(rawDesc).replace(/\s*\(Color:\s*[^)]*\)/gi, '').trim() || 'Custom Accessory Item';
   let poStyle = it.po_style_no || it.poStyleNo || '';
   const poVal = it.order_number || it.orderNumber || '';
   const styleVal = it.style_name || it.styleName || '';

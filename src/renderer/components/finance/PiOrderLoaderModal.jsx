@@ -8,7 +8,6 @@ import {
   Search,
   X
 } from 'lucide-react';
-import { normalizeColorValue } from '../../../shared/pi-item-sync.mjs';
 
 /**
  * Shared modal to load accessories from Inventory by Order Number or Purchase Order
@@ -344,11 +343,6 @@ export default function PiOrderLoaderModal({
                             </td>
                             <td style={{ padding: '8px 10px', fontWeight: 600 }}>
                               {it.name}
-                              {normalizeColorValue(it.color) && (
-                                <span style={{ fontSize: 11, color: 'var(--text-secondary)', marginLeft: 6, fontWeight: 500 }}>
-                                  (Color: {normalizeColorValue(it.color)})
-                                </span>
-                              )}
                               {it.item_code && (
                                 <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 6, fontWeight: 400 }}>
                                   ({it.item_code})

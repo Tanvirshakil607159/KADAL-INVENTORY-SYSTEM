@@ -1,6 +1,7 @@
 import { dayStartIso, dayEndIso } from '../utils/dateRange';
 import { getSupabase, isCloudEnabled } from './supabase-client';
 import { fetchMonthlyStockMovementSupabase } from '../../shared/monthly-stock-movement.mjs';
+import { stripColorFromDescription } from '../../shared/pi-item-sync.mjs';
 import bcrypt from 'bcryptjs';
 import { inventoryApi, fetchAll } from './inventory-api';
 import { challansApi } from './challans-api';
@@ -1862,7 +1863,7 @@ export const webBridge = {
 
       const normalizePiItem = (it, idx) => {
         const slNo = it.sl_no !== undefined ? it.sl_no : (it.slNo !== undefined ? it.slNo : idx + 1);
-        const desc = it.item_description || it.itemDescription || it.item_name || it.name || '';
+        const desc = stripColorFromDescription(it.item_description || it.itemDescription || it.item_name || it.name || '');
         const { poStyle, purchaseNo: itPurch, combined } = formatBridgePoStyle(it);
         const qty = Number(it.quantity || 0);
         const unit = (it.unit || 'PCS').toUpperCase();
@@ -1944,7 +1945,7 @@ export const webBridge = {
       data.created_by_name = data.users?.full_name;
       data.items = (data.proforma_invoice_items || []).sort((a, b) => a.sl_no - b.sl_no).map((it, idx) => {
         const slNo = it.sl_no !== undefined ? it.sl_no : (it.slNo !== undefined ? it.slNo : idx + 1);
-        const desc = it.item_description || it.itemDescription || it.item_name || it.name || '';
+        const desc = stripColorFromDescription(it.item_description || it.itemDescription || it.item_name || it.name || '');
         const { poStyle, purchaseNo: itPurch, combined } = formatBridgePoStyle(it);
         const qty = Number(it.quantity || 0);
         const unit = (it.unit || 'PCS').toUpperCase();
@@ -1975,7 +1976,7 @@ export const webBridge = {
       if (!data) return null;
       data.items = (data.proforma_invoice_items || []).sort((a, b) => a.sl_no - b.sl_no).map((it, idx) => {
         const slNo = it.sl_no !== undefined ? it.sl_no : (it.slNo !== undefined ? it.slNo : idx + 1);
-        const desc = it.item_description || it.itemDescription || it.item_name || it.name || '';
+        const desc = stripColorFromDescription(it.item_description || it.itemDescription || it.item_name || it.name || '');
         const { poStyle, purchaseNo: itPurch, combined } = formatBridgePoStyle(it);
         const qty = Number(it.quantity || 0);
         const unit = (it.unit || 'PCS').toUpperCase();

@@ -1,4 +1,5 @@
 import { numberToCurrencyWords } from '../../utils/numberToWords';
+import { stripColorFromDescription } from '../../../shared/pi-item-sync.mjs';
 
 /**
  * Helpers for the PI approval modal (preview + admin edit).
@@ -92,7 +93,7 @@ export const buildPrintPi = (raw) => {
     items: items.map((it, idx) => {
       const itemPurch = str(it.purchaseNo || it.purchase_no || pNum).trim();
       const poStyle = str(it.poStyleNo || it.po_style_no).trim() || '-';
-      const desc = str(it.itemDescription || it.item_description).trim() || 'Custom Accessory Item';
+      const desc = stripColorFromDescription(it.itemDescription || it.item_description) || 'Custom Accessory Item';
       const unitPrice = num(it.unitPrice ?? it.unit_price);
       return {
         sl_no: it.slNo || it.sl_no || idx + 1,
@@ -147,7 +148,7 @@ export const toEditForm = (raw) => {
       ...it,
       itemId: it.itemId || it.item_id || null,
       itemCode: str(it.itemCode || it.item_code),
-      itemDescription: str(it.itemDescription || it.item_description),
+      itemDescription: stripColorFromDescription(it.itemDescription || it.item_description),
       purchaseNo: str(it.purchaseNo || it.purchase_no),
       poStyleNo: str(it.poStyleNo || it.po_style_no),
       quantity: it.quantity ?? '',

@@ -40,20 +40,8 @@ function escapeRegex(str) {
   return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-export function normalizeColorValue(color) {
-  const c = String(color ?? '').trim();
-  if (!c || c === '-' || /^(n\/?a|none|nil)$/i.test(c)) return '';
-  return c;
-}
-
-export function formatItemDescriptionWithColor(name, color) {
-  const rawName = String(name ?? '').replace(/\s*\(Color:\s*[^)]*\)\s*$/i, '').trim() || 'Custom Accessory Item';
-  const cleanColor = normalizeColorValue(color);
-  if (!cleanColor) return rawName;
-  if (rawName.toUpperCase().includes(`(${cleanColor.toUpperCase()})`)) {
-    return rawName;
-  }
-  return `${rawName} (Color: ${cleanColor})`;
+export function stripColorFromDescription(desc) {
+  return String(desc ?? '').replace(/\s*\(Color:\s*[^)]*\)/gi, '').trim();
 }
 
 export function buildItemPoStyle(item) {
@@ -88,12 +76,7 @@ export function buildPiLineFieldsFromItem(updatedItem, existingPiItem, oldItem =
   const rawDesc = updatedItem?.name !== undefined
     ? updatedItem.name
     : (existingPiItem.item_description || existingPiItem.itemDescription || 'Custom Accessory Item');
-  const nextColor = updatedItem && 'color' in updatedItem
-    ? updatedItem.color
-    : oldItem?.color;
-  const itemDescription = (updatedItem?.name !== undefined || (updatedItem && 'color' in updatedItem))
-    ? formatItemDescriptionWithColor(rawDesc, nextColor)
-    : (String(rawDesc).trim() || 'Custom Accessory Item');
+  const itemDescription = stripColorFromDescription(rawDesc) || 'Custom Accessory Item';
 
   const poMeta = buildItemPoStyle(updatedItem);
   const updatePoStyle = hasPoStyleFields(updatedItem);

@@ -5,6 +5,7 @@ import letterheadImg from '../../assets/letterhead.png';
 import watermarkImg from '../../assets/watermark.png';
 import { Printer, Download, X, CheckCircle, Move, RotateCcw } from 'lucide-react';
 import { numberToCurrencyWords } from '../../utils/numberToWords';
+import { stripColorFromDescription } from '../../../shared/pi-item-sync.mjs';
 
 const DEFAULT_COL_WIDTHS = {
   sl: 28,
@@ -89,7 +90,7 @@ function ProformaInvoicePrintViewContent({
     const map = new Map();
 
     rawList.forEach((item) => {
-      const desc = (item.item_description || item.itemDescription || item.item_name || item.name || '').trim();
+      const desc = stripColorFromDescription(item.item_description || item.itemDescription || item.item_name || item.name || '');
       let itemPurch = (item.purchase_no || item.purchaseNo || item.purchase_number || item.purchaseNumber || '').trim();
       let poStyle = (item.po_style_no || item.poStyleNo || '').trim();
 
